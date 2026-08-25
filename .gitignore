@@ -17,3 +17,6 @@ tmp/
 # File sumber/spreadsheet lokal (bukan bagian aplikasi)
 *.xlsx
 *.xls
+
+# Berisi JWT_SECRET produksi — jangan pernah masuk repo
+PRODUCTION-ENV.txt

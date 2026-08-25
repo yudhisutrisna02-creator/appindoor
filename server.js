@@ -18,6 +18,50 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
+// ------------------------------------------------------------------
+// Validasi konfigurasi sebelum server menerima permintaan.
+//
+// Tanpa ini, JWT_SECRET yang lupa diisi di panel hosting baru ketahuan saat
+// pengguna gagal login dengan pesan yang menyesatkan. Lebih baik server
+// menolak menyala disertai instruksi yang jelas.
+// ------------------------------------------------------------------
+function verifyConfig() {
+  const problems = [];
+  const secret = process.env.JWT_SECRET || '';
+
+  if (!secret) {
+    problems.push('JWT_SECRET belum diisi.');
+  } else if (secret.length < 32) {
+    problems.push(`JWT_SECRET terlalu pendek (${secret.length} karakter, minimal 32).`);
+  } else if (secret.includes('ganti-dengan')) {
+    problems.push('JWT_SECRET masih memakai nilai contoh dari .env.example.');
+  }
+
+  if (isProd) {
+    const password = process.env.SEED_ADMIN_PASSWORD || '';
+    if (password && (password.length < 10 || password.startsWith('GANTI'))) {
+      problems.push('SEED_ADMIN_PASSWORD terlalu lemah atau masih berupa placeholder.');
+    }
+  }
+
+  if (problems.length === 0) return;
+
+  console.error('\n╔══════════════════════════════════════════════════════════');
+  console.error('║ KONFIGURASI BELUM LENGKAP — server tidak dijalankan');
+  console.error('╠══════════════════════════════════════════════════════════');
+  problems.forEach((p) => console.error('║  • ' + p));
+  console.error('╠══════════════════════════════════════════════════════════');
+  console.error('║ Perbaiki lewat Environment Variables di panel hosting');
+  console.error('║ (atau berkas .env bila menjalankan secara lokal).');
+  console.error('║');
+  console.error('║ Membuat JWT_SECRET yang aman:');
+  console.error('║   node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"');
+  console.error('╚══════════════════════════════════════════════════════════\n');
+  process.exit(1);
+}
+
+verifyConfig();
+
 // Hostinger menjalankan aplikasi di belakang reverse proxy (Apache/LiteSpeed),
 // sehingga IP asli klien berasal dari header X-Forwarded-For.
 app.set('trust proxy', 1);

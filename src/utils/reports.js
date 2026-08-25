@@ -1,6 +1,6 @@
 'use strict';
 const { db } = require('../db');
-const { r2 } = require('./accounting');
+const { r2, ruleError } = require('./accounting');
 
 /**
  * Saldo per akun.
@@ -270,7 +270,7 @@ function prevDay(dateStr) {
 /** Buku Besar satu akun: saldo awal + mutasi + saldo berjalan. */
 function generalLedger(accountId, from, to) {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId);
-  if (!account) throw new Error('Akun tidak ditemukan');
+  if (!account) throw ruleError('Akun tidak ditemukan', 404);
 
   const openRow = db
     .prepare(

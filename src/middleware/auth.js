@@ -24,8 +24,12 @@ function requireAuth(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Token tidak ditemukan' });
 
+  // Kesalahan konfigurasi server tidak boleh menyamar sebagai sesi kedaluwarsa —
+  // teruskan ke penanganan error agar tercatat sebagai 500 di log.
+  const secret = jwtSecret();
+
   try {
-    const payload = jwt.verify(token, jwtSecret());
+    const payload = jwt.verify(token, secret);
     const user = db
       .prepare('SELECT id, name, email, role, position, active FROM users WHERE id = ?')
       .get(payload.sub);

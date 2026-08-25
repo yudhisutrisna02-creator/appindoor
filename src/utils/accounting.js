@@ -5,15 +5,27 @@ const { ACC } = require('../db/coa');
 /** Pembulatan ke 2 desimal untuk meredam galat floating point. */
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+/**
+ * Pelanggaran aturan akuntansi adalah kesalahan input pengguna, bukan kerusakan
+ * server. Error diberi `status` agar penanganan error terpusat mengirimkannya
+ * sebagai 4xx — kalau tidak, di NODE_ENV=production pesannya tersamarkan
+ * menjadi "Terjadi kesalahan pada server" dan pengguna tidak tahu apa yang salah.
+ */
+function ruleError(message, status = 422) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
 function accountByCode(code) {
   const acc = db.prepare('SELECT * FROM accounts WHERE code = ?').get(String(code));
-  if (!acc) throw new Error(`Akun dengan kode ${code} tidak ditemukan di COA`);
+  if (!acc) throw ruleError(`Akun dengan kode ${code} tidak ditemukan di COA`, 404);
   return acc;
 }
 
 function accountById(id) {
   const acc = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id);
-  if (!acc) throw new Error(`Akun id ${id} tidak ditemukan`);
+  if (!acc) throw ruleError(`Akun id ${id} tidak ditemukan`, 404);
   return acc;
 }
 
@@ -32,9 +44,9 @@ function accountById(id) {
  * Melempar Error bila total debit ≠ total kredit, atau bila jurnal kosong.
  */
 function postJournal({ date, description, lines, source = 'MANUAL', sourceId = null, userId = null }) {
-  if (!date) throw new Error('Tanggal jurnal wajib diisi');
+  if (!date) throw ruleError('Tanggal jurnal wajib diisi', 400);
   if (!Array.isArray(lines) || lines.length < 2) {
-    throw new Error('Jurnal minimal terdiri dari 2 baris (debit dan kredit)');
+    throw ruleError('Jurnal minimal terdiri dari 2 baris (debit dan kredit)', 400);
   }
 
   // Normalisasi + buang baris nol
@@ -51,10 +63,10 @@ function postJournal({ date, description, lines, source = 'MANUAL', sourceId = n
     })
     .filter((l) => l.debit > 0 || l.credit > 0);
 
-  if (norm.length < 2) throw new Error('Jurnal minimal terdiri dari 2 baris bernilai');
+  if (norm.length < 2) throw ruleError('Jurnal minimal terdiri dari 2 baris bernilai', 400);
   for (const l of norm) {
     if (l.debit > 0 && l.credit > 0) {
-      throw new Error('Satu baris jurnal tidak boleh berisi debit dan kredit sekaligus');
+      throw ruleError('Satu baris jurnal tidak boleh berisi debit dan kredit sekaligus');
     }
   }
 
@@ -63,11 +75,11 @@ function postJournal({ date, description, lines, source = 'MANUAL', sourceId = n
 
   // Aturan emas dual-entry
   if (Math.abs(totalDebit - totalCredit) > 0.009) {
-    throw new Error(
+    throw ruleError(
       `Jurnal tidak seimbang: Debit ${totalDebit.toLocaleString('id-ID')} ≠ Kredit ${totalCredit.toLocaleString('id-ID')}`
     );
   }
-  if (totalDebit === 0) throw new Error('Nilai jurnal tidak boleh nol');
+  if (totalDebit === 0) throw ruleError('Nilai jurnal tidak boleh nol', 400);
 
   const period = String(date).slice(0, 7);
   const entryNo = nextNumber('JV', period);
@@ -148,6 +160,7 @@ function buildSalesJournalLines(o) {
 
 module.exports = {
   r2,
+  ruleError,
   ACC,
   accountByCode,
   accountById,

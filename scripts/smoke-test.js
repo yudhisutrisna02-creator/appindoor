@@ -25,7 +25,12 @@ async function call(method, path, body) {
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
-  if (!res.ok) throw new Error(`${method} ${path} → ${res.status}: ${data.error || text}`);
+  if (!res.ok) {
+    const err = new Error(`${method} ${path} → ${res.status}: ${data.error || text}`);
+    err.status = res.status;
+    err.serverMessage = data.error || '';
+    throw err;
+  }
   return data;
 }
 
@@ -161,7 +166,8 @@ async function main() {
   const kas = accounts.find((a) => a.code === '1000');
   const beban = accounts.find((a) => a.code === '6110');
 
-  let journalGuard = false;
+  let journalStatus = 0;
+  let journalMessage = '';
   try {
     await call('POST', '/api/finance/journals', {
       entry_date: today, description: 'Jurnal sengaja tidak seimbang',
@@ -171,9 +177,16 @@ async function main() {
       ],
     });
   } catch (err) {
-    journalGuard = /tidak seimbang/i.test(err.message);
+    journalStatus = err.status || 0;
+    journalMessage = err.serverMessage || '';
   }
-  check('jurnal tidak seimbang ditolak', journalGuard);
+  check('jurnal tidak seimbang ditolak', journalStatus >= 400, `(status ${journalStatus})`);
+  // Regresi: pelanggaran aturan harus 4xx, bukan 500. Bila 500, NODE_ENV=production
+  // akan menyamarkan pesannya menjadi "Terjadi kesalahan pada server".
+  check('penolakan jurnal berstatus 4xx, bukan 500',
+    journalStatus >= 400 && journalStatus < 500, `(status ${journalStatus})`);
+  check('pesan selisih jurnal tetap terbaca di mode produksi',
+    /tidak seimbang/i.test(journalMessage), `("${journalMessage}")`);
 
   // Jurnal manual yang benar
   const jv = await call('POST', '/api/finance/journals', {
