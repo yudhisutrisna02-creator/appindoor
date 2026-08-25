@@ -41,7 +41,11 @@ function run(args) {
   }
 }
 
-run(['install', '--no-audit', '--no-fund']);
+// --include=dev wajib: panel hosting menjalankan build dengan NODE_ENV=production,
+// dan pada mode itu npm melewati devDependencies. Vite, Tailwind, dan PostCSS
+// ada di devDependencies — tanpa flag ini build gagal dengan
+// "vite: command not found" (exit code 127).
+run(['install', '--no-audit', '--no-fund', '--include=dev']);
 run(['run', 'build']);
 
 console.log('Build frontend selesai — hasil ada di client/dist');
