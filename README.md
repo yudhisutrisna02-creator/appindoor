@@ -106,6 +106,9 @@ SMOKE_BASE_URL=http://localhost:3100 npm run smoke
 
 ## Deploy ke Hostinger (Node.js Application Hosting)
 
+> Panduan langkah demi langkah yang lebih rinci — termasuk jalur VPS,
+> troubleshooting, dan backup — ada di **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+
 ### 1. Dorong kode ke GitHub
 
 ```bash
