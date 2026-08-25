@@ -1,0 +1,15 @@
+# Repo ini dikembangkan di Windows tetapi dijalankan di Linux (Hostinger).
+# Normalisasi ke LF di dalam repository agar tidak ada masalah line ending
+# pada script shell di GitHub Actions maupun saat deploy.
+* text=auto eol=lf
+
+# Berkas biner — jangan pernah diutak-atik line endingnya.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.pdf  binary
+*.xlsx binary
+*.ico  binary
+*.woff  binary
+*.woff2 binary

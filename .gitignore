@@ -1,0 +1,19 @@
+node_modules/
+client/node_modules/
+client/dist/
+data/
+uploads/*
+!uploads/.gitkeep
+.env
+.env.local
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+tmp/
+
+# File sumber/spreadsheet lokal (bukan bagian aplikasi)
+*.xlsx
+*.xls

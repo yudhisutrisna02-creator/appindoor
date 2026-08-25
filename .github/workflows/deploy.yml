@@ -1,0 +1,81 @@
+name: Build & Deploy ke Hostinger
+
+# Auto-deploy: setiap push ke branch utama akan diverifikasi build-nya,
+# lalu memicu webhook deploy Hostinger.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Verifikasi Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Siapkan Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # --ignore-scripts mencegah postinstall (npm run build) berjalan dua kali.
+      - name: Install dependensi backend
+        run: npm install --no-audit --no-fund --ignore-scripts
+
+      - name: Install dependensi frontend
+        run: npm --prefix client install --no-audit --no-fund
+
+      - name: Build frontend
+        run: npm --prefix client run build
+
+      - name: Uji boot server
+        env:
+          NODE_ENV: production
+          PORT: 3000
+          JWT_SECRET: ci-secret-hanya-untuk-pengujian-build-1234567890
+          DATABASE_URL: file:./data/ci.db
+        run: |
+          node server.js &
+          SERVER_PID=$!
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3000/api/health > /dev/null; then
+              echo "Server sehat."
+              curl -s http://localhost:3000/api/health
+              kill $SERVER_PID
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server gagal merespons /api/health"
+          kill $SERVER_PID || true
+          exit 1
+
+  deploy:
+    name: Picu Webhook Hostinger
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+
+    steps:
+      # Simpan URL webhook dari hPanel sebagai repository secret HOSTINGER_DEPLOY_WEBHOOK.
+      # Bila secret belum diisi, langkah ini dilewati tanpa menggagalkan pipeline.
+      - name: Kirim permintaan deploy
+        env:
+          WEBHOOK: ${{ secrets.HOSTINGER_DEPLOY_WEBHOOK }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "Secret HOSTINGER_DEPLOY_WEBHOOK belum diatur — melewati langkah deploy."
+            echo "Hostinger tetap dapat menarik perubahan sendiri bila Auto-Deploy aktif di hPanel."
+            exit 0
+          fi
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$WEBHOOK")
+          echo "Webhook merespons HTTP $STATUS"
+          if [ "$STATUS" -ge 400 ]; then
+            echo "Deploy gagal dipicu."
+            exit 1
+          fi

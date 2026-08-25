@@ -1,0 +1,430 @@
+'use strict';
+const express = require('express');
+const { z } = require('zod');
+const { db, nextNumber } = require('../db');
+const { requireAuth, requireRole } = require('../middleware/auth');
+const { ah, parse, httpError, dateRange } = require('../utils/http');
+const { r2, ACC, postJournal } = require('../utils/accounting');
+const { tableExcel } = require('../utils/exporters');
+const { todayLocal } = require('../utils/time');
+
+const router = express.Router();
+router.use(requireAuth);
+
+// ==================================================================
+// MASTER PRODUK
+// ==================================================================
+const productSchema = z.object({
+  sku: z.string().trim().min(1, 'SKU wajib diisi').max(40),
+  name: z.string().trim().min(1, 'nama produk wajib diisi').max(150),
+  category: z.string().trim().max(60).default('Umum'),
+  unit: z.string().trim().max(15).default('PCS'),
+  cost: z.number().nonnegative().default(0),
+  price: z.number().nonnegative().default(0),
+  min_stock: z.number().nonnegative().default(0),
+  active: z.boolean().default(true),
+});
+
+/** GET /api/inventory/products — daftar produk + nilai valuasi per baris. */
+router.get('/products', ah((req, res) => {
+  const search = `%${(req.query.q || '').trim()}%`;
+  const category = req.query.category || undefined;
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM products
+        WHERE (sku LIKE ? OR name LIKE ?)
+          ${category ? 'AND category = ?' : ''}
+          ${req.query.includeInactive === '1' ? '' : 'AND active = 1'}
+        ORDER BY name`
+    )
+    .all(...[search, search, category].filter((x) => x !== undefined));
+
+  const products = rows.map((p) => ({
+    ...p,
+    stock_value: r2(p.stock * p.cost),
+    margin_base: r2(p.price - p.cost),
+    margin_base_pct: p.price ? r2(((p.price - p.cost) / p.price) * 100) : 0,
+    low_stock: p.stock <= p.min_stock,
+  }));
+
+  res.json({
+    products,
+    categories: db.prepare('SELECT DISTINCT category FROM products ORDER BY category').all().map((r) => r.category),
+    totalValue: r2(products.reduce((s, p) => s + p.stock_value, 0)),
+  });
+}));
+
+router.post('/products', requireRole('admin', 'manager'), ah((req, res) => {
+  const p = parse(productSchema, req.body);
+  const dupe = db.prepare('SELECT id FROM products WHERE sku = ?').get(p.sku);
+  if (dupe) throw httpError(409, `SKU ${p.sku} sudah dipakai produk lain`);
+
+  const info = db
+    .prepare(
+      `INSERT INTO products (sku, name, category, unit, cost, price, min_stock, active)
+       VALUES (?,?,?,?,?,?,?,?)`
+    )
+    .run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock, p.active ? 1 : 0);
+
+  res.status(201).json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid) });
+}));
+
+router.put('/products/:id', requireRole('admin', 'manager'), ah((req, res) => {
+  const p = parse(productSchema, req.body);
+  const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!existing) throw httpError(404, 'Produk tidak ditemukan');
+
+  const dupe = db.prepare('SELECT id FROM products WHERE sku = ? AND id <> ?').get(p.sku, existing.id);
+  if (dupe) throw httpError(409, `SKU ${p.sku} sudah dipakai produk lain`);
+
+  db.prepare(
+    `UPDATE products SET sku=?, name=?, category=?, unit=?, cost=?, price=?, min_stock=?, active=?
+      WHERE id=?`
+  ).run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock, p.active ? 1 : 0, existing.id);
+
+  res.json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id) });
+}));
+
+router.delete('/products/:id', requireRole('admin'), ah((req, res) => {
+  const used = db.prepare('SELECT COUNT(*) c FROM sales_items WHERE product_id = ?').get(req.params.id).c;
+  if (used > 0) {
+    // Produk yang pernah terjual tidak dihapus agar histori laporan tetap utuh
+    db.prepare('UPDATE products SET active = 0 WHERE id = ?').run(req.params.id);
+    return res.json({ ok: true, message: 'Produk pernah dipakai transaksi — dinonaktifkan, bukan dihapus' });
+  }
+  db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
+  res.json({ ok: true, message: 'Produk dihapus' });
+}));
+
+// ==================================================================
+// MUTASI STOK
+// ==================================================================
+const moveSchema = z.object({
+  product_id: z.number().int().positive(),
+  move_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),
+  move_type: z.enum(['IN', 'OUT']),
+  qty: z.number().positive('jumlah harus lebih dari 0'),
+  unit_cost: z.number().nonnegative().optional(),
+  // Sumber dana pembelian (khusus IN) / akun beban (khusus OUT)
+  payment: z.enum(['CASH', 'BANK', 'CREDIT']).default('CASH'),
+  ref: z.string().max(60).optional().nullable(),
+  note: z.string().max(300).optional().nullable(),
+});
+
+/**
+ * Mencatat mutasi stok + memperbarui HPP rata-rata bergerak + jurnal otomatis.
+ * Seluruh langkah dibungkus satu transaksi agar stok dan jurnal tidak pernah
+ * berbeda keadaan.
+ */
+const applyMove = db.transaction((body, userId) => {
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(body.product_id);
+  if (!product) throw httpError(404, 'Produk tidak ditemukan');
+
+  const qty = r2(body.qty);
+  let newStock;
+  let unitCost;
+
+  if (body.move_type === 'IN') {
+    unitCost = body.unit_cost != null ? r2(body.unit_cost) : product.cost;
+    newStock = r2(product.stock + qty);
+
+    // HPP rata-rata bergerak (moving average)
+    const oldValue = product.stock * product.cost;
+    const inValue = qty * unitCost;
+    const avgCost = newStock > 0 ? r2((oldValue + inValue) / newStock) : unitCost;
+    db.prepare('UPDATE products SET stock = ?, cost = ? WHERE id = ?').run(newStock, avgCost, product.id);
+  } else {
+    unitCost = product.cost;
+    if (qty > product.stock) {
+      throw httpError(422, `Stok ${product.name} tidak mencukupi (tersedia ${product.stock} ${product.unit})`);
+    }
+    newStock = r2(product.stock - qty);
+    db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, product.id);
+  }
+
+  const info = db
+    .prepare(
+      `INSERT INTO stock_moves
+         (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, note, user_id)
+       VALUES (?,?,?,?,?,?,?,'MANUAL',?,?)`
+    )
+    .run(product.id, body.move_date, body.move_type, qty, unitCost, newStock, body.ref || null, body.note || null, userId);
+
+  // Jurnal otomatis
+  const value = r2(qty * unitCost);
+  if (value > 0) {
+    const counterAccount =
+      body.payment === 'CREDIT' ? ACC.AP : body.payment === 'BANK' ? ACC.BANK : ACC.CASH;
+
+    const lines =
+      body.move_type === 'IN'
+        ? [
+            { code: ACC.INVENTORY, debit: value, credit: 0, memo: `Stok masuk ${product.name}` },
+            { code: counterAccount, debit: 0, credit: value, memo: body.payment === 'CREDIT' ? 'Utang supplier' : 'Pembayaran pembelian' },
+          ]
+        : [
+            { code: ACC.OTHER_EXPENSE, debit: value, credit: 0, memo: `Pemakaian stok ${product.name}` },
+            { code: ACC.INVENTORY, debit: 0, credit: value, memo: 'Pengurangan persediaan' },
+          ];
+
+    postJournal({
+      date: body.move_date,
+      description: `${body.move_type === 'IN' ? 'Stok Masuk' : 'Stok Keluar'} — ${product.name} (${qty} ${product.unit})`,
+      lines,
+      source: 'STOCK',
+      sourceId: info.lastInsertRowid,
+      userId,
+    });
+  }
+
+  return db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(info.lastInsertRowid);
+});
+
+router.post('/moves', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+  const body = parse(moveSchema, req.body);
+  res.status(201).json({ ok: true, move: applyMove(body, req.user.id) });
+}));
+
+/** GET /api/inventory/moves — kartu stok / log mutasi. */
+router.get('/moves', ah((req, res) => {
+  const { from, to } = dateRange(req.query);
+  const params = [from, to];
+  let where = 'WHERE m.move_date BETWEEN ? AND ?';
+  if (req.query.product_id) { where += ' AND m.product_id = ?'; params.push(Number(req.query.product_id)); }
+  if (req.query.move_type) { where += ' AND m.move_type = ?'; params.push(req.query.move_type); }
+
+  const rows = db
+    .prepare(
+      `SELECT m.*, p.sku, p.name AS product_name, p.unit, u.name AS user_name,
+              (m.qty * m.unit_cost) AS value
+         FROM stock_moves m
+         JOIN products p ON p.id = m.product_id
+         LEFT JOIN users u ON u.id = m.user_id
+         ${where}
+        ORDER BY m.move_date DESC, m.id DESC
+        LIMIT 1000`
+    )
+    .all(...params);
+
+  res.json({
+    from, to, rows,
+    summary: {
+      inQty: r2(rows.filter((r) => r.move_type === 'IN').reduce((s, r) => s + r.qty, 0)),
+      outQty: r2(rows.filter((r) => r.move_type === 'OUT').reduce((s, r) => s + r.qty, 0)),
+      inValue: r2(rows.filter((r) => r.move_type === 'IN').reduce((s, r) => s + r.value, 0)),
+      outValue: r2(rows.filter((r) => r.move_type === 'OUT').reduce((s, r) => s + r.value, 0)),
+    },
+  });
+}));
+
+// ==================================================================
+// VALUASI STOK REAL-TIME
+// ==================================================================
+/** GET /api/inventory/valuation — nilai persediaan = Σ (stok × HPP). */
+router.get('/valuation', ah((req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT id, sku, name, category, unit, stock, cost, price, min_stock,
+              (stock * cost)  AS stock_value,
+              (stock * price) AS potential_revenue
+         FROM products WHERE active = 1
+        ORDER BY (stock * cost) DESC`
+    )
+    .all();
+
+  const byCategory = {};
+  for (const r of rows) {
+    byCategory[r.category] = byCategory[r.category] || { category: r.category, qty: 0, value: 0, skus: 0 };
+    byCategory[r.category].qty = r2(byCategory[r.category].qty + r.stock);
+    byCategory[r.category].value = r2(byCategory[r.category].value + r.stock_value);
+    byCategory[r.category].skus += 1;
+  }
+
+  const totalValue = r2(rows.reduce((s, r) => s + r.stock_value, 0));
+  const potentialRevenue = r2(rows.reduce((s, r) => s + r.potential_revenue, 0));
+
+  res.json({
+    asOf: new Date().toISOString(),
+    totalSku: rows.length,
+    totalQty: r2(rows.reduce((s, r) => s + r.stock, 0)),
+    totalValue,
+    potentialRevenue,
+    potentialMargin: r2(potentialRevenue - totalValue),
+    lowStock: rows.filter((r) => r.stock <= r.min_stock).map((r) => ({ ...r, stock_value: r2(r.stock_value) })),
+    outOfStock: rows.filter((r) => r.stock <= 0).length,
+    byCategory: Object.values(byCategory).sort((a, b) => b.value - a.value),
+    rows: rows.map((r) => ({ ...r, stock_value: r2(r.stock_value), potential_revenue: r2(r.potential_revenue) })),
+  });
+}));
+
+router.get('/valuation/export/excel', ah(async (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT sku, name, category, unit, stock, cost, price, (stock*cost) AS stock_value
+         FROM products WHERE active = 1 ORDER BY category, name`
+    )
+    .all();
+
+  const buffer = await tableExcel(
+    'Valuasi Stok',
+    [
+      { header: 'SKU', key: 'sku', width: 16 },
+      { header: 'Nama Produk', key: 'name', width: 32 },
+      { header: 'Kategori', key: 'category', width: 16 },
+      { header: 'Unit', key: 'unit', width: 8 },
+      { header: 'Stok', key: 'stock', width: 10 },
+      { header: 'HPP / Unit', key: 'cost', width: 14, money: true },
+      { header: 'Harga Jual', key: 'price', width: 14, money: true },
+      { header: 'Nilai Persediaan', key: 'stock_value', width: 18, money: true },
+    ],
+    rows.map((r) => ({ ...r, stock_value: r2(r.stock_value) })),
+    [['TOTAL NILAI PERSEDIAAN', r2(rows.reduce((s, r) => s + r.stock_value, 0))]]
+  );
+
+  res
+    .set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    .set('Content-Disposition', `attachment; filename="valuasi-stok-${todayLocal()}.xlsx"`)
+    .send(buffer);
+}));
+
+// ==================================================================
+// STOK OPNAME
+// ==================================================================
+const opnameSchema = z.object({
+  opname_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),
+  note: z.string().max(300).optional().nullable(),
+  lines: z
+    .array(
+      z.object({
+        product_id: z.number().int().positive(),
+        physical_qty: z.number().nonnegative(),
+        note: z.string().max(200).optional().nullable(),
+      })
+    )
+    .min(1, 'minimal satu baris produk'),
+});
+
+/** GET /api/inventory/opname/sheet — lembar kerja opname berisi stok sistem terkini. */
+router.get('/opname/sheet', ah((req, res) => {
+  const rows = db
+    .prepare('SELECT id, sku, name, category, unit, stock AS system_qty, cost FROM products WHERE active = 1 ORDER BY category, name')
+    .all();
+  res.json({ date: todayLocal(), rows });
+}));
+
+/**
+ * POST /api/inventory/opname — merekam & langsung memposting rekonsiliasi.
+ * Selisih fisik vs sistem menghasilkan mutasi ADJ dan jurnal Selisih Stok.
+ */
+const createOpname = db.transaction((body, userId) => {
+  const period = body.opname_date.slice(0, 7);
+  const opnameNo = nextNumber('OPN', period);
+
+  const header = db
+    .prepare(
+      `INSERT INTO stock_opnames (opname_no, opname_date, note, status, user_id, posted_at)
+       VALUES (?,?,?, 'POSTED', ?, datetime('now'))`
+    )
+    .run(opnameNo, body.opname_date, body.note || null, userId);
+
+  const opnameId = header.lastInsertRowid;
+  const insertLine = db.prepare(
+    `INSERT INTO stock_opname_lines
+       (opname_id, product_id, system_qty, physical_qty, diff_qty, unit_cost, diff_value, note)
+     VALUES (?,?,?,?,?,?,?,?)`
+  );
+
+  let totalDiffValue = 0;
+  const adjustments = [];
+
+  for (const line of body.lines) {
+    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(line.product_id);
+    if (!product) throw httpError(404, `Produk id ${line.product_id} tidak ditemukan`);
+
+    const systemQty = r2(product.stock);
+    const physicalQty = r2(line.physical_qty);
+    const diffQty = r2(physicalQty - systemQty);
+    const diffValue = r2(diffQty * product.cost);
+
+    insertLine.run(opnameId, product.id, systemQty, physicalQty, diffQty, product.cost, diffValue, line.note || null);
+    totalDiffValue = r2(totalDiffValue + diffValue);
+
+    if (diffQty !== 0) {
+      db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(physicalQty, product.id);
+      db.prepare(
+        `INSERT INTO stock_moves
+           (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, source_id, note, user_id)
+         VALUES (?,?,'ADJ',?,?,?,?,'OPNAME',?,?,?)`
+      ).run(
+        product.id, body.opname_date, Math.abs(diffQty), product.cost, physicalQty,
+        opnameNo, opnameId,
+        `Koreksi opname: ${diffQty > 0 ? 'lebih' : 'kurang'} ${Math.abs(diffQty)} ${product.unit}`,
+        userId
+      );
+      adjustments.push({ product: product.name, diffQty, diffValue });
+    }
+  }
+
+  db.prepare('UPDATE stock_opnames SET total_diff_value = ? WHERE id = ?').run(totalDiffValue, opnameId);
+
+  // Jurnal selisih: surplus menambah persediaan, defisit membebankan kerugian.
+  if (Math.abs(totalDiffValue) > 0.004) {
+    const value = Math.abs(totalDiffValue);
+    const lines =
+      totalDiffValue > 0
+        ? [
+            { code: ACC.INVENTORY, debit: value, credit: 0, memo: 'Surplus stok opname' },
+            { code: ACC.STOCK_VARIANCE, debit: 0, credit: value, memo: 'Koreksi selisih lebih' },
+          ]
+        : [
+            { code: ACC.STOCK_VARIANCE, debit: value, credit: 0, memo: 'Kerugian selisih stok' },
+            { code: ACC.INVENTORY, debit: 0, credit: value, memo: 'Defisit stok opname' },
+          ];
+
+    postJournal({
+      date: body.opname_date,
+      description: `Penyesuaian Stok Opname ${opnameNo}`,
+      lines,
+      source: 'OPNAME',
+      sourceId: opnameId,
+      userId,
+    });
+  }
+
+  return { id: opnameId, opname_no: opnameNo, total_diff_value: totalDiffValue, adjustments };
+});
+
+router.post('/opname', requireRole('admin', 'manager'), ah((req, res) => {
+  const body = parse(opnameSchema, req.body);
+  res.status(201).json({ ok: true, ...createOpname(body, req.user.id) });
+}));
+
+router.get('/opname', ah((req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT o.*, u.name AS user_name,
+              (SELECT COUNT(*) FROM stock_opname_lines l WHERE l.opname_id = o.id) AS line_count
+         FROM stock_opnames o LEFT JOIN users u ON u.id = o.user_id
+        ORDER BY o.opname_date DESC, o.id DESC LIMIT 200`
+    )
+    .all();
+  res.json({ rows });
+}));
+
+router.get('/opname/:id', ah((req, res) => {
+  const header = db.prepare('SELECT * FROM stock_opnames WHERE id = ?').get(req.params.id);
+  if (!header) throw httpError(404, 'Dokumen opname tidak ditemukan');
+
+  const lines = db
+    .prepare(
+      `SELECT l.*, p.sku, p.name AS product_name, p.unit
+         FROM stock_opname_lines l JOIN products p ON p.id = l.product_id
+        WHERE l.opname_id = ? ORDER BY p.name`
+    )
+    .all(header.id);
+
+  res.json({ header, lines });
+}));
+
+module.exports = router;
