@@ -280,7 +280,7 @@ Browser harus meminta izin kamera. Kalau tidak muncul apa-apa, HTTPS belum aktif
 | Presensi WFO ditolak terus | Koordinat kantor salah atau radius kekecilan. Perbaiki di Pengaturan → Titik Kantor. Pesan errornya menyebutkan jarak sebenarnya. |
 | *"Akurasi GPS ... melebihi batas"* | Sinyal lemah (dalam gedung). Coba di area terbuka, atau naikkan `MAX_GPS_ACCURACY_M`. |
 | Push GitHub tidak memicu deploy | Cek Webhook di GitHub → Settings → Webhooks → Recent Deliveries. Status harus 2xx. |
-| Data hilang setelah redeploy | Folder `data/` terhapus. Lihat Tahap 5. |
+| Data hilang setelah redeploy | **Penyebab utama di Hostinger.** Aplikasi dijalankan dari `hbuilds/versions/<id>/` dan setiap deploy membuat folder versi baru, sehingga `./data` dan `./uploads` ikut hilang. Arahkan `DATABASE_URL` dan `UPLOAD_DIR` ke path absolut di luar `hbuilds`, mis. `/home/<user>/erp-data/`. |
 
 Log aplikasi: hPanel → Node.js App → **Logs**, atau di VPS `pm2 logs erp-kebumen`.
 
