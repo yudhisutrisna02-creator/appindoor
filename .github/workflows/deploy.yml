@@ -23,9 +23,18 @@ jobs:
           node-version: '20'
           cache: npm
 
-      # --ignore-scripts mencegah postinstall (npm run build) berjalan dua kali.
+      # Jangan memakai --ignore-scripts di sini: flag itu ikut membatalkan
+      # penyiapan modul native, sehingga better-sqlite3 kehilangan berkas
+      # binding-nya dan server gagal start. Cukup setel ERP_SKIP_CLIENT_BUILD
+      # agar postinstall tetap jalan tetapi build frontend tidak dikerjakan
+      # dua kali (ada langkah build tersendiri di bawah).
       - name: Install dependensi backend
-        run: npm install --no-audit --no-fund --ignore-scripts
+        env:
+          ERP_SKIP_CLIENT_BUILD: '1'
+        run: npm install --no-audit --no-fund
+
+      - name: Pastikan modul native siap
+        run: node -e "require('better-sqlite3'); console.log('better-sqlite3 termuat')"
 
       - name: Install dependensi frontend
         run: npm --prefix client install --no-audit --no-fund
@@ -33,27 +42,55 @@ jobs:
       - name: Build frontend
         run: npm --prefix client run build
 
-      - name: Uji boot server
+      # Menjalankan server persis seperti Hostinger (NODE_ENV=production),
+      # lalu menembak API sungguhan dengan uji asap end-to-end.
+      - name: Uji boot server + uji asap
         env:
           NODE_ENV: production
           PORT: 3000
           JWT_SECRET: ci-secret-hanya-untuk-pengujian-build-1234567890
           DATABASE_URL: file:./data/ci.db
+          SEED_ADMIN_EMAIL: ci@contoh.test
+          SEED_ADMIN_PASSWORD: CiPassword123
+          UPLOAD_DIR: ./uploads
         run: |
-          node server.js &
+          set -o pipefail
+          node server.js > server.log 2>&1 &
           SERVER_PID=$!
-          for i in $(seq 1 20); do
+
+          for i in $(seq 1 30); do
             if curl -sf http://localhost:3000/api/health > /dev/null; then
-              echo "Server sehat."
-              curl -s http://localhost:3000/api/health
-              kill $SERVER_PID
-              exit 0
+              READY=1
+              break
+            fi
+            # Bila proses sudah mati, tidak ada gunanya menunggu lagi
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              break
             fi
             sleep 1
           done
-          echo "Server gagal merespons /api/health"
-          kill $SERVER_PID || true
-          exit 1
+
+          if [ "$READY" != "1" ]; then
+            echo "::error::Server gagal merespons /api/health"
+            echo "----- log server -----"
+            cat server.log || true
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Server sehat:"
+          curl -s http://localhost:3000/api/health
+          echo ""
+
+          if ! node scripts/smoke-test.js; then
+            echo "::error::Uji asap gagal"
+            echo "----- log server -----"
+            cat server.log || true
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          kill $SERVER_PID 2>/dev/null || true
 
   deploy:
     name: Picu Webhook Hostinger
