@@ -26,6 +26,9 @@ laporan keuangan tidak perlu diinput ulang.
 
 ## Menjalankan Secara Lokal
 
+> Ingin mengubah tampilan atau isinya lalu mengirim ke produksi?
+> Alur lengkapnya ada di **[PENGEMBANGAN.md](PENGEMBANGAN.md)**.
+
 ```bash
 npm install
 ```
