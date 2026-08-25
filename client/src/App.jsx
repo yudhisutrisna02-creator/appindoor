@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
-  Settings, LogOut, Menu, X,
+  Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -23,6 +23,10 @@ import Jurnal from './pages/Jurnal';
 import ChartOfAccounts from './pages/ChartOfAccounts';
 import LaporanKeuangan from './pages/LaporanKeuangan';
 import Pengaturan from './pages/Pengaturan';
+import KasMasukKeluar from './pages/KasMasukKeluar';
+import UtangPiutang from './pages/UtangPiutang';
+import Mitra from './pages/Mitra';
+import Retur from './pages/Retur';
 
 const NAV = [
   { section: 'Ringkasan', items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }] },
@@ -47,15 +51,22 @@ const NAV = [
     items: [
       { to: '/penjualan', label: 'Order Penjualan', icon: ShoppingCart },
       { to: '/penjualan/analisis', label: 'Analisis Margin', icon: TrendingUp },
+      { to: '/penjualan/retur', label: 'Retur Penjualan', icon: Undo2 },
     ],
   },
   {
     section: 'Keuangan',
     items: [
+      { to: '/keuangan/kas', label: 'Kas Masuk & Keluar', icon: Wallet },
+      { to: '/keuangan/utang-piutang', label: 'Utang & Piutang', icon: HandCoins },
       { to: '/keuangan/laporan', label: 'Laporan Keuangan', icon: FileBarChart2 },
       { to: '/keuangan/jurnal', label: 'Buku Besar & Jurnal', icon: BookOpenCheck },
       { to: '/keuangan/coa', label: 'Chart of Accounts', icon: ListTree },
     ],
+  },
+  {
+    section: 'Mitra',
+    items: [{ to: '/mitra', label: 'Supplier & Pelanggan', icon: Contact }],
   },
   { section: 'Sistem', items: [{ to: '/pengaturan', label: 'Pengaturan', icon: Settings }] },
 ];
@@ -182,9 +193,13 @@ export default function App() {
         <Route path="/gudang/opname" element={<StokOpname />} />
         <Route path="/penjualan" element={<Penjualan />} />
         <Route path="/penjualan/analisis" element={<AnalisisMargin />} />
+        <Route path="/penjualan/retur" element={<Retur />} />
+        <Route path="/keuangan/kas" element={<KasMasukKeluar />} />
+        <Route path="/keuangan/utang-piutang" element={<UtangPiutang />} />
         <Route path="/keuangan/laporan" element={<LaporanKeuangan />} />
         <Route path="/keuangan/jurnal" element={<Jurnal />} />
         <Route path="/keuangan/coa" element={<ChartOfAccounts />} />
+        <Route path="/mitra" element={<Mitra />} />
         <Route path="/pengaturan" element={<Pengaturan />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

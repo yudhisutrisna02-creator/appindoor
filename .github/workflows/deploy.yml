@@ -90,6 +90,14 @@ jobs:
             exit 1
           fi
 
+          if ! node scripts/smoke-features.js; then
+            echo "::error::Uji fitur (mitra, kas, utang-piutang, retur, izin) gagal"
+            echo "----- log server -----"
+            cat server.log || true
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
           kill $SERVER_PID 2>/dev/null || true
 
   deploy:

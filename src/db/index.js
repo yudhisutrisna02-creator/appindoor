@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const { runMigrations } = require('./migrate');
 
 /**
  * Menerjemahkan DATABASE_URL menjadi path file SQLite.
@@ -26,10 +27,21 @@ const db = new Database(dbFile);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-/** Menjalankan schema.sql (idempoten — semua CREATE memakai IF NOT EXISTS). */
+/**
+ * Menyiapkan struktur database.
+ * 1. schema.sql membuat tabel yang belum ada.
+ * 2. runMigrations menambahkan kolom baru pada tabel yang sudah terlanjur ada,
+ *    karena CREATE TABLE IF NOT EXISTS tidak menyentuh tabel lama.
+ */
 function migrate() {
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(sql);
+
+  const applied = runMigrations(db);
+  if (applied.length > 0) {
+    console.log('Migrasi database diterapkan:', applied.join(', '));
+  }
+  return applied;
 }
 
 /**

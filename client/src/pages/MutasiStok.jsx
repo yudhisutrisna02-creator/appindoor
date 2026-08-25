@@ -13,6 +13,7 @@ export default function MutasiStok() {
   const [moveType, setMoveType] = useState('');
   const [data, setData] = useState(null);
   const [products, setProducts] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
 
@@ -32,6 +33,7 @@ export default function MutasiStok() {
 
   useEffect(() => {
     api.get('/api/inventory/products').then((d) => setProducts(d.products)).catch(() => {});
+    api.get('/api/partners', { kind: 'SUPPLIER' }).then((d) => setSuppliers(d.partners)).catch(() => {});
   }, []);
 
   function openForm(type) {
@@ -42,6 +44,7 @@ export default function MutasiStok() {
       qty: '',
       unit_cost: '',
       payment: 'CASH',
+      partner_id: '',
       ref: '',
       note: '',
     });
@@ -58,6 +61,7 @@ export default function MutasiStok() {
         move_type: form.move_type,
         qty: Number(form.qty),
         payment: form.payment,
+        partner_id: form.partner_id ? Number(form.partner_id) : null,
         ref: form.ref || null,
         note: form.note || null,
       };
@@ -179,6 +183,15 @@ export default function MutasiStok() {
             ) : (
               <Field label="HPP Terpakai">
                 <input className="input bg-slate-50" readOnly value={selected ? rupiah(selected.cost) : '-'} />
+              </Field>
+            )}
+
+            {form.move_type === 'IN' && (
+              <Field label="Supplier" hint="Wajib bila memakai tempo, agar utang terlacak" className="sm:col-span-2">
+                <select className="input" value={form.partner_id} onChange={(e) => setForm({ ...form, partner_id: e.target.value })}>
+                  <option value="">— tidak dicatat —</option>
+                  {suppliers.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                </select>
               </Field>
             )}
 

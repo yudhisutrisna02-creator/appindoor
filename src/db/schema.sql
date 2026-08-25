@@ -253,3 +253,21 @@ CREATE TABLE IF NOT EXISTS counters (
   key   TEXT PRIMARY KEY,
   value INTEGER NOT NULL DEFAULT 0
 );
+
+-- ---------- MITRA USAHA (SUPPLIER & PELANGGAN) ----------
+CREATE TABLE IF NOT EXISTS partners (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  code       TEXT UNIQUE,
+  name       TEXT NOT NULL,
+  -- Satu mitra bisa berperan sebagai pemasok sekaligus pelanggan
+  kind       TEXT NOT NULL DEFAULT 'CUSTOMER'
+             CHECK (kind IN ('SUPPLIER','CUSTOMER','BOTH')),
+  phone      TEXT,
+  email      TEXT,
+  address    TEXT,
+  note       TEXT,
+  term_days  INTEGER NOT NULL DEFAULT 0,   -- tempo bawaan (hari)
+  active     INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_partner_kind ON partners(kind);

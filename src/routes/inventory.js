@@ -108,6 +108,8 @@ const moveSchema = z.object({
   unit_cost: z.number().nonnegative().optional(),
   // Sumber dana pembelian (khusus IN) / akun beban (khusus OUT)
   payment: z.enum(['CASH', 'BANK', 'CREDIT']).default('CASH'),
+  partner_id: z.number().int().positive().optional().nullable(),
+  due_date: z.string().optional().nullable(),
   ref: z.string().max(60).optional().nullable(),
   note: z.string().max(300).optional().nullable(),
 });
@@ -146,10 +148,14 @@ const applyMove = db.transaction((body, userId) => {
   const info = db
     .prepare(
       `INSERT INTO stock_moves
-         (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, note, user_id)
-       VALUES (?,?,?,?,?,?,?,'MANUAL',?,?)`
+         (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, note, user_id, partner_id, due_date)
+       VALUES (?,?,?,?,?,?,?,'MANUAL',?,?,?,?)`
     )
-    .run(product.id, body.move_date, body.move_type, qty, unitCost, newStock, body.ref || null, body.note || null, userId);
+    .run(
+      product.id, body.move_date, body.move_type, qty, unitCost, newStock,
+      body.ref || null, body.note || null, userId,
+      body.partner_id || null, body.due_date || null
+    );
 
   // Jurnal otomatis
   const value = r2(qty * unitCost);
@@ -161,7 +167,11 @@ const applyMove = db.transaction((body, userId) => {
       body.move_type === 'IN'
         ? [
             { code: ACC.INVENTORY, debit: value, credit: 0, memo: `Stok masuk ${product.name}` },
-            { code: counterAccount, debit: 0, credit: value, memo: body.payment === 'CREDIT' ? 'Utang supplier' : 'Pembayaran pembelian' },
+            {
+              code: counterAccount, debit: 0, credit: value,
+              memo: body.payment === 'CREDIT' ? 'Utang supplier' : 'Pembayaran pembelian',
+              partner_id: body.payment === 'CREDIT' ? body.partner_id || null : null,
+            },
           ]
         : [
             { code: ACC.OTHER_EXPENSE, debit: value, credit: 0, memo: `Pemakaian stok ${product.name}` },

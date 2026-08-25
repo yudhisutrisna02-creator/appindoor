@@ -25,6 +25,8 @@ const orderSchema = z.object({
   order_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),
   channel: z.enum(CHANNELS),
   customer: z.string().max(120).optional().nullable(),
+  partner_id: z.number().int().positive().optional().nullable(),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   marketplace_ref: z.string().max(80).optional().nullable(),
   items: z
     .array(
@@ -139,8 +141,8 @@ const createOrder = db.transaction((body, userId) => {
          admin_fee_pct, admin_fee, handling_fee, shipping_extra, voucher_platform,
          tax_pct, tax_amount, packing_cost, other_cost,
          net_revenue, total_fees, gross_profit, net_profit, margin_pct,
-         payment_status, status, note, user_id
-       ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, 'POSTED', ?, ?)`
+         payment_status, status, note, user_id, partner_id, due_date
+       ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, 'POSTED', ?, ?, ?, ?)`
     )
     .run(
       orderNo, body.order_date, body.channel, body.customer || null, body.marketplace_ref || null,
@@ -148,7 +150,8 @@ const createOrder = db.transaction((body, userId) => {
       body.admin_fee_pct, calc.admin_fee, r2(body.handling_fee), r2(body.shipping_extra), r2(body.voucher_platform),
       body.tax_pct, calc.tax_amount, r2(body.packing_cost), r2(body.other_cost),
       calc.net_revenue, calc.total_fees, calc.gross_profit, calc.net_profit, calc.margin_pct,
-      body.payment_status, body.note || null, userId
+      body.payment_status, body.note || null, userId,
+      body.partner_id || null, body.due_date || null
     );
 
   const orderId = info.lastInsertRowid;

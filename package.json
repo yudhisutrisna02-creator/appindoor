@@ -14,7 +14,8 @@
     "postinstall": "node scripts/build-client.js",
     "seed": "node src/db/seed.js",
     "smoke": "node scripts/smoke-test.js",
-    "seed:demo": "node scripts/seed-demo.js"
+    "seed:demo": "node scripts/seed-demo.js",
+    "smoke:features": "node scripts/smoke-features.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field } from '../components/ui';
@@ -14,6 +15,7 @@ const emptyOrder = () => ({
   order_date: today(),
   channel: 'OFFLINE_WA',
   customer: '',
+  partner_id: null,
   marketplace_ref: '',
   items: [{ product_id: '', qty: 1, price: '' }],
   discount: 0,
@@ -35,11 +37,11 @@ export default function Penjualan() {
   const [channel, setChannel] = useState('');
   const [data, setData] = useState(null);
   const [products, setProducts] = useState([]);
+  const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
   const [detail, setDetail] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [returnForm, setReturnForm] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +61,10 @@ export default function Penjualan() {
     api.get('/api/inventory/products').then((d) => setProducts(d.products)).catch(() => {});
   }, []);
   useEffect(() => { refreshProducts(); }, [refreshProducts]);
+
+  useEffect(() => {
+    api.get('/api/partners', { kind: 'CUSTOMER' }).then((d) => setPartners(d.partners)).catch(() => {});
+  }, []);
 
   // ---------- Kalkulasi margin langsung di browser (cermin logika server) ----------
   const calc = useMemo(() => {
@@ -110,6 +116,7 @@ export default function Penjualan() {
       const payload = {
         ...form,
         customer: form.customer || null,
+        partner_id: form.partner_id || null,
         marketplace_ref: form.marketplace_ref || null,
         note: form.note || null,
         items: form.items
@@ -150,26 +157,6 @@ export default function Penjualan() {
     }
   }
 
-  async function submitReturn(e) {
-    e.preventDefault();
-    try {
-      const res = await api.post('/api/sales/returns', {
-        return_date: returnForm.return_date,
-        order_id: returnForm.order_id || null,
-        product_id: Number(returnForm.product_id),
-        qty: Number(returnForm.qty),
-        price: Number(returnForm.price),
-        restock: returnForm.restock,
-        reason: returnForm.reason || null,
-      });
-      toast.success(`Retur ${res.return_no} tercatat senilai ${rupiah(res.amount)}`);
-      setReturnForm(null);
-      load();
-      refreshProducts();
-    } catch (err) {
-      toast.error(err.message);
-    }
-  }
 
   return (
     <div>
@@ -177,12 +164,9 @@ export default function Penjualan() {
         <button className="btn-primary" onClick={() => setForm(emptyOrder())}>
           <Plus size={16} /> Order Baru
         </button>
-        <button
-          className="btn-secondary"
-          onClick={() => setReturnForm({ return_date: today(), order_id: '', product_id: '', qty: 1, price: '', restock: true, reason: '' })}
-        >
+        <Link className="btn-secondary" to="/penjualan/retur">
           <Undo2 size={16} /> Retur
-        </button>
+        </Link>
         <button
           className="btn-secondary"
           onClick={() => api.download('/api/sales/export/excel', { ...range, channel }, 'penjualan.xlsx').catch((e) => toast.error(e.message))}
@@ -294,8 +278,22 @@ export default function Penjualan() {
                   {Object.entries(CHANNEL_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </Field>
-              <Field label="Pelanggan">
-                <input className="input" value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} />
+              <Field label="Pelanggan" hint="Pilih terdaftar agar piutang terlacak">
+                <select
+                  className="input"
+                  value={form.partner_id || ''}
+                  onChange={(e) => {
+                    const p = partners.find((x) => x.id === Number(e.target.value));
+                    setForm({
+                      ...form,
+                      partner_id: e.target.value ? Number(e.target.value) : null,
+                      customer: p ? p.name : form.customer,
+                    });
+                  }}
+                >
+                  <option value="">— umum / tidak terdaftar —</option>
+                  {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </Field>
               <Field label="Ref. Marketplace" hint="No. invoice platform">
                 <input className="input" value={form.marketplace_ref} onChange={(e) => setForm({ ...form, marketplace_ref: e.target.value })} />
@@ -486,48 +484,6 @@ export default function Penjualan() {
         )}
       </Modal>
 
-      {/* ---------- FORM RETUR ---------- */}
-      <Modal open={!!returnForm} onClose={() => setReturnForm(null)} title="Catat Retur Penjualan">
-        {returnForm && (
-          <form onSubmit={submitReturn} className="grid gap-3 sm:grid-cols-2">
-            <Field label="Tanggal Retur *">
-              <input type="date" className="input" required value={returnForm.return_date} onChange={(e) => setReturnForm({ ...returnForm, return_date: e.target.value })} />
-            </Field>
-            <Field label="ID Order Terkait" hint="Opsional">
-              <input type="number" className="input" value={returnForm.order_id} onChange={(e) => setReturnForm({ ...returnForm, order_id: e.target.value })} />
-            </Field>
-            <Field label="Produk *" className="sm:col-span-2">
-              <select
-                className="input" required value={returnForm.product_id}
-                onChange={(e) => {
-                  const p = products.find((x) => x.id === Number(e.target.value));
-                  setReturnForm({ ...returnForm, product_id: e.target.value, price: returnForm.price || p?.price || '' });
-                }}
-              >
-                <option value="">— pilih produk —</option>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Qty Retur *">
-              <input type="number" min="0" step="any" className="input" required value={returnForm.qty} onChange={(e) => setReturnForm({ ...returnForm, qty: e.target.value })} />
-            </Field>
-            <Field label="Harga Jual / Unit *">
-              <input type="number" min="0" step="any" className="input" required value={returnForm.price} onChange={(e) => setReturnForm({ ...returnForm, price: e.target.value })} />
-            </Field>
-            <Field label="Alasan Retur" className="sm:col-span-2">
-              <input className="input" value={returnForm.reason} onChange={(e) => setReturnForm({ ...returnForm, reason: e.target.value })} />
-            </Field>
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input type="checkbox" className="h-4 w-4 rounded" checked={returnForm.restock} onChange={(e) => setReturnForm({ ...returnForm, restock: e.target.checked })} />
-              Barang kembali ke gudang (stok bertambah & HPP dibalik)
-            </label>
-            <div className="flex gap-2 sm:col-span-2">
-              <button type="button" className="btn-secondary flex-1" onClick={() => setReturnForm(null)}>Batal</button>
-              <button type="submit" className="btn-primary flex-1">Simpan Retur</button>
-            </div>
-          </form>
-        )}
-      </Modal>
     </div>
   );
 }

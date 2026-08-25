@@ -225,6 +225,54 @@ router.get('/export/pdf', ah(async (req, res) => {
     .send(buffer);
 }));
 
+/**
+ * POST /api/attendance/leave — mencatat izin, cuti, atau alpa.
+ *
+ * Baris presensi tetap dibuat agar karyawan yang berhalangan tidak menghilang
+ * begitu saja dari rekap. Kolom work_type tetap diisi karena skema
+ * mensyaratkannya, tetapi yang bermakna adalah kolom status.
+ */
+const leaveSchema = z.object({
+  user_id: z.number().int().positive(),
+  work_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  status: z.enum(['LEAVE', 'ABSENT']),
+  notes: z.string().max(500).optional().nullable(),
+});
+
+router.post('/leave', requireRole('admin', 'manager'), ah((req, res) => {
+  const body = parse(leaveSchema, req.body);
+
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ? AND active = 1').get(body.user_id);
+  if (!user) throw httpError(404, 'Karyawan tidak ditemukan atau tidak aktif');
+
+  const existing = db
+    .prepare('SELECT * FROM attendance WHERE user_id = ? AND work_date = ?')
+    .get(body.user_id, body.work_date);
+
+  if (existing && existing.check_in_at) {
+    throw httpError(
+      409,
+      `${user.name} sudah melakukan check-in pada ${body.work_date}. ` +
+        'Gunakan koreksi status bila memang perlu diubah.'
+    );
+  }
+
+  if (existing) {
+    db.prepare('UPDATE attendance SET status = ?, notes = ? WHERE id = ?')
+      .run(body.status, body.notes || null, existing.id);
+  } else {
+    db.prepare(
+      `INSERT INTO attendance (user_id, work_date, work_type, status, notes)
+       VALUES (?, ?, 'WFH', ?, ?)`
+    ).run(body.user_id, body.work_date, body.status, body.notes || null);
+  }
+
+  res.status(201).json({
+    ok: true,
+    message: `${user.name} ditandai ${body.status === 'LEAVE' ? 'Izin/Cuti' : 'Alpa'} pada ${body.work_date}`,
+  });
+}));
+
 /** PATCH /api/attendance/:id — koreksi manual oleh admin/manager. */
 const correctionSchema = z.object({
   status: z.enum(['ONTIME', 'LATE', 'LEAVE', 'ABSENT']).optional(),

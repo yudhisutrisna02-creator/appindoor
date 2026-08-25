@@ -59,6 +59,8 @@ function postJournal({ date, description, lines, source = 'MANUAL', sourceId = n
         credit: r2(l.credit),
         memo: l.memo || null,
         cashflow: l.cashflow || null,
+        // Dimensi mitra: dipakai menghitung saldo utang/piutang per pihak
+        partner_id: l.partner_id || null,
       };
     })
     .filter((l) => l.debit > 0 || l.credit > 0);
@@ -92,11 +94,13 @@ function postJournal({ date, description, lines, source = 'MANUAL', sourceId = n
     .run(entryNo, date, description, source, sourceId, userId);
 
   const insertLine = db.prepare(
-    `INSERT INTO journal_lines (journal_id, account_id, debit, credit, memo, cashflow)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO journal_lines (journal_id, account_id, debit, credit, memo, cashflow, partner_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   for (const l of norm) {
-    insertLine.run(info.lastInsertRowid, l.account_id, l.debit, l.credit, l.memo, l.cashflow);
+    insertLine.run(
+      info.lastInsertRowid, l.account_id, l.debit, l.credit, l.memo, l.cashflow, l.partner_id
+    );
   }
 
   return { id: info.lastInsertRowid, entry_no: entryNo };
@@ -127,7 +131,11 @@ function buildSalesJournalLines(o) {
   const settlement = r2(o.net_revenue - o.total_fees);
 
   if (settlement >= 0) {
-    lines.push({ code: settleAccount, debit: settlement, credit: 0, memo: 'Penerimaan bersih order' });
+    lines.push({
+      code: settleAccount, debit: settlement, credit: 0,
+      memo: 'Penerimaan bersih order',
+      partner_id: o.payment_status === 'PAID' ? null : o.partner_id || null,
+    });
   } else {
     // Kasus ekstrem: biaya melebihi nilai order → kas justru keluar
     lines.push({ code: settleAccount, debit: 0, credit: Math.abs(settlement), memo: 'Kekurangan bayar order' });

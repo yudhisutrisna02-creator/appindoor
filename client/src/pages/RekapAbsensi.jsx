@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { FileSpreadsheet, FileText, Users, Clock, MapPin, Image as ImageIcon } from 'lucide-react';
+import { FileSpreadsheet, FileText, Users, Clock, MapPin, Image as ImageIcon, CalendarPlus, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, Modal } from '../components/ui';
-import { timeID, WORK_TYPE_LABEL, STATUS_LABEL } from '../lib/format';
+import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, Modal, Field } from '../components/ui';
+import { timeID, today, WORK_TYPE_LABEL, STATUS_LABEL } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const BADGE = { ONTIME: 'badge-green', LATE: 'badge-red', LEAVE: 'badge-amber', ABSENT: 'badge-slate' };
@@ -16,6 +16,8 @@ export default function RekapAbsensi() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState(null);
+  const [leaveForm, setLeaveForm] = useState(null);
+  const [koreksi, setKoreksi] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,6 +56,14 @@ export default function RekapAbsensi() {
         <button className="btn-secondary" onClick={() => download('pdf')}>
           <FileText size={16} /> PDF
         </button>
+        {canManage && (
+          <button
+            className="btn-primary"
+            onClick={() => setLeaveForm({ user_id: '', work_date: today(), status: 'LEAVE', notes: '' })}
+          >
+            <CalendarPlus size={16} /> Catat Izin/Cuti
+          </button>
+        )}
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange}>
@@ -107,7 +117,7 @@ export default function RekapAbsensi() {
                   <thead>
                     <tr>
                       <th>Tanggal</th><th>Nama</th><th>Tipe</th><th>Masuk</th><th>Pulang</th>
-                      <th>Durasi</th><th>Status</th><th>Telat</th><th>Lokasi</th><th>Bukti</th>
+                      <th>Durasi</th><th>Status</th><th>Telat</th><th>Lokasi</th><th>Bukti</th>{canManage && <th></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -118,7 +128,11 @@ export default function RekapAbsensi() {
                           <p className="font-medium text-slate-900">{r.user_name}</p>
                           <p className="text-xs text-slate-400">{r.position || '-'}</p>
                         </td>
-                        <td className="text-xs">{WORK_TYPE_LABEL[r.work_type]}</td>
+                        <td className="text-xs">
+                          {r.status === 'LEAVE' || r.status === 'ABSENT'
+                            ? <span className="text-slate-400">—</span>
+                            : WORK_TYPE_LABEL[r.work_type]}
+                        </td>
                         <td className="tabular">{timeID(r.check_in_at)}</td>
                         <td className="tabular">{timeID(r.check_out_at)}</td>
                         <td className="tabular">{r.work_minutes ? `${Math.floor(r.work_minutes / 60)}j ${r.work_minutes % 60}m` : '-'}</td>
@@ -143,10 +157,25 @@ export default function RekapAbsensi() {
                           )}
                         </td>
                         <td>
-                          <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setPreview(r)}>
-                            <ImageIcon size={14} /> Lihat
-                          </button>
+                          {r.in_photo ? (
+                            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setPreview(r)}>
+                              <ImageIcon size={14} /> Lihat
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
                         </td>
+                        {canManage && (
+                          <td>
+                            <button
+                              className="btn-ghost !px-2 !py-1"
+                              onClick={() => setKoreksi({ id: r.id, nama: r.user_name, tanggal: r.work_date, status: r.status, late_minutes: r.late_minutes, notes: r.notes || '' })}
+                              aria-label="Koreksi"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -196,6 +225,135 @@ export default function RekapAbsensi() {
           </div>
         )}
       </Modal>
+      {/* ---------- CATAT IZIN / CUTI ---------- */}
+      <Modal open={!!leaveForm} onClose={() => setLeaveForm(null)} title="Catat Izin, Cuti, atau Alpa">
+        {leaveForm && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const res = await api.post('/api/attendance/leave', {
+                  user_id: Number(leaveForm.user_id),
+                  work_date: leaveForm.work_date,
+                  status: leaveForm.status,
+                  notes: leaveForm.notes || null,
+                });
+                toast.success(res.message);
+                setLeaveForm(null);
+                load();
+              } catch (err) {
+                toast.error(err.message);
+              }
+            }}
+            className="grid gap-3 sm:grid-cols-2"
+          >
+            <Field label="Karyawan *" className="sm:col-span-2">
+              <select
+                className="input" required value={leaveForm.user_id}
+                onChange={(e) => setLeaveForm({ ...leaveForm, user_id: e.target.value })}
+              >
+                <option value="">— pilih karyawan —</option>
+                {users.filter((u) => u.active).map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}{u.position ? ` — ${u.position}` : ''}</option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Tanggal *">
+              <input
+                type="date" className="input" required value={leaveForm.work_date}
+                onChange={(e) => setLeaveForm({ ...leaveForm, work_date: e.target.value })}
+              />
+            </Field>
+
+            <Field label="Status *">
+              <select
+                className="input" value={leaveForm.status}
+                onChange={(e) => setLeaveForm({ ...leaveForm, status: e.target.value })}
+              >
+                <option value="LEAVE">Izin / Cuti</option>
+                <option value="ABSENT">Alpa (tanpa keterangan)</option>
+              </select>
+            </Field>
+
+            <Field label="Keterangan" hint="mis. cuti tahunan, sakit, izin keluarga" className="sm:col-span-2">
+              <input
+                className="input" maxLength={500} value={leaveForm.notes}
+                onChange={(e) => setLeaveForm({ ...leaveForm, notes: e.target.value })}
+              />
+            </Field>
+
+            <p className="rounded-xl bg-brand-50 p-3 text-xs text-brand-800 sm:col-span-2">
+              Baris presensi tetap dibuat supaya karyawan yang berhalangan tidak hilang dari rekap.
+              Karyawan yang sudah terlanjur check-in tidak bisa ditandai izin — gunakan tombol koreksi
+              pada barisnya.
+            </p>
+
+            <div className="flex gap-2 sm:col-span-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setLeaveForm(null)}>Batal</button>
+              <button type="submit" className="btn-primary flex-1">Simpan</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ---------- KOREKSI PRESENSI ---------- */}
+      <Modal open={!!koreksi} onClose={() => setKoreksi(null)} title="Koreksi Data Presensi">
+        {koreksi && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await api.patch(`/api/attendance/${koreksi.id}`, {
+                  status: koreksi.status,
+                  late_minutes: Number(koreksi.late_minutes) || 0,
+                  notes: koreksi.notes || null,
+                });
+                toast.success('Data presensi dikoreksi');
+                setKoreksi(null);
+                load();
+              } catch (err) {
+                toast.error(err.message);
+              }
+            }}
+            className="grid gap-3 sm:grid-cols-2"
+          >
+            <div className="rounded-xl bg-slate-50 p-3 text-sm sm:col-span-2">
+              <p className="font-semibold text-slate-900">{koreksi.nama}</p>
+              <p className="text-xs text-slate-500">{koreksi.tanggal}</p>
+            </div>
+
+            <Field label="Status *">
+              <select
+                className="input" value={koreksi.status}
+                onChange={(e) => setKoreksi({ ...koreksi, status: e.target.value })}
+              >
+                {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+
+            <Field label="Menit Terlambat" hint="Isi 0 bila dianggap tepat waktu">
+              <input
+                type="number" min="0" className="input" value={koreksi.late_minutes}
+                onChange={(e) => setKoreksi({ ...koreksi, late_minutes: e.target.value })}
+              />
+            </Field>
+
+            <Field label="Catatan Koreksi" hint="Sebaiknya isi alasan perubahan" className="sm:col-span-2">
+              <input
+                className="input" maxLength={500} value={koreksi.notes}
+                onChange={(e) => setKoreksi({ ...koreksi, notes: e.target.value })}
+              />
+            </Field>
+
+            <div className="flex gap-2 sm:col-span-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setKoreksi(null)}>Batal</button>
+              <button type="submit" className="btn-primary flex-1">Simpan Koreksi</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
     </div>
   );
 }

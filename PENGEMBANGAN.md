@@ -187,9 +187,11 @@ Contoh yang **tidak** otomatis:
 - mengubah tipe atau nama kolom
 - mengubah aturan `CHECK`
 
-Bila butuh salah satu dari itu, beri tahu saya lebih dulu. Perlu langkah
-migrasi (`ALTER TABLE`) yang dijalankan sekali di produksi, dan urutannya
-harus benar supaya data lama tetap terbaca.
+Sejak versi ini sudah ada mekanisme migrasi otomatis di `src/db/migrate.js`.
+Untuk menambah kolom, cukup daftarkan lewat `addColumn(...)` di berkas itu —
+kolom akan ditambahkan sekali saat boot, aman diulang, dan tidak menyentuh
+data lama. Untuk mengubah tipe atau nama kolom tetap beri tahu saya dulu,
+karena SQLite memerlukan pembangunan ulang tabel.
 
 Jangan menyiasatinya dengan menghapus `erp.db` di produksi — itu menghapus
 seluruh absensi dan pembukuan.
@@ -204,5 +206,6 @@ seluruh absensi dan pembukuan.
 | `npm run build` | Membangun frontend |
 | `npm start` | Menjalankan seperti di produksi |
 | `npm run seed:demo` | Mengisi data contoh (lokal saja) |
-| `npm run smoke` | 40 uji otomatis |
+| `npm run smoke` | 40 uji otomatis modul inti (perlu database kosong) |
+| `npm run smoke:features` | 28 uji mitra, kas, utang-piutang, retur, izin |
 | `git push` | Mengirim ke produksi |
