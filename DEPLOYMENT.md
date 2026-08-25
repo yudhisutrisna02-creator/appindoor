@@ -1,5 +1,11 @@
 # Panduan Deploy ERP Kebumen ke Hostinger
 
+> **Status: SUDAH LIVE di https://erp.indonesiaorganik.id**
+> (paket Business, Web Apps Node.js, auto-deploy dari GitHub aktif)
+>
+> Dokumen ini tetap berguna sebagai rujukan bila perlu deploy ulang,
+> memindahkan ke domain lain, atau menelusuri masalah.
+
 Runbook langkah demi langkah. Ikuti berurutan — setiap tahap punya cara
 verifikasi supaya Anda tahu pasti tahap itu berhasil sebelum lanjut.
 
@@ -265,6 +271,8 @@ Browser harus meminta izin kamera. Kalau tidak muncul apa-apa, HTTPS belum aktif
 
 | Gejala | Penyebab & tindakan |
 |---|---|
+| Build gagal: `vite: command not found` | Panel membangun dengan NODE_ENV=production sehingga npm melewati devDependencies. Sudah ditangani lewat `--include=dev` di scripts/build-client.js. |
+| Password admin ditolak padahal sudah benar | Nilai environment variable mengandung `#`; hPanel menambahkan backslash di depannya. Pakai huruf dan angka saja. |
 | Log: *"KONFIGURASI BELUM LENGKAP"* | `JWT_SECRET` kosong/pendek/masih contoh. Perbaiki di Environment Variables lalu Restart. |
 | Halaman: *"Frontend belum di-build"* | `npm run build` belum jalan. Jalankan build atau Restart agar `postinstall` terpicu. |
 | Kamera tidak jalan di HP | HTTPS belum aktif — lihat Tahap 2. |

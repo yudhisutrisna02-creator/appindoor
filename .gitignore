@@ -21,3 +21,4 @@ tmp/
 # Berisi JWT_SECRET produksi — jangan pernah masuk repo
 PRODUCTION-ENV.txt
 ENV-HOSTINGER.txt
+AKSES-PRODUKSI.txt
