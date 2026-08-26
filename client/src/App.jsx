@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
-import { NAMA_APP, NAMA_PERUSAHAAN } from './lib/brand';
+import { NAMA_APP } from './lib/brand';
+import { LogoPerusahaan, useBranding } from './lib/branding';
 import { Spinner } from './components/ui';
 
 import Login from './pages/Login';
@@ -116,6 +117,7 @@ function grupSedangAktif(group, pathname) {
 
 function Sidebar({ onNavigate }) {
   const { user, logout } = useAuth();
+  const identitas = useBranding();
   const location = useLocation();
   const [terlipat, setTerlipat] = useState(bacaLipatan);
 
@@ -130,10 +132,10 @@ function Sidebar({ onNavigate }) {
   return (
     <div className="flex h-full flex-col bg-slate-900 text-slate-300">
       <div className="flex items-center gap-2.5 px-5 py-5">
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 font-bold text-white">E</div>
+        <LogoPerusahaan ukuran={36} />
         <div className="min-w-0">
           <p className="truncate text-sm font-bold text-white">{NAMA_APP}</p>
-          <p className="truncate text-[11px] text-slate-400">{NAMA_PERUSAHAAN}</p>
+          <p className="truncate text-[11px] text-slate-400">{identitas.company}</p>
         </div>
       </div>
 

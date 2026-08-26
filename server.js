@@ -136,6 +136,8 @@ app.use('/api/shops', require('./src/routes/shops'));
 app.use('/api/partners', require('./src/routes/partners').router);
 app.use('/api/cashflow', require('./src/routes/cashflow'));
 app.use('/api/admin', require('./src/routes/admin'));
+// Identitas perusahaan boleh dibaca sebelum masuk — halaman login perlu logonya.
+app.use('/api/branding', require('./src/routes/branding'));
 
 // Foto selfie presensi hanya boleh diakses pengguna yang sudah login.
 app.use('/api/uploads', requireAuth, express.static(UPLOAD_DIR, { maxAge: '7d' }));

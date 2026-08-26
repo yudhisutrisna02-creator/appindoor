@@ -17,6 +17,23 @@ CREATE TABLE IF NOT EXISTS users (
                 CHECK (role IN ('admin','manager','staff')),
   position      TEXT,
   phone         TEXT,
+
+  -- Data kepegawaian. Semuanya boleh kosong: yang wajib untuk masuk aplikasi
+  -- hanya nama, email, dan sandi; sisanya dilengkapi sambil jalan.
+  photo             TEXT,   -- nama berkas di folder unggahan
+  nik               TEXT,   -- nomor induk karyawan
+  department        TEXT,
+  employment_status TEXT,   -- tetap, kontrak, magang
+  join_date         TEXT,
+  birth_date        TEXT,
+  gender            TEXT,
+  address           TEXT,
+  emergency_name    TEXT,
+  emergency_phone   TEXT,
+  bank_name         TEXT,
+  bank_account      TEXT,
+  note              TEXT,
+
   active        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );

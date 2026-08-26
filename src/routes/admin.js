@@ -5,6 +5,8 @@ const { z } = require('zod');
 const { db, getSetting, setSetting } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { ah, parse, httpError } = require('../utils/http');
+const { saveDataUrlImage, hapusBerkas } = require('../utils/upload');
+const { daftarkanEkspor } = require('../utils/ekspor');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -12,6 +14,8 @@ router.use(requireAuth);
 // ==================================================================
 // PENGGUNA
 // ==================================================================
+const tanggalOpsional = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'tanggal harus YYYY-MM-DD').optional().nullable();
+
 const userSchema = z.object({
   name: z.string().trim().min(1).max(100),
   email: z.string().email().transform((v) => v.toLowerCase()),
@@ -20,14 +24,127 @@ const userSchema = z.object({
   position: z.string().max(80).optional().nullable(),
   phone: z.string().max(30).optional().nullable(),
   active: z.boolean().default(true),
+
+  // --- Data kepegawaian, semuanya boleh dikosongkan ---
+  // Foto dikirim sebagai data URL dari peramban, sama seperti selfie presensi,
+  // lalu disimpan sebagai berkas. Yang tersimpan di basis data hanya namanya.
+  photo: z.string().optional().nullable(),
+  nik: z.string().trim().max(30).optional().nullable(),
+  department: z.string().trim().max(60).optional().nullable(),
+  employment_status: z.enum(['TETAP', 'KONTRAK', 'MAGANG', 'HARIAN', 'MITRA']).optional().nullable(),
+  join_date: tanggalOpsional,
+  birth_date: tanggalOpsional,
+  gender: z.enum(['L', 'P']).optional().nullable(),
+  address: z.string().trim().max(250).optional().nullable(),
+  emergency_name: z.string().trim().max(100).optional().nullable(),
+  emergency_phone: z.string().trim().max(30).optional().nullable(),
+  bank_name: z.string().trim().max(60).optional().nullable(),
+  bank_account: z.string().trim().max(50).optional().nullable(),
+  note: z.string().trim().max(300).optional().nullable(),
 });
 
+/** Kolom kepegawaian yang ditulis apa adanya ke basis data. */
+const KOLOM_TIM = [
+  'nik', 'department', 'employment_status', 'join_date', 'birth_date', 'gender',
+  'address', 'emergency_name', 'emergency_phone', 'bank_name', 'bank_account', 'note',
+];
+
+/** Semua kolom pengguna yang boleh dibaca — password_hash tidak pernah ikut. */
+const KOLOM_TAMPIL = `id, name, email, role, position, phone, active, created_at, photo, ${KOLOM_TIM.join(', ')}`;
+
+/**
+ * Simpan foto bila yang dikirim berupa data URL baru.
+ *
+ * Nilai yang dikirim balik dari layar bisa berupa nama berkas yang sudah ada
+ * (tidak diubah), data URL (foto baru), atau kosong (foto dihapus). Ketiganya
+ * dibedakan di sini supaya menyimpan formulir tanpa menyentuh foto tidak
+ * menulis ulang berkas yang sama berkali-kali.
+ */
+function simpanFoto(nilai, fotoLama, prefix) {
+  if (nilai === undefined) return fotoLama || null;
+  if (!nilai) {
+    hapusBerkas(fotoLama);
+    return null;
+  }
+  if (!/^data:/.test(nilai)) return fotoLama || null;
+
+  const baru = saveDataUrlImage(nilai, prefix);
+  hapusBerkas(fotoLama);
+  return baru;
+}
+
 router.get('/users', requireRole('admin', 'manager'), ah((req, res) => {
-  const users = db
-    .prepare('SELECT id, name, email, role, position, phone, active, created_at FROM users ORDER BY name')
-    .all();
-  res.json({ users });
+  const users = db.prepare(`SELECT ${KOLOM_TAMPIL} FROM users ORDER BY name`).all();
+  res.json({
+    users,
+    // Dipakai layar untuk menunjukkan seberapa lengkap data timnya.
+    ringkas: {
+      total: users.length,
+      aktif: users.filter((u) => u.active).length,
+      berfoto: users.filter((u) => u.photo).length,
+      lengkap: users.filter((u) => u.nik && u.department && u.join_date && u.phone).length,
+    },
+  });
 }));
+
+const STATUS_KERJA = {
+  TETAP: 'Karyawan Tetap', KONTRAK: 'Kontrak', MAGANG: 'Magang',
+  HARIAN: 'Harian', MITRA: 'Mitra / Freelance',
+};
+
+daftarkanEkspor(router, {
+  path: '/users',
+  judul: 'Data Tim',
+  kolom: [
+    { header: 'NIK', key: 'nik', width: 14 },
+    { header: 'Nama', key: 'name', width: 28 },
+    { header: 'Email', key: 'email', width: 28 },
+    { header: 'Bagian', key: 'department', width: 18 },
+    { header: 'Jabatan', key: 'position', width: 22 },
+    { header: 'Status Kerja', key: 'status_kerja', width: 16 },
+    { header: 'Peran Aplikasi', key: 'role', width: 13 },
+    { header: 'Telepon', key: 'phone', width: 16 },
+    { header: 'Tanggal Masuk', key: 'join_date', width: 13 },
+    { header: 'Masa Kerja', key: 'masa_kerja', width: 13 },
+    { header: 'Kontak Darurat', key: 'kontak_darurat', width: 26 },
+    { header: 'Bank', key: 'bank', width: 22 },
+    { header: 'Status Akun', key: 'status_akun', width: 12 },
+  ],
+  ambil: () => {
+    const rows = db.prepare(`SELECT ${KOLOM_TAMPIL} FROM users ORDER BY department, name`).all();
+    const hariIni = new Date();
+
+    return {
+      rows: rows.map((u) => ({
+        ...u,
+        status_kerja: STATUS_KERJA[u.employment_status] || '',
+        status_akun: u.active ? 'Aktif' : 'Nonaktif',
+        kontak_darurat: [u.emergency_name, u.emergency_phone].filter(Boolean).join(' — '),
+        bank: [u.bank_name, u.bank_account].filter(Boolean).join(' — '),
+        masa_kerja: masaKerja(u.join_date, hariIni),
+      })),
+      subtitle: 'Daftar anggota tim beserta data kepegawaiannya',
+      meta: [
+        ['Jumlah anggota', rows.length],
+        ['Aktif', rows.filter((u) => u.active).length],
+        ['Profil lengkap', rows.filter((u) => u.nik && u.department && u.join_date && u.phone).length],
+      ],
+    };
+  },
+});
+
+/** Lama bekerja dalam tahun dan bulan, mis. "1 thn 5 bln". */
+function masaKerja(mulai, sampai) {
+  if (!mulai) return '';
+  const awal = new Date(mulai);
+  if (Number.isNaN(awal.getTime()) || awal > sampai) return '';
+  let bulan = (sampai.getFullYear() - awal.getFullYear()) * 12 + (sampai.getMonth() - awal.getMonth());
+  if (sampai.getDate() < awal.getDate()) bulan -= 1;
+  if (bulan < 0) return '';
+  const tahun = Math.floor(bulan / 12);
+  const sisa = bulan % 12;
+  return [tahun ? `${tahun} thn` : '', sisa ? `${sisa} bln` : ''].filter(Boolean).join(' ') || '0 bln';
+}
 
 router.post('/users', requireRole('admin'), ah((req, res) => {
   const u = parse(userSchema, req.body);
@@ -36,16 +153,22 @@ router.post('/users', requireRole('admin'), ah((req, res) => {
     throw httpError(409, 'Email sudah terdaftar');
   }
 
+  const foto = simpanFoto(u.photo, null, 'tim');
+
   const info = db
     .prepare(
-      `INSERT INTO users (name, email, password_hash, role, position, phone, active)
-       VALUES (?,?,?,?,?,?,?)`
+      `INSERT INTO users (name, email, password_hash, role, position, phone, active, photo, ${KOLOM_TIM.join(', ')})
+       VALUES (?,?,?,?,?,?,?,?, ${KOLOM_TIM.map(() => '?').join(', ')})`
     )
-    .run(u.name, u.email, bcrypt.hashSync(u.password, 10), u.role, u.position || null, u.phone || null, u.active ? 1 : 0);
+    .run(
+      u.name, u.email, bcrypt.hashSync(u.password, 10), u.role,
+      u.position || null, u.phone || null, u.active ? 1 : 0, foto,
+      ...KOLOM_TIM.map((k) => u[k] || null)
+    );
 
   res.status(201).json({
     ok: true,
-    user: db.prepare('SELECT id, name, email, role, position, phone, active FROM users WHERE id = ?').get(info.lastInsertRowid),
+    user: db.prepare(`SELECT ${KOLOM_TAMPIL} FROM users WHERE id = ?`).get(info.lastInsertRowid),
   });
 }));
 
@@ -63,9 +186,17 @@ router.put('/users/:id', requireRole('admin'), ah((req, res) => {
     if (admins <= 1) throw httpError(422, 'Minimal harus ada satu admin aktif');
   }
 
+  const foto = simpanFoto(u.photo, existing.photo, `tim${existing.id}`);
+
   db.prepare(
-    'UPDATE users SET name=?, email=?, role=?, position=?, phone=?, active=? WHERE id=?'
-  ).run(u.name, u.email, u.role, u.position || null, u.phone || null, u.active ? 1 : 0, existing.id);
+    `UPDATE users SET name=?, email=?, role=?, position=?, phone=?, active=?, photo=?,
+            ${KOLOM_TIM.map((k) => `${k}=?`).join(', ')}
+      WHERE id=?`
+  ).run(
+    u.name, u.email, u.role, u.position || null, u.phone || null, u.active ? 1 : 0, foto,
+    ...KOLOM_TIM.map((k) => u[k] || null),
+    existing.id
+  );
 
   if (u.password) {
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(u.password, 10), existing.id);
@@ -73,7 +204,7 @@ router.put('/users/:id', requireRole('admin'), ah((req, res) => {
 
   res.json({
     ok: true,
-    user: db.prepare('SELECT id, name, email, role, position, phone, active FROM users WHERE id = ?').get(existing.id),
+    user: db.prepare(`SELECT ${KOLOM_TAMPIL} FROM users WHERE id = ?`).get(existing.id),
   });
 }));
 
@@ -133,6 +264,9 @@ router.delete('/offices/:id', requireRole('admin'), ah((req, res) => {
 const EDITABLE_SETTINGS = [
   'company_name', 'work_start', 'work_end', 'late_tolerance_minutes',
   'max_gps_accuracy_m', 'currency', 'timezone',
+  // Identitas perusahaan untuk kop laporan dan berkas yang diunduh.
+  'company_tagline', 'company_address', 'company_phone', 'company_email',
+  'company_tax_id', 'company_website',
 ];
 
 router.get('/settings', ah((req, res) => {

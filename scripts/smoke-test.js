@@ -383,6 +383,89 @@ async function main() {
   }
   check('order yang sudah dibatalkan menolak diubah lagi', tolakUbahBatal);
 
+  // ---------- Identitas perusahaan & data tim ----------
+  console.log('\n9. Logo perusahaan & data tim');
+
+  // PNG 16x16 sungguhan — cukup untuk membuktikan berkasnya benar-benar tersimpan
+  // dan terbaca kembali, bukan sekadar namanya tercatat.
+  const PNG_KECIL =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVR4nGP8//8/AybIKApjYKgyMEC' +
+    'AsaHiQAsGBiOICFAGAFtvCk+eT318AAAAASUVORK5CYII=';
+
+  const brandingAwal = await call('GET', '/api/branding');
+  check('identitas perusahaan bisa dibaca tanpa login', !!brandingAwal.company, brandingAwal.company);
+
+  const unggah = await call('PUT', '/api/branding/logo', { logo: PNG_KECIL });
+  check('logo perusahaan bisa diunggah', !!unggah.logo);
+
+  const brandingIsi = await call('GET', '/api/branding');
+  check('logo muncul pada identitas', !!brandingIsi.logo, brandingIsi.logo || '');
+
+  // Halaman masuk memerlukan logo sebelum ada sesi, jadi gambarnya sengaja
+  // dilayani tanpa autentikasi — yang dibuka hanya logo, bukan data lain.
+  const tanpaToken = await fetch(`${BASE}/api/branding/logo`);
+  const gambar = Buffer.from(await tanpaToken.arrayBuffer());
+  check('gambar logo terbaca tanpa login',
+    tanpaToken.ok && gambar.slice(1, 4).toString() === 'PNG',
+    `${tanpaToken.status}, ${gambar.length} byte`);
+
+  const anggota = await call('POST', '/api/admin/users', {
+    name: 'Anggota Uji', email: `tim-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
+    role: 'staff', position: 'Packing', phone: '081200000000',
+    photo: PNG_KECIL, nik: 'UJI-001', department: 'Gudang',
+    employment_status: 'KONTRAK', join_date: '2024-02-15', gender: 'L',
+    emergency_name: 'Wali Uji', emergency_phone: '081211112222',
+    bank_name: 'BCA', bank_account: '9876543210',
+  });
+  check('anggota tim tersimpan beserta data kepegawaian',
+    anggota.user.nik === 'UJI-001' && anggota.user.department === 'Gudang' && !!anggota.user.photo,
+    anggota.user.photo || '');
+
+  const fotoRes = await call('GET', '/api/admin/users');
+  const tersimpan = fotoRes.users.find((u) => u.id === anggota.user.id);
+  check('ringkasan kelengkapan tim ikut dihitung',
+    fotoRes.ringkas.berfoto >= 1 && fotoRes.ringkas.lengkap >= 1,
+    JSON.stringify(fotoRes.ringkas));
+
+  // Menyimpan ulang tanpa menyentuh foto tidak boleh menggandakan berkas.
+  const ubahTim = await call('PUT', `/api/admin/users/${anggota.user.id}`, {
+    name: 'Anggota Uji', email: tersimpan.email, role: 'staff',
+    position: 'Kepala Packing', phone: '081200000000', active: true,
+    photo: tersimpan.photo, nik: 'UJI-001', department: 'Gudang',
+    employment_status: 'KONTRAK', join_date: '2024-02-15',
+  });
+  check('menyimpan ulang tidak mengganti berkas foto',
+    ubahTim.user.photo === tersimpan.photo && ubahTim.user.position === 'Kepala Packing');
+
+  let tolakTanggal = false;
+  try {
+    await call('PUT', `/api/admin/users/${anggota.user.id}`, {
+      name: 'Anggota Uji', email: tersimpan.email, role: 'staff', join_date: '15-02-2024',
+    });
+  } catch {
+    tolakTanggal = true;
+  }
+  check('tanggal berformat salah ditolak', tolakTanggal);
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/admin/users/export/${bentuk}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    const sah = res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b');
+    check(`data tim bisa diunduh sebagai ${bentuk.toUpperCase()}`, sah, `${res.status}, ${buf.length} byte`);
+  }
+
+  // Logo harus benar-benar tercetak di kop, bukan hanya tersimpan.
+  const pdfLaporan = await fetch(`${BASE}/api/finance/reports/balance-sheet/export/pdf?asOf=${today}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const isiPdf = Buffer.from(await pdfLaporan.arrayBuffer());
+  check('logo ikut tercetak pada kop laporan PDF',
+    pdfLaporan.ok && isiPdf.includes(Buffer.from('/Image')),
+    `${isiPdf.length} byte`);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -45,4 +45,21 @@ function saveDataUrlImage(dataUrl, prefix = 'photo') {
   return filename;
 }
 
-module.exports = { UPLOAD_DIR, saveDataUrlImage, MAX_PHOTO_BYTES };
+/**
+ * Menghapus berkas unggahan lama.
+ *
+ * Dipakai saat logo atau foto diganti. Kegagalan dihiraukan dengan sengaja:
+ * berkas yang tertinggal hanya memakan ruang, sedangkan melempar galat di sini
+ * akan menggagalkan penggantian foto yang sebenarnya sudah berhasil.
+ */
+function hapusBerkas(namaBerkas) {
+  if (!namaBerkas) return;
+  const aman = path.basename(String(namaBerkas));
+  try {
+    fs.unlinkSync(path.join(UPLOAD_DIR, aman));
+  } catch {
+    /* berkas sudah tidak ada, atau tidak bisa dihapus — bukan alasan gagal */
+  }
+}
+
+module.exports = { UPLOAD_DIR, saveDataUrlImage, hapusBerkas, MAX_PHOTO_BYTES };

@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { NAMA_APP, MODUL_APP } from '../lib/brand';
+import { LogoPerusahaan, useBranding } from '../lib/branding';
 import { LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useToast } from '../components/ui';
 
 export default function Login() {
+  const identitas = useBranding();
   const { login } = useAuth();
   const toast = useToast();
   const [email, setEmail] = useState('');
@@ -29,11 +31,11 @@ export default function Login() {
     <div className="grid min-h-screen place-items-center bg-gradient-to-br from-slate-900 via-slate-800 to-brand-900 px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-brand-600 text-2xl font-bold text-white shadow-lg">
-            E
+          <div className="mx-auto mb-3 w-fit rounded-2xl shadow-lg">
+            <LogoPerusahaan ukuran={56} className="!rounded-2xl" />
           </div>
-          <h1 className="text-2xl font-bold text-white">{NAMA_APP}</h1>
-          <p className="mt-1 text-sm text-slate-300">{MODUL_APP}</p>
+          <h1 className="text-2xl font-bold text-white">{identitas.company || NAMA_APP}</h1>
+          <p className="mt-1 text-sm text-slate-300">{identitas.tagline || MODUL_APP}</p>
         </div>
 
         <form onSubmit={onSubmit} className="rounded-2xl bg-white p-6 shadow-2xl">

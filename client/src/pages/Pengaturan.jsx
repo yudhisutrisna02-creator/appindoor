@@ -1,13 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, Pencil, Trash2, MapPin, Save, Users, Building2, Settings as SettingsIcon, KeyRound, Crosshair } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, Spinner, EmptyState, Modal, useToast, Field } from '../components/ui';
+import UnggahGambar from '../components/UnggahGambar';
+import GambarTerlindungi from '../components/GambarTerlindungi';
+import { useBranding } from '../lib/branding';
+import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { useAuth } from '../lib/auth';
 
 const TABS = [
   { key: 'app', label: 'Aplikasi', icon: SettingsIcon },
   { key: 'offices', label: 'Titik Kantor', icon: Building2 },
-  { key: 'users', label: 'Pengguna', icon: Users },
+  { key: 'users', label: 'Data Tim', icon: Users },
   { key: 'account', label: 'Akun Saya', icon: KeyRound },
 ];
 
@@ -43,11 +46,16 @@ export default function Pengaturan() {
 // ------------------------------------------------------------------
 function AppSettings({ isAdmin }) {
   const toast = useToast();
+  const { muatUlangIdentitas } = useBranding();
   const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
+  // null = belum dimuat; string = data URL atau alamat gambar; '' = tidak ada logo
+  const [logo, setLogo] = useState('');
+  const [logoBaru, setLogoBaru] = useState(false);
 
   useEffect(() => {
     api.get('/api/admin/settings').then((d) => setSettings(d.settings)).catch((e) => toast.error(e.message));
+    api.get('/api/branding').then((d) => setLogo(d.logo || '')).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -56,6 +64,14 @@ function AppSettings({ isAdmin }) {
     setSaving(true);
     try {
       await api.put('/api/admin/settings', settings);
+      // Logo hanya dikirim bila memang diganti — mengirim alamat gambar yang
+      // lama akan diabaikan peladen, tetapi menghapusnya secara tidak sengaja
+      // saat pengguna hanya mengubah nomor telepon jelas bukan yang diinginkan.
+      if (logoBaru) {
+        await api.put('/api/branding/logo', { logo: logo || null });
+        setLogoBaru(false);
+      }
+      await muatUlangIdentitas();
       toast.success('Pengaturan disimpan');
     } catch (err) {
       toast.error(err.message);
@@ -69,9 +85,41 @@ function AppSettings({ isAdmin }) {
 
   return (
     <form onSubmit={save} className="card grid max-w-3xl gap-4 sm:grid-cols-2">
+      <div className="sm:col-span-2">
+        <h2 className="card-title mb-3">Identitas Perusahaan</h2>
+        <UnggahGambar
+          label="Logo Perusahaan"
+          nilai={logo || null}
+          onChange={(v) => { setLogo(v || ''); setLogoBaru(true); }}
+          hint="Tampil di halaman masuk, sidebar, dan kop laporan. PNG berlatar tembus pandang paling rapi."
+        />
+      </div>
+
       <Field label="Nama Perusahaan" className="sm:col-span-2">
         <input className="input" value={settings.company_name || ''} onChange={set('company_name')} disabled={!isAdmin} />
       </Field>
+      <Field label="Tagline" hint="Satu baris di bawah nama" className="sm:col-span-2">
+        <input className="input" value={settings.company_tagline || ''} onChange={set('company_tagline')} disabled={!isAdmin} />
+      </Field>
+      <Field label="Alamat" className="sm:col-span-2">
+        <input className="input" value={settings.company_address || ''} onChange={set('company_address')} disabled={!isAdmin} />
+      </Field>
+      <Field label="Telepon">
+        <input className="input" value={settings.company_phone || ''} onChange={set('company_phone')} disabled={!isAdmin} />
+      </Field>
+      <Field label="Email">
+        <input className="input" value={settings.company_email || ''} onChange={set('company_email')} disabled={!isAdmin} />
+      </Field>
+      <Field label="NPWP">
+        <input className="input" value={settings.company_tax_id || ''} onChange={set('company_tax_id')} disabled={!isAdmin} />
+      </Field>
+      <Field label="Website">
+        <input className="input" value={settings.company_website || ''} onChange={set('company_website')} disabled={!isAdmin} />
+      </Field>
+
+      <div className="sm:col-span-2 mt-2 border-t border-slate-200 pt-4">
+        <h2 className="card-title">Jam Kerja & Presensi</h2>
+      </div>
       <Field label="Jam Masuk (HH:mm)" hint="Dasar kalkulasi keterlambatan">
         <input className="input" placeholder="08:00" value={settings.work_start || ''} onChange={set('work_start')} disabled={!isAdmin} />
       </Field>
@@ -272,11 +320,35 @@ function Offices({ canManage, isAdmin }) {
 }
 
 // ------------------------------------------------------------------
-const EMPTY_USER = { name: '', email: '', password: '', role: 'staff', position: '', phone: '', active: true };
+const EMPTY_USER = {
+  name: '', email: '', password: '', role: 'staff', position: '', phone: '', active: true,
+  photo: null, nik: '', department: '', employment_status: '', join_date: '', birth_date: '',
+  gender: '', address: '', emergency_name: '', emergency_phone: '',
+  bank_name: '', bank_account: '', note: '',
+};
+
+const STATUS_KERJA = {
+  TETAP: 'Karyawan Tetap',
+  KONTRAK: 'Kontrak',
+  MAGANG: 'Magang',
+  HARIAN: 'Harian',
+  MITRA: 'Mitra / Freelance',
+};
+
+/**
+ * Kolom yang menentukan sebuah profil dianggap lengkap.
+ * Sengaja hanya yang benar-benar dipakai: nomor induk untuk penggajian,
+ * bagian untuk pembagian tugas, tanggal masuk untuk masa kerja, dan telepon
+ * untuk dihubungi.
+ */
+const KOLOM_WAJIB_LENGKAP = ['nik', 'department', 'join_date', 'phone'];
+
+const profilLengkap = (u) => KOLOM_WAJIB_LENGKAP.every((k) => u[k]);
 
 function UsersTab({ isAdmin }) {
   const toast = useToast();
   const [users, setUsers] = useState([]);
+  const [ringkas, setRingkas] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
 
@@ -285,6 +357,7 @@ function UsersTab({ isAdmin }) {
     try {
       const d = await api.get('/api/admin/users');
       setUsers(d.users);
+      setRingkas(d.ringkas || null);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -299,6 +372,9 @@ function UsersTab({ isAdmin }) {
     e.preventDefault();
     const payload = { ...editing };
     if (!payload.password) delete payload.password;
+    // Hanya dipakai untuk menampilkan gambar di layar, bukan kolom di peladen.
+    delete payload.photoPratinjau;
+    delete payload.created_at;
     try {
       if (editing.id) {
         await api.put(`/api/admin/users/${editing.id}`, payload);
@@ -330,30 +406,64 @@ function UsersTab({ isAdmin }) {
   return (
     <div className="card">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="card-title">Daftar Pengguna</h2>
-        {isAdmin && (
-          <button className="btn-primary !py-2" onClick={() => setEditing({ ...EMPTY_USER })}>
-            <Plus size={16} /> Pengguna Baru
-          </button>
-        )}
+        <div>
+          <h2 className="card-title">Data Tim</h2>
+          {ringkas && (
+            <p className="mt-0.5 text-xs text-slate-500">
+              {ringkas.aktif} aktif dari {ringkas.total} orang • {ringkas.berfoto} berfoto •{' '}
+              <span className={ringkas.lengkap === ringkas.total ? 'text-emerald-600' : 'text-amber-600'}>
+                {ringkas.lengkap} profil lengkap
+              </span>
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <TombolEkspor path="/api/admin/users" nama="data-tim" kecil />
+          {isAdmin && (
+            <button className="btn-primary !py-2" onClick={() => setEditing({ ...EMPTY_USER })}>
+              <Plus size={16} /> Anggota Baru
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Nama</th><th>Email</th><th>Peran</th><th>Jabatan</th><th>Telepon</th><th>Status</th>{isAdmin && <th></th>}</tr></thead>
+          <thead><tr><th></th><th>Nama</th><th>Bagian</th><th>Peran</th><th>Jabatan</th><th>Telepon</th><th>Status Kerja</th><th>Profil</th><th>Akun</th>{isAdmin && <th></th>}</tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <td className="font-medium text-slate-900">{u.name}</td>
-                <td className="text-sm text-slate-600">{u.email}</td>
+                <td>
+                  <GambarTerlindungi
+                    berkas={u.photo}
+                    alt={u.name}
+                    className="h-9 w-9 rounded-full object-cover"
+                    fallback={
+                      <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-400">
+                        {u.name.trim().charAt(0).toUpperCase()}
+                      </div>
+                    }
+                  />
+                </td>
+                <td>
+                  <p className="font-medium text-slate-900">{u.name}</p>
+                  <p className="text-xs text-slate-500">{u.email}</p>
+                </td>
+                <td className="text-sm">{u.department || <span className="text-slate-400">belum diisi</span>}</td>
                 <td><span className={u.role === 'admin' ? 'badge-blue' : u.role === 'manager' ? 'badge-amber' : 'badge-slate'}>{u.role}</span></td>
                 <td className="text-sm">{u.position || '-'}</td>
                 <td className="text-sm">{u.phone || '-'}</td>
+                <td className="text-xs">{STATUS_KERJA[u.employment_status] || <span className="text-slate-400">-</span>}</td>
+                <td>
+                  {profilLengkap(u)
+                    ? <span className="badge-green">lengkap</span>
+                    : <span className="badge-amber">perlu dilengkapi</span>}
+                </td>
                 <td>{u.active ? <span className="badge-green">aktif</span> : <span className="badge-slate">nonaktif</span>}</td>
                 {isAdmin && (
                   <td>
                     <div className="flex gap-1">
-                      <button className="btn-ghost !px-2 !py-1" onClick={() => setEditing({ ...u, password: '', active: !!u.active })} aria-label="Ubah">
+                      <button className="btn-ghost !px-2 !py-1" onClick={() => setEditing({ ...u, password: '', active: !!u.active, photoPratinjau: undefined })} aria-label="Ubah">
                         <Pencil size={14} />
                       </button>
                       <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => deactivate(u)} aria-label="Nonaktifkan">
@@ -401,6 +511,75 @@ function UsersTab({ isAdmin }) {
             <Field label="Telepon" className="sm:col-span-2">
               <input className="input" value={editing.phone || ''} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
             </Field>
+            <div className="sm:col-span-2 mt-1 border-t border-slate-200 pt-3">
+              <h3 className="mb-3 text-sm font-bold text-slate-800">Data Kepegawaian</h3>
+              <div className="flex items-start gap-4">
+                {/* Foto yang sudah tersimpan ditampilkan terpisah karena berkasnya
+                    dilindungi dan tidak bisa dipasang langsung sebagai src. */}
+                {editing.photo && editing.photoPratinjau === undefined && (
+                  <GambarTerlindungi
+                    berkas={editing.photo}
+                    alt={editing.name}
+                    className="h-20 w-20 rounded-full border border-slate-200 object-cover"
+                  />
+                )}
+                <UnggahGambar
+                  label="Foto"
+                  bentuk="bulat"
+                  ukuranMaks={400}
+                  nilai={editing.photoPratinjau || null}
+                  onChange={(v) => setEditing({ ...editing, photo: v, photoPratinjau: v })}
+                  hint={editing.photo && editing.photoPratinjau === undefined
+                    ? 'Foto saat ini di sebelah kiri — pilih gambar untuk menggantinya'
+                    : 'Tampil di daftar tim dan rekap presensi'}
+                />
+              </div>
+            </div>
+
+            <Field label="Nomor Induk (NIK)">
+              <input className="input" value={editing.nik || ''} onChange={(e) => setEditing({ ...editing, nik: e.target.value })} />
+            </Field>
+            <Field label="Bagian / Divisi">
+              <input className="input" placeholder="Gudang, Penjualan, Keuangan" value={editing.department || ''} onChange={(e) => setEditing({ ...editing, department: e.target.value })} />
+            </Field>
+            <Field label="Status Kerja">
+              <select className="input" value={editing.employment_status || ''} onChange={(e) => setEditing({ ...editing, employment_status: e.target.value })}>
+                <option value="">— belum diisi —</option>
+                {Object.entries(STATUS_KERJA).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            <Field label="Tanggal Masuk">
+              <input type="date" className="input" value={editing.join_date || ''} onChange={(e) => setEditing({ ...editing, join_date: e.target.value })} />
+            </Field>
+            <Field label="Tanggal Lahir">
+              <input type="date" className="input" value={editing.birth_date || ''} onChange={(e) => setEditing({ ...editing, birth_date: e.target.value })} />
+            </Field>
+            <Field label="Jenis Kelamin">
+              <select className="input" value={editing.gender || ''} onChange={(e) => setEditing({ ...editing, gender: e.target.value })}>
+                <option value="">— belum diisi —</option>
+                <option value="L">Laki-laki</option>
+                <option value="P">Perempuan</option>
+              </select>
+            </Field>
+            <Field label="Alamat" className="sm:col-span-2">
+              <input className="input" value={editing.address || ''} onChange={(e) => setEditing({ ...editing, address: e.target.value })} />
+            </Field>
+            <Field label="Kontak Darurat" hint="Nama orang yang dihubungi bila terjadi sesuatu">
+              <input className="input" value={editing.emergency_name || ''} onChange={(e) => setEditing({ ...editing, emergency_name: e.target.value })} />
+            </Field>
+            <Field label="Telepon Kontak Darurat">
+              <input className="input" value={editing.emergency_phone || ''} onChange={(e) => setEditing({ ...editing, emergency_phone: e.target.value })} />
+            </Field>
+            <Field label="Nama Bank" hint="Untuk pembayaran gaji">
+              <input className="input" value={editing.bank_name || ''} onChange={(e) => setEditing({ ...editing, bank_name: e.target.value })} />
+            </Field>
+            <Field label="Nomor Rekening">
+              <input className="input" value={editing.bank_account || ''} onChange={(e) => setEditing({ ...editing, bank_account: e.target.value })} />
+            </Field>
+            <Field label="Catatan" className="sm:col-span-2">
+              <input className="input" value={editing.note || ''} onChange={(e) => setEditing({ ...editing, note: e.target.value })} />
+            </Field>
+
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input type="checkbox" className="h-4 w-4 rounded" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} />
               Akun aktif dan dapat login

@@ -1,4 +1,8 @@
 'use strict';
+const fs = require('fs');
+const path = require('path');
+const { UPLOAD_DIR } = require('./upload');
+const { getSetting } = require('../db');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 
@@ -100,6 +104,40 @@ async function attendanceExcel(rows, { from, to }) {
   return wb.xlsx.writeBuffer();
 }
 
+/**
+ * Menggambar kop halaman: logo perusahaan bila ada, lalu nama dan judul.
+ *
+ * Logo dibaca dari berkas saat pencetakan, bukan disimpan di memori, karena
+ * berkas ini jarang dipakai dan gambarnya bisa diganti kapan saja. Kegagalan
+ * membaca gambar tidak menggagalkan laporan — kop hanya kehilangan logonya.
+ */
+function pdfKop(doc, { perusahaan, judul, subjudul }) {
+  const kiri = doc.page.margins.left;
+  let x = kiri;
+
+  try {
+    const nama = getSetting('company_logo', '');
+    if (nama) {
+      const berkas = path.join(UPLOAD_DIR, path.basename(nama));
+      if (fs.existsSync(berkas)) {
+        doc.image(berkas, kiri, doc.y, { fit: [38, 38] });
+        x = kiri + 48;
+      }
+    }
+  } catch {
+    /* logo tidak terbaca — kop tetap dicetak tanpa gambar */
+  }
+
+  const atas = doc.y;
+  doc.font('Helvetica-Bold').fontSize(14).text(perusahaan || 'Laporan', x, atas);
+  if (judul) doc.font('Helvetica-Bold').fontSize(11).text(judul, x, doc.y);
+  if (subjudul) doc.font('Helvetica').fontSize(9).fillColor('#475569').text(subjudul, x, doc.y);
+
+  doc.fillColor('#0F172A');
+  doc.y = Math.max(doc.y, atas + 40);
+  doc.moveDown(0.5);
+}
+
 /** Membungkus PDFKit menjadi Promise<Buffer>. */
 function renderPdf(build, options = {}) {
   return new Promise((resolve, reject) => {
@@ -151,10 +189,11 @@ function pdfTable(doc, headers, widths, rows, startY) {
 
 async function attendancePdf(rows, { from, to, company }) {
   return renderPdf((doc) => {
-    doc.font('Helvetica-Bold').fontSize(15).text(company || 'Rekap Absensi');
-    doc.font('Helvetica').fontSize(10).fillColor('#475569')
-      .text(`Rekap Presensi Karyawan — Periode ${from} s/d ${to}`);
-    doc.moveDown(0.8).fillColor('#0F172A');
+    pdfKop(doc, {
+      perusahaan: company || 'Rekap Absensi',
+      judul: 'Rekap Presensi Karyawan',
+      subjudul: `Periode ${from} s/d ${to}`,
+    });
 
     const headers = ['Tanggal', 'Nama', 'Tipe', 'In', 'Out', 'Status', 'Telat', 'Jarak(m)'];
     const widths = [58, 110, 90, 40, 40, 68, 40, 85];
@@ -222,10 +261,8 @@ async function tableExcel(sheetName, columns, rows, meta = []) {
  */
 async function financialPdf(title, subtitle, lines, company) {
   return renderPdf((doc) => {
-    doc.font('Helvetica-Bold').fontSize(15).text(company || 'Laporan Keuangan');
-    doc.font('Helvetica-Bold').fontSize(12).text(title);
-    doc.font('Helvetica').fontSize(9).fillColor('#475569').text(subtitle);
-    doc.moveDown(1).fillColor('#0F172A');
+    pdfKop(doc, { perusahaan: company || 'Laporan Keuangan', judul: title, subjudul: subtitle });
+    doc.moveDown(0.4);
 
     const left = doc.page.margins.left;
     const right = doc.page.width - doc.page.margins.right;
@@ -274,10 +311,7 @@ async function tablePdf(title, subtitle, columns, rows, meta = [], company) {
       const ruang = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const widths = columns.map((c) => ((c.width || 16) / totalBobot) * ruang);
 
-      doc.font('Helvetica-Bold').fontSize(14).text(company || 'Laporan');
-      doc.font('Helvetica-Bold').fontSize(11).text(title);
-      if (subtitle) doc.font('Helvetica').fontSize(9).fillColor('#475569').text(subtitle);
-      doc.moveDown(0.7).fillColor('#0F172A');
+      pdfKop(doc, { perusahaan: company, judul: title, subjudul: subtitle });
 
       const isi = rows.map((r) =>
         columns.map((c) => {

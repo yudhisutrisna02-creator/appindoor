@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import GambarTerlindungi from '../components/GambarTerlindungi';
 import { FileSpreadsheet, FileText, Users, Clock, MapPin, Image as ImageIcon, CalendarPlus, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, Modal, Field } from '../components/ui';
@@ -196,7 +197,11 @@ export default function RekapAbsensi() {
               <div key={side.label}>
                 <p className="label">{side.label}</p>
                 {side.photo ? (
-                  <AuthImage file={side.photo} alt={side.label} />
+                  <GambarTerlindungi
+                    berkas={side.photo}
+                    alt={side.label}
+                    className="aspect-[4/3] w-full rounded-xl object-cover"
+                  />
                 ) : (
                   <div className="grid aspect-[4/3] place-items-center rounded-xl bg-slate-100 text-xs text-slate-400">
                     Tidak ada foto
@@ -358,30 +363,3 @@ export default function RekapAbsensi() {
   );
 }
 
-/** Foto presensi butuh header Authorization, jadi diambil sebagai blob URL. */
-function AuthImage({ file, alt }) {
-  const [src, setSrc] = useState(null);
-
-  useEffect(() => {
-    let url;
-    let cancelled = false;
-    fetch(`/api/uploads/${file}`, { headers: { Authorization: `Bearer ${localStorage.getItem('erp_token')}` } })
-      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('gagal'))))
-      .then((blob) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setSrc(url);
-      })
-      .catch(() => setSrc(null));
-
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [file]);
-
-  if (!src) {
-    return <div className="grid aspect-[4/3] animate-pulse place-items-center rounded-xl bg-slate-100" />;
-  }
-  return <img src={src} alt={alt} className="aspect-[4/3] w-full rounded-xl object-cover" />;
-}

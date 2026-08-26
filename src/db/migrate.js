@@ -153,6 +153,25 @@ function runMigrations(db) {
   addColumn(db, 'sales_orders', 'due_date', 'TEXT', applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
+  // --- Data tim yang lebih lengkap ---
+  // Kolom kepegawaian yang selama ini hanya ada di kepala pemilik usaha:
+  // nomor induk, penempatan, status kerja, dan kontak darurat. Semuanya boleh
+  // kosong karena karyawan yang sudah terdaftar tidak boleh mendadak dianggap
+  // tidak sah hanya karena ada kolom baru.
+  addColumn(db, 'users', 'photo', 'TEXT', applied);             // nama berkas di folder unggahan
+  addColumn(db, 'users', 'nik', 'TEXT', applied);               // nomor induk karyawan
+  addColumn(db, 'users', 'department', 'TEXT', applied);        // divisi / bagian
+  addColumn(db, 'users', 'employment_status', 'TEXT', applied); // tetap, kontrak, magang
+  addColumn(db, 'users', 'join_date', 'TEXT', applied);
+  addColumn(db, 'users', 'birth_date', 'TEXT', applied);
+  addColumn(db, 'users', 'gender', 'TEXT', applied);
+  addColumn(db, 'users', 'address', 'TEXT', applied);
+  addColumn(db, 'users', 'emergency_name', 'TEXT', applied);
+  addColumn(db, 'users', 'emergency_phone', 'TEXT', applied);
+  addColumn(db, 'users', 'bank_name', 'TEXT', applied);
+  addColumn(db, 'users', 'bank_account', 'TEXT', applied);
+  addColumn(db, 'users', 'note', 'TEXT', applied);
+
   // --- Daftar kanal jualan tidak lagi dikunci di dalam tabel ---
   lepasCekKanal(db, 'sales_orders', applied);
   lepasCekKanal(db, 'shops', applied);
