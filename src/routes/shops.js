@@ -1,4 +1,5 @@
 'use strict';
+const { daftarkanEkspor } = require('../utils/ekspor');
 /**
  * Toko / akun marketplace.
  *
@@ -27,7 +28,8 @@ const shopSchema = z.object({
 });
 
 /** GET /api/shops — daftar toko beserta ringkasan performanya. */
-router.get('/', ah((req, res) => {
+/** Pengambil daftar toko + performanya — dipakai layar dan berkas unduhan. */
+function ambilToko(req) {
   const { from, to } = dateRange(req.query);
 
   const rows = db
@@ -58,8 +60,37 @@ router.get('/', ah((req, res) => {
       avg_order_value: s.orders ? r2(s.net_revenue / s.orders) : 0,
     }));
 
-  res.json({ from, to, shops: rows });
-}));
+  return { from, to, shops: rows };
+}
+
+router.get('/', ah((req, res) => res.json(ambilToko(req))));
+
+daftarkanEkspor(router, {
+  path: '',
+  judul: 'Toko Marketplace',
+  kolom: [
+    { header: 'Toko', key: 'name', width: 26 },
+    { header: 'Channel', key: 'channel', width: 16 },
+    { header: 'Order', key: 'orders', width: 10 },
+    { header: 'Pendapatan Bersih', key: 'net_revenue', width: 17, money: true },
+    { header: 'HPP', key: 'cogs', width: 15, money: true },
+    { header: 'Total Biaya', key: 'total_fees', width: 15, money: true },
+    { header: 'Laba Bersih', key: 'net_profit', width: 15, money: true },
+    { header: 'Margin', key: 'margin_pct', width: 10, pct: true },
+    { header: 'Rata-rata per Order', key: 'avg_order_value', width: 18, money: true },
+  ],
+  ambil: (req) => {
+    const d = ambilToko(req);
+    return {
+      rows: d.shops,
+      subtitle: `Periode ${d.from} s/d ${d.to}`,
+      meta: [
+        ['Jumlah toko', d.shops.length],
+        ['Total laba bersih', r2(d.shops.reduce((s, x) => s + x.net_profit, 0))],
+      ],
+    };
+  },
+});
 
 router.post('/', requireRole('admin', 'manager'), ah((req, res) => {
   const s = parse(shopSchema, req.body);

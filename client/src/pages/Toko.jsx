@@ -4,8 +4,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  DateRangeFilter, defaultRange, useToast, Field,
-} from '../components/ui';
+  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, rupiahShort, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -80,6 +79,7 @@ export default function Toko() {
             <Plus size={16} /> Toko Baru
           </button>
         )}
+        <TombolEkspor path="/api/shops" params={range} nama="toko-marketplace" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange} />

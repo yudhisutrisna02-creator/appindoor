@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2 } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field } from '../components/ui';
+import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -195,12 +195,7 @@ export default function Penjualan() {
         <Link className="btn-secondary" to="/penjualan/retur">
           <Undo2 size={16} /> Retur
         </Link>
-        <button
-          className="btn-secondary"
-          onClick={() => api.download('/api/sales/export/excel', { ...range, channel }, 'penjualan.xlsx').catch((e) => toast.error(e.message))}
-        >
-          <FileSpreadsheet size={16} /> Excel
-        </button>
+          <TombolEkspor path="/api/sales" params={{ ...range, channel }} nama="order-penjualan" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange}>
@@ -230,6 +225,15 @@ export default function Penjualan() {
           </div>
 
           <div className="card">
+            {/* Ringkasan di atas selalu menghitung seluruh periode; tabel di
+                bawah dibatasi agar halaman tetap ringan. Bedanya disebutkan
+                supaya daftar yang terpotong tidak dikira sudah lengkap. */}
+            {data.terpotong && (
+              <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Menampilkan {data.rows.length} order terbaru dari {data.totalRows} order pada periode ini.
+                Angka ringkasan di atas dan berkas unduhan tetap mencakup seluruhnya.
+              </p>
+            )}
             {data.rows.length === 0 ? (
               <EmptyState message="Belum ada order pada rentang ini" hint="Klik “Order Baru” untuk mencatat penjualan" />
             ) : (

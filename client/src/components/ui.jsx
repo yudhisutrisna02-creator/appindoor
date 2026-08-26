@@ -1,6 +1,7 @@
 import { createContext, useContext, useCallback, useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle2, Info, X, Loader2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, X, Loader2, FileSpreadsheet, FileText } from 'lucide-react';
 import { firstOfMonth, today } from '../lib/format';
+import { api } from '../lib/api';
 
 // ------------------------------------------------------------------
 // Notifikasi toast
@@ -187,6 +188,45 @@ export function Field({ label, children, hint, className = '' }) {
       <label className="label">{label}</label>
       {children}
       {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * Sepasang tombol unduhan Excel dan PDF.
+ *
+ * Dibuat satu komponen supaya setiap menu mendapat perilaku yang sama —
+ * termasuk keadaan sedang mengunduh dan pesan galat yang seragam. Penyaring
+ * yang sedang aktif di layar ikut dikirim sebagai parameter, jadi berkas yang
+ * turun berisi persis apa yang sedang dilihat pengguna, bukan seluruh tabel.
+ */
+export function TombolEkspor({ path, params = {}, nama = 'laporan', kecil = false }) {
+  const toast = useToast();
+  const [sibuk, setSibuk] = useState(null);
+
+  async function unduh(bentuk) {
+    setSibuk(bentuk);
+    try {
+      await api.download(`${path}/export/${bentuk}`, params, `${nama}.${bentuk === 'excel' ? 'xlsx' : 'pdf'}`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSibuk(null);
+    }
+  }
+
+  const kelas = `btn-secondary ${kecil ? '!px-2.5 !py-1.5 text-xs' : ''}`;
+
+  return (
+    <div className="flex gap-2">
+      <button className={kelas} onClick={() => unduh('excel')} disabled={sibuk !== null}>
+        <FileSpreadsheet size={kecil ? 14 : 16} />
+        {sibuk === 'excel' ? 'Menyiapkan...' : 'Excel'}
+      </button>
+      <button className={kelas} onClick={() => unduh('pdf')} disabled={sibuk !== null}>
+        <FileText size={kecil ? 14 : 16} />
+        {sibuk === 'pdf' ? 'Menyiapkan...' : 'PDF'}
+      </button>
     </div>
   );
 }

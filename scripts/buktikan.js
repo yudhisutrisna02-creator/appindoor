@@ -89,7 +89,9 @@ function cek(judul, benar, keterangan = '') {
   for (const j of jual) {
     grupExcel.add(j.noPesanan ? `NO:${j.noPesanan}` : `X:${j.tanggal}|${j.toko}|${j.pembeli}|${j.resi}`);
   }
-  cek('daftar tidak terpotong', !daftar.terpotong, `${daftar.rows.length} baris dikembalikan`);
+  cek('ringkasan mencakup seluruh periode, bukan hanya baris yang tampil',
+    ringkas.orders === grupExcel.size,
+    `ringkasan ${ringkas.orders} order, daftar ${daftar.rows.length} baris`);
   cek('jumlah order sama dengan pengelompokan Excel', ringkas.orders === grupExcel.size, `aplikasi ${ringkas.orders}, excel ${grupExcel.size}`);
 
   const qtyExcel = jual.reduce((s, j) => s + j.qty, 0);

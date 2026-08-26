@@ -1,4 +1,5 @@
 'use strict';
+const { daftarkanEkspor } = require('../utils/ekspor');
 const express = require('express');
 const { z } = require('zod');
 const { db } = require('../db');
@@ -46,7 +47,8 @@ function balanceMap() {
   return map;
 }
 
-router.get('/', ah((req, res) => {
+/** Pengambil daftar mitra — dipakai layar dan berkas unduhan. */
+function ambilMitra(req) {
   const kind = req.query.kind;
   const search = `%${(req.query.q || '').trim()}%`;
 
@@ -62,14 +64,42 @@ router.get('/', ah((req, res) => {
 
   const saldo = balanceMap();
 
-  res.json({
+  return {
     partners: rows.map((p) => ({
       ...p,
       receivable: saldo.get(p.id)?.receivable || 0,
       payable: saldo.get(p.id)?.payable || 0,
     })),
-  });
-}));
+  };
+}
+
+router.get('/', ah((req, res) => res.json(ambilMitra(req))));
+
+daftarkanEkspor(router, {
+  path: '',
+  judul: 'Supplier & Pelanggan',
+  kolom: [
+    { header: 'Kode', key: 'code', width: 14 },
+    { header: 'Nama', key: 'name', width: 32 },
+    { header: 'Jenis', key: 'kind', width: 12 },
+    { header: 'Telepon', key: 'phone', width: 18 },
+    { header: 'Alamat', key: 'address', width: 40 },
+    { header: 'Piutang', key: 'receivable', width: 16, money: true },
+    { header: 'Utang', key: 'payable', width: 16, money: true },
+  ],
+  ambil: (req) => {
+    const d = ambilMitra(req);
+    return {
+      rows: d.partners,
+      subtitle: req.query.kind ? `Jenis: ${req.query.kind}` : 'Seluruh mitra aktif',
+      meta: [
+        ['Jumlah mitra', d.partners.length],
+        ['Total piutang', d.partners.reduce((s, x) => s + x.receivable, 0)],
+        ['Total utang', d.partners.reduce((s, x) => s + x.payable, 0)],
+      ],
+    };
+  },
+});
 
 router.post('/', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
   const p = parse(partnerSchema, req.body);

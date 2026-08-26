@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ClipboardCheck, Save, Eye, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, StatCard } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, StatCard, TombolEkspor } from '../components/ui';
 import { rupiah, num, today, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -90,6 +90,7 @@ export default function StokOpname() {
             <ClipboardCheck size={16} /> Mulai Opname
           </button>
         )}
+        <TombolEkspor path="/api/inventory/opname" nama="stok-opname" />
       </PageHeader>
 
       {loading ? (

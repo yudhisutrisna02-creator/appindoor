@@ -3,8 +3,7 @@ import { ArrowDownCircle, ArrowUpCircle, Trash2, Wallet, Plus } from 'lucide-rea
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  DateRangeFilter, defaultRange, useToast, Field,
-} from '../components/ui';
+  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, today, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -96,6 +95,7 @@ export default function KasMasukKeluar() {
         <button className="btn-secondary" onClick={() => openForm('OUT')}>
           <ArrowUpCircle size={16} /> Kas Keluar
         </button>
+        <TombolEkspor path="/api/cashflow/entries" params={range} nama="kas-masuk-keluar" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange} />

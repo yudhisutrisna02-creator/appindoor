@@ -249,10 +249,69 @@ async function financialPdf(title, subtitle, lines, company) {
   });
 }
 
+// ------------------------------------------------------------------
+// GENERIK: tabel apa pun -> PDF
+// ------------------------------------------------------------------
+/**
+ * Pasangan PDF untuk tableExcel, memakai definisi kolom yang sama persis.
+ *
+ * Satu definisi kolom dipakai kedua format supaya isi berkas Excel dan PDF
+ * tidak bisa berbeda diam-diam — kalau satu kolom ditambahkan, keduanya ikut.
+ *
+ * @param {string} title judul di kepala halaman
+ * @param {string} subtitle keterangan periode atau penyaring yang sedang aktif
+ * @param {Array<{header:string,key:string,width?:number,money?:boolean,pct?:boolean}>} columns
+ * @param {Array<object>} rows
+ * @param {Array<[string,any]>} [meta] baris ringkasan di bawah tabel
+ */
+async function tablePdf(title, subtitle, columns, rows, meta = [], company) {
+  // Kolom lebar-nol pada Excel tidak berarti apa-apa di PDF, jadi lebarnya
+  // dibagi menurut proporsi lebar kolom Excel terhadap ruang cetak yang ada.
+  const totalBobot = columns.reduce((s, c) => s + (c.width || 16), 0);
+
+  return renderPdf(
+    (doc) => {
+      const ruang = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const widths = columns.map((c) => ((c.width || 16) / totalBobot) * ruang);
+
+      doc.font('Helvetica-Bold').fontSize(14).text(company || 'Laporan');
+      doc.font('Helvetica-Bold').fontSize(11).text(title);
+      if (subtitle) doc.font('Helvetica').fontSize(9).fillColor('#475569').text(subtitle);
+      doc.moveDown(0.7).fillColor('#0F172A');
+
+      const isi = rows.map((r) =>
+        columns.map((c) => {
+          const v = r[c.key];
+          if (v === null || v === undefined || v === '') return '-';
+          if (c.money) return rupiah(v);
+          if (c.pct) return `${Number(v).toFixed(2)}%`;
+          return v;
+        })
+      );
+
+      const akhir = pdfTable(doc, columns.map((c) => c.header), widths, isi, doc.y);
+
+      doc.y = akhir + 12;
+      doc.font('Helvetica').fontSize(8).fillColor('#475569').text(`${rows.length} baris`);
+      if (meta.length) {
+        doc.moveDown(0.3).fillColor('#0F172A');
+        for (const [label, value] of meta) {
+          if (doc.y > doc.page.height - 60) doc.addPage();
+          doc.font('Helvetica-Bold').fontSize(9)
+            .text(`${label}: ${typeof value === 'number' ? rupiah(value) : value}`);
+        }
+      }
+    },
+    // Tabel lebar lebih terbaca melintang; tabel sempit tetap tegak.
+    { layout: columns.length > 6 ? 'landscape' : 'portrait' }
+  );
+}
+
 module.exports = {
   attendanceExcel,
   attendancePdf,
   tableExcel,
+  tablePdf,
   financialPdf,
   rupiah,
   WORK_TYPE_LABEL,

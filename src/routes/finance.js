@@ -4,9 +4,10 @@ const { z } = require('zod');
 const { db, getSetting } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { postJournal } = require('../utils/accounting');
+const { postJournal, r2 } = require('../utils/accounting');
 const { incomeStatement, balanceSheet, cashFlow, generalLedger, trialBalance, accountBalances } = require('../utils/reports');
 const { tableExcel, financialPdf } = require('../utils/exporters');
+const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 
 const router = express.Router();
@@ -29,7 +30,8 @@ const accountSchema = z.object({
 });
 
 /** GET /api/finance/accounts — COA lengkap dengan saldo berjalan. */
-router.get('/accounts', ah((req, res) => {
+/** Pengambil bagan akun beserta saldonya — dipakai layar dan berkas unduhan. */
+function ambilAkun(req) {
   const balances = accountBalances(null, req.query.asOf || todayLocal());
   const map = new Map(balances.map((b) => [b.id, b.balance]));
 
@@ -38,8 +40,32 @@ router.get('/accounts', ah((req, res) => {
     balance: map.get(a.id) ?? 0,
   }));
 
-  res.json({ accounts });
-}));
+  return { accounts };
+}
+
+router.get('/accounts', ah((req, res) => res.json(ambilAkun(req))));
+
+daftarkanEkspor(router, {
+  path: '/accounts',
+  judul: 'Chart of Accounts',
+  kolom: [
+    { header: 'Kode', key: 'code', width: 10 },
+    { header: 'Nama Akun', key: 'name', width: 36 },
+    { header: 'Tipe', key: 'type', width: 14 },
+    { header: 'Subtipe', key: 'subtype', width: 16 },
+    { header: 'Saldo Normal', key: 'normal', width: 12 },
+    { header: 'Arus Kas', key: 'cashflow', width: 10 },
+    { header: 'Saldo', key: 'balance', width: 18, money: true },
+  ],
+  ambil: (req) => {
+    const d = ambilAkun(req);
+    return {
+      rows: d.accounts,
+      subtitle: `Saldo per ${req.query.asOf || todayLocal()}`,
+      meta: [['Jumlah akun', d.accounts.length]],
+    };
+  },
+});
 
 router.post('/accounts', requireRole('admin', 'manager'), ah((req, res) => {
   const a = parse(accountSchema, req.body);
@@ -114,7 +140,8 @@ router.post('/journals', requireRole('admin', 'manager'), ah((req, res) => {
 }));
 
 /** GET /api/finance/journals — daftar jurnal beserta totalnya. */
-router.get('/journals', ah((req, res) => {
+/** Pengambil daftar jurnal — dipakai layar dan berkas unduhan. */
+function ambilJurnal(req) {
   const { from, to } = dateRange(req.query);
   const params = [from, to];
   let where = 'WHERE j.entry_date BETWEEN ? AND ?';
@@ -131,8 +158,36 @@ router.get('/journals', ah((req, res) => {
     )
     .all(...params);
 
-  res.json({ from, to, rows });
-}));
+  return { from, to, rows };
+}
+
+router.get('/journals', ah((req, res) => res.json(ambilJurnal(req))));
+
+daftarkanEkspor(router, {
+  path: '/journals',
+  judul: 'Buku Besar & Jurnal',
+  kolom: [
+    { header: 'Tanggal', key: 'entry_date', width: 12 },
+    { header: 'Nomor', key: 'entry_no', width: 18 },
+    { header: 'Keterangan', key: 'description', width: 46 },
+    { header: 'Sumber', key: 'source', width: 12 },
+    { header: 'Total Debit', key: 'total_debit', width: 17, money: true },
+    { header: 'Total Kredit', key: 'total_credit', width: 17, money: true },
+    { header: 'Dicatat Oleh', key: 'user_name', width: 18 },
+  ],
+  ambil: (req) => {
+    const d = ambilJurnal(req);
+    return {
+      rows: d.rows,
+      subtitle: `Periode ${d.from} s/d ${d.to}`,
+      meta: [
+        ['Jumlah jurnal', d.rows.length],
+        ['Total debit', r2(d.rows.reduce((s, r) => s + r.total_debit, 0))],
+        ['Total kredit', r2(d.rows.reduce((s, r) => s + r.total_credit, 0))],
+      ],
+    };
+  },
+});
 
 router.get('/journals/:id', ah((req, res) => {
   const journal = db.prepare('SELECT * FROM journals WHERE id = ?').get(req.params.id);

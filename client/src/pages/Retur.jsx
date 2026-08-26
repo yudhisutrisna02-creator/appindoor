@@ -3,8 +3,7 @@ import { Undo2, Plus, PackageCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  DateRangeFilter, defaultRange, useToast, Field,
-} from '../components/ui';
+  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, today, dateID } from '../lib/format';
 
 export default function Retur() {
@@ -81,6 +80,7 @@ export default function Retur() {
         <button className="btn-primary" onClick={openForm}>
           <Plus size={16} /> Catat Retur
         </button>
+        <TombolEkspor path="/api/sales/returns/list" params={range} nama="retur-penjualan" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange} />

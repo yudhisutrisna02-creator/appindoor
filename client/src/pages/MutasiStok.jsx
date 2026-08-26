@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, Plus, Package } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field } from '../components/ui';
+import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, today } from '../lib/format';
 
 const TYPE_BADGE = { IN: 'badge-green', OUT: 'badge-red', ADJ: 'badge-amber' };
@@ -86,6 +86,7 @@ export default function MutasiStok() {
         <button className="btn-secondary" onClick={() => openForm('OUT')}>
           <ArrowUpFromLine size={16} /> Stok Keluar
         </button>
+        <TombolEkspor path="/api/inventory/moves" params={range} nama="mutasi-stok" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange}>

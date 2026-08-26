@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Warehouse, FileSpreadsheet, AlertTriangle, PackageX, Coins, RefreshCw } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, useToast } from '../components/ui';
+import { PageHeader, StatCard, Spinner, EmptyState, useToast, TombolEkspor } from '../components/ui';
 import { rupiah, rupiahShort, num, CHART_COLORS } from '../lib/format';
 
 export default function ValuasiStok() {
@@ -33,12 +33,7 @@ export default function ValuasiStok() {
         subtitle={`Real-time • Nilai = Jumlah Stok × HPP • Diperbarui ${new Date(data.asOf).toLocaleString('id-ID')}`}
       >
         <button className="btn-secondary" onClick={load}><RefreshCw size={16} /> Muat Ulang</button>
-        <button
-          className="btn-secondary"
-          onClick={() => api.download('/api/inventory/valuation/export/excel', {}, 'valuasi-stok.xlsx').catch((e) => toast.error(e.message))}
-        >
-          <FileSpreadsheet size={16} /> Excel
-        </button>
+        <TombolEkspor path="/api/inventory/valuation" nama="valuasi-stok" />
       </PageHeader>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Search, Package } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, Spinner, EmptyState, Modal, useToast, Field } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, pct } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -86,6 +86,7 @@ export default function Produk() {
             <Plus size={16} /> Produk Baru
           </button>
         )}
+        <TombolEkspor path="/api/inventory/products" params={{ q, category }} nama="master-produk" />
       </PageHeader>
 
       <div className="card mb-4 flex flex-col gap-3 sm:flex-row">

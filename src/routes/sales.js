@@ -5,7 +5,7 @@ const { db, nextNumber } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines } = require('../utils/accounting');
-const { tableExcel } = require('../utils/exporters');
+const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 
 const router = express.Router();
@@ -287,26 +287,41 @@ router.get('/', ah((req, res) => {
     )
     .all(...params, batas(req.query.limit));
 
-  const sum = (k) => r2(rows.reduce((s, r) => s + r[k], 0));
-  const netRevenue = sum('net_revenue');
+  // Ringkasan dihitung langsung di basis data atas SELURUH baris yang cocok,
+  // bukan atas baris yang kebetulan muat di halaman. Menghitungnya dari daftar
+  // yang terpotong membuat total di layar lebih kecil dari kenyataan tanpa ada
+  // tanda apa pun — persis jenis angka salah yang paling sulit disadari.
+  const total = db
+    .prepare(
+      `SELECT COUNT(*) AS orders,
+              COALESCE(SUM(o.gross_sales), 0)  AS gross_sales,
+              COALESCE(SUM(o.net_revenue), 0)  AS net_revenue,
+              COALESCE(SUM(o.cogs), 0)         AS cogs,
+              COALESCE(SUM(o.total_fees), 0)   AS total_fees,
+              COALESCE(SUM(o.gross_profit), 0) AS gross_profit,
+              COALESCE(SUM(o.net_profit), 0)   AS net_profit
+         FROM sales_orders o ${where}`
+    )
+    .get(...params);
 
   const diminta = batas(req.query.limit);
   res.json({
     from, to, rows,
-    // Beri tahu pemanggil bila daftar kemungkinan terpotong, supaya angka di
-    // layar tidak dikira lengkap padahal bukan.
-    terpotong: rows.length >= diminta,
+    // Daftar boleh terpotong; ringkasannya tidak. Keduanya dibedakan supaya
+    // layar bisa mengatakan "menampilkan 500 dari 1.043" dengan jujur.
+    terpotong: total.orders > rows.length,
     limit: diminta,
+    totalRows: total.orders,
     summary: {
-      orders: rows.length,
-      grossSales: sum('gross_sales'),
-      netRevenue,
-      cogs: sum('cogs'),
-      totalFees: sum('total_fees'),
-      grossProfit: sum('gross_profit'),
-      netProfit: sum('net_profit'),
-      marginPct: netRevenue ? r2((sum('net_profit') / netRevenue) * 100) : 0,
-      avgOrderValue: rows.length ? r2(netRevenue / rows.length) : 0,
+      orders: total.orders,
+      grossSales: r2(total.gross_sales),
+      netRevenue: r2(total.net_revenue),
+      cogs: r2(total.cogs),
+      totalFees: r2(total.total_fees),
+      grossProfit: r2(total.gross_profit),
+      netProfit: r2(total.net_profit),
+      marginPct: total.net_revenue ? r2((total.net_profit / total.net_revenue) * 100) : 0,
+      avgOrderValue: total.orders ? r2(total.net_revenue / total.orders) : 0,
     },
   });
 }));
@@ -363,7 +378,8 @@ router.delete('/:id', requireRole('admin', 'manager'), ah((req, res) => {
 // ANALISIS MARGIN PER CHANNEL
 // ==================================================================
 /** GET /api/sales/analytics — agregasi profitabilitas per channel & produk. */
-router.get('/analytics', ah((req, res) => {
+/** Pengambil analisis margin — dipakai layar dan berkas unduhan. */
+function ambilAnalitik(req) {
   const { from, to } = dateRange(req.query);
 
   const byChannel = db
@@ -439,50 +455,116 @@ router.get('/analytics', ah((req, res) => {
   );
   totals.margin_pct = totals.net_revenue ? r2((totals.net_profit / totals.net_revenue) * 100) : 0;
 
-  res.json({ from, to, byChannel, byProduct, daily, totals, channelLabels: CHANNEL_LABEL });
-}));
+  return { from, to, byChannel, byProduct, daily, totals, channelLabels: CHANNEL_LABEL };
+}
 
-router.get('/export/excel', ah(async (req, res) => {
-  const { from, to, where, params } = orderFilter(req.query);
-  const rows = db.prepare(`SELECT o.* FROM sales_orders o ${where} ORDER BY o.order_date`).all(...params);
+router.get('/analytics', ah((req, res) => res.json(ambilAnalitik(req))));
 
-  const buffer = await tableExcel(
-    'Penjualan',
-    [
-      { header: 'No. Order', key: 'order_no', width: 20 },
-      { header: 'Tanggal', key: 'order_date', width: 12 },
-      { header: 'Channel', key: 'channel_label', width: 18 },
-      { header: 'Pelanggan', key: 'customer', width: 22 },
-      { header: 'Penjualan Kotor', key: 'gross_sales', width: 16, money: true },
-      { header: 'Diskon', key: 'discount', width: 12, money: true },
-      { header: 'Pendapatan Bersih', key: 'net_revenue', width: 17, money: true },
-      { header: 'HPP', key: 'cogs', width: 14, money: true },
-      { header: 'Laba Kotor', key: 'gross_profit', width: 15, money: true },
-      { header: 'Adm. Marketplace', key: 'admin_fee', width: 16, money: true },
-      { header: 'Handling', key: 'handling_fee', width: 12, money: true },
-      { header: 'Ongkir Extra', key: 'shipping_extra', width: 13, money: true },
-      { header: 'Voucher Platform', key: 'voucher_platform', width: 16, money: true },
-      { header: 'Pajak', key: 'tax_amount', width: 12, money: true },
-      { header: 'Packing', key: 'packing_cost', width: 12, money: true },
-      { header: 'Biaya Lain', key: 'other_cost', width: 12, money: true },
-      { header: 'Total Biaya', key: 'total_fees', width: 15, money: true },
-      { header: 'Laba Bersih', key: 'net_profit', width: 15, money: true },
-      { header: 'Margin (%)', key: 'margin_pct', width: 12 },
-    ],
-    rows.map((r) => ({ ...r, channel_label: CHANNEL_LABEL[r.channel] })),
-    [
-      ['Periode', `${from} s/d ${to}`],
-      ['Total Order', rows.length],
-      ['Total Pendapatan Bersih', r2(rows.reduce((s, r) => s + r.net_revenue, 0))],
-      ['Total Laba Bersih', r2(rows.reduce((s, r) => s + r.net_profit, 0))],
-    ]
-  );
+// ------------------------------------------------------------------
+// Unduhan
+// ------------------------------------------------------------------
 
-  res
-    .set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    .set('Content-Disposition', `attachment; filename="penjualan-${from}_${to}.xlsx"`)
-    .send(buffer);
-}));
+const KOLOM_ORDER = [
+  { header: 'No. Order', key: 'order_no', width: 18 },
+  { header: 'Tanggal', key: 'order_date', width: 11 },
+  { header: 'Toko', key: 'shop_name', width: 20 },
+  { header: 'Channel', key: 'channel_label', width: 16 },
+  { header: 'No. Pesanan', key: 'order_ref', width: 20 },
+  { header: 'Status', key: 'fulfillment_status', width: 11 },
+  { header: 'Tgl Cair', key: 'payout_date', width: 11 },
+  { header: 'Pembeli', key: 'buyer_name', width: 22 },
+  { header: 'Kota', key: 'buyer_city', width: 16 },
+  { header: 'Ekspedisi', key: 'courier', width: 14 },
+  { header: 'Resi', key: 'tracking_no', width: 20 },
+  { header: 'Penjualan Kotor', key: 'gross_sales', width: 15, money: true },
+  { header: 'Diskon', key: 'discount', width: 11, money: true },
+  { header: 'Pendapatan Bersih', key: 'net_revenue', width: 16, money: true },
+  { header: 'HPP', key: 'cogs', width: 13, money: true },
+  { header: 'Laba Kotor', key: 'gross_profit', width: 14, money: true },
+  { header: 'Adm. Marketplace', key: 'admin_fee', width: 15, money: true },
+  { header: 'Ongkir Ditanggung', key: 'shipping_extra', width: 15, money: true },
+  { header: 'Ongkir Ditagih', key: 'shipping_charged', width: 14, money: true },
+  { header: 'Voucher Platform', key: 'voucher_platform', width: 15, money: true },
+  { header: 'Packing', key: 'packing_cost', width: 11, money: true },
+  { header: 'Total Biaya', key: 'total_fees', width: 14, money: true },
+  { header: 'Laba Bersih', key: 'net_profit', width: 14, money: true },
+  { header: 'Margin', key: 'margin_pct', width: 10, pct: true },
+];
+
+daftarkanEkspor(router, {
+  path: '',
+  judul: 'Order Penjualan',
+  kolom: KOLOM_ORDER,
+  ambil: (req) => {
+    const { from, to, where, params } = orderFilter(req.query);
+    const rows = db
+      .prepare(
+        `SELECT o.*, sh.name AS shop_name
+           FROM sales_orders o
+           LEFT JOIN shops sh ON sh.id = o.shop_id
+           ${where} ORDER BY o.order_date, o.id`
+      )
+      .all(...params);
+    return {
+      rows: rows.map((r) => ({ ...r, channel_label: CHANNEL_LABEL[r.channel] || r.channel })),
+      subtitle: `Periode ${from} s/d ${to}`,
+      meta: [
+        ['Jumlah order', rows.length],
+        ['Total pendapatan bersih', r2(rows.reduce((s, r) => s + r.net_revenue, 0))],
+        ['Total biaya', r2(rows.reduce((s, r) => s + r.total_fees, 0))],
+        ['Total laba bersih', r2(rows.reduce((s, r) => s + r.net_profit, 0))],
+      ],
+    };
+  },
+});
+
+daftarkanEkspor(router, {
+  path: '/analytics',
+  judul: 'Analisis Margin per Channel',
+  kolom: [
+    { header: 'Channel', key: 'label', width: 20 },
+    { header: 'Order', key: 'orders', width: 10 },
+    { header: 'Penjualan Kotor', key: 'gross_sales', width: 16, money: true },
+    { header: 'Pendapatan Bersih', key: 'net_revenue', width: 17, money: true },
+    { header: 'HPP', key: 'cogs', width: 14, money: true },
+    { header: 'Total Biaya', key: 'total_fees', width: 15, money: true },
+    { header: 'Laba Bersih', key: 'net_profit', width: 15, money: true },
+    { header: 'Margin', key: 'margin_pct', width: 10, pct: true },
+  ],
+  ambil: (req) => {
+    const d = ambilAnalitik(req);
+    return {
+      rows: d.byChannel.map((c) => ({ ...c, label: CHANNEL_LABEL[c.channel] || c.channel })),
+      subtitle: `Periode ${d.from} s/d ${d.to}`,
+      meta: [
+        ['Total pendapatan bersih', d.totals.net_revenue || 0],
+        ['Total laba bersih', d.totals.net_profit || 0],
+      ],
+    };
+  },
+});
+
+daftarkanEkspor(router, {
+  path: '/returns/list',
+  judul: 'Retur Penjualan',
+  kolom: [
+    { header: 'Tanggal', key: 'return_date', width: 12 },
+    { header: 'SKU', key: 'sku', width: 16 },
+    { header: 'Produk', key: 'product_name', width: 34 },
+    { header: 'Jumlah', key: 'qty', width: 10 },
+    { header: 'Nilai', key: 'amount', width: 16, money: true },
+    { header: 'Alasan', key: 'reason', width: 34 },
+  ],
+  ambil: (req) => {
+    const d = ambilRetur(req);
+    return {
+      rows: d.rows,
+      subtitle: `Periode ${d.from} s/d ${d.to}`,
+      meta: [['Jumlah retur', d.rows.length], ['Total nilai retur', d.total]],
+    };
+  },
+});
+
 
 // ==================================================================
 // RETUR PENJUALAN
@@ -548,7 +630,8 @@ router.post('/returns', requireRole('admin', 'manager', 'staff'), ah((req, res) 
   res.status(201).json({ ok: true, ...createReturn(body, req.user.id) });
 }));
 
-router.get('/returns/list', ah((req, res) => {
+/** Pengambil daftar retur — dipakai layar dan berkas unduhan. */
+function ambilRetur(req) {
   const { from, to } = dateRange(req.query);
   const rows = db
     .prepare(
@@ -558,7 +641,9 @@ router.get('/returns/list', ah((req, res) => {
         ORDER BY r.return_date DESC, r.id DESC`
     )
     .all(from, to);
-  res.json({ from, to, rows, total: r2(rows.reduce((s, r) => s + r.amount, 0)) });
-}));
+  return { from, to, rows, total: r2(rows.reduce((s, r) => s + r.amount, 0)) };
+}
+
+router.get('/returns/list', ah((req, res) => res.json(ambilRetur(req))));
 
 module.exports = router;

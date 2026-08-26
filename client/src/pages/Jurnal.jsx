@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, Trash2, Eye, BookOpenCheck, FileSpreadsheet, Scale } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, StatCard } from '../components/ui';
+import { PageHeader, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, StatCard, TombolEkspor } from '../components/ui';
 import { rupiah, today, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -125,6 +125,7 @@ export default function Jurnal() {
             <FileSpreadsheet size={16} /> Excel
           </button>
         )}
+        <TombolEkspor path="/api/finance/journals" params={range} nama="buku-besar-jurnal" />
       </PageHeader>
 
       <div className="mb-4 flex gap-1.5 rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">

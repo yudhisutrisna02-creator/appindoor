@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { HandCoins, Receipt, Wallet, Eye } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, Modal, useToast, Field } from '../components/ui';
+import { PageHeader, StatCard, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, today, dateID } from '../lib/format';
 
 /**
@@ -86,7 +86,9 @@ export default function UtangPiutang() {
       <PageHeader
         title="Utang & Piutang"
         subtitle="Siapa berutang kepada Anda, dan kepada siapa Anda berutang"
-      />
+      >
+        <TombolEkspor path="/api/cashflow/ar-ap" nama="utang-piutang" />
+      </PageHeader>
 
       {loading || !data ? (
         <Spinner />

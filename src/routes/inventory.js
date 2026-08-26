@@ -5,7 +5,7 @@ const { db, nextNumber } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, ACC, postJournal } = require('../utils/accounting');
-const { tableExcel } = require('../utils/exporters');
+const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 
 const router = express.Router();
@@ -27,7 +27,14 @@ const productSchema = z.object({
 });
 
 /** GET /api/inventory/products — daftar produk + nilai valuasi per baris. */
-router.get('/products', ah((req, res) => {
+/**
+ * Pengambil daftar produk.
+ *
+ * Dipakai bersama oleh tampilan layar dan berkas unduhan, supaya penyaring
+ * yang sedang aktif di layar menghasilkan berkas dengan isi yang sama persis —
+ * bukan seluruh tabel yang tidak diminta.
+ */
+function ambilProduk(req) {
   const search = `%${(req.query.q || '').trim()}%`;
   const category = req.query.category || undefined;
 
@@ -55,12 +62,14 @@ router.get('/products', ah((req, res) => {
     low_stock: p.stock > 0 && p.min_stock > 0 && p.stock <= p.min_stock,
   }));
 
-  res.json({
+  return {
     products,
     categories: db.prepare('SELECT DISTINCT category FROM products ORDER BY category').all().map((r) => r.category),
     totalValue: r2(products.reduce((s, p) => s + p.stock_value, 0)),
-  });
-}));
+  };
+}
+
+router.get('/products', ah((req, res) => res.json(ambilProduk(req))));
 
 router.post('/products', requireRole('admin', 'manager'), ah((req, res) => {
   const p = parse(productSchema, req.body);
@@ -214,7 +223,8 @@ router.post('/moves', requireRole('admin', 'manager', 'staff'), ah((req, res) =>
 }));
 
 /** GET /api/inventory/moves — kartu stok / log mutasi. */
-router.get('/moves', ah((req, res) => {
+/** Pengambil daftar mutasi stok — dipakai layar dan berkas unduhan. */
+function ambilMutasi(req) {
   const { from, to } = dateRange(req.query);
   const params = [from, to];
   let where = 'WHERE m.move_date BETWEEN ? AND ?';
@@ -234,7 +244,7 @@ router.get('/moves', ah((req, res) => {
     )
     .all(...params);
 
-  res.json({
+  return {
     from, to, rows,
     summary: {
       inQty: r2(rows.filter((r) => r.move_type === 'IN').reduce((s, r) => s + r.qty, 0)),
@@ -242,14 +252,17 @@ router.get('/moves', ah((req, res) => {
       inValue: r2(rows.filter((r) => r.move_type === 'IN').reduce((s, r) => s + r.value, 0)),
       outValue: r2(rows.filter((r) => r.move_type === 'OUT').reduce((s, r) => s + r.value, 0)),
     },
-  });
-}));
+  };
+}
+
+router.get('/moves', ah((req, res) => res.json(ambilMutasi(req))));
 
 // ==================================================================
 // VALUASI STOK REAL-TIME
 // ==================================================================
 /** GET /api/inventory/valuation — nilai persediaan = Σ (stok × HPP). */
-router.get('/valuation', ah((req, res) => {
+/** Pengambil valuasi stok — dipakai layar dan berkas unduhan. */
+function ambilValuasi() {
   const rows = db
     .prepare(
       // Nama pemasok ikut dibawa supaya halaman valuasi bisa menjawab
@@ -276,7 +289,7 @@ router.get('/valuation', ah((req, res) => {
   const totalValue = r2(rows.reduce((s, r) => s + r.stock_value, 0));
   const potentialRevenue = r2(rows.reduce((s, r) => s + r.potential_revenue, 0));
 
-  res.json({
+  return {
     asOf: new Date().toISOString(),
     totalSku: rows.length,
     totalQty: r2(rows.reduce((s, r) => s + r.stock, 0)),
@@ -292,42 +305,129 @@ router.get('/valuation', ah((req, res) => {
     neverStocked: rows.filter((r) => r.stock <= 0 && r.min_stock <= 0).length,
     byCategory: Object.values(byCategory).sort((a, b) => b.value - a.value),
     rows: rows.map((r) => ({ ...r, stock_value: r2(r.stock_value), potential_revenue: r2(r.potential_revenue) })),
-  });
-}));
+  };
+}
 
-router.get('/valuation/export/excel', ah(async (req, res) => {
-  const rows = db
-    .prepare(
-      `SELECT p.sku, p.name, p.category, p.unit, mp.name AS supplier_name,
-              p.stock, p.cost, p.price, (p.stock*p.cost) AS stock_value
-         FROM products p
-         LEFT JOIN partners mp ON mp.id = p.supplier_id
-        WHERE p.active = 1 ORDER BY p.category, p.name`
-    )
-    .all();
+router.get('/valuation', ah((req, res) => res.json(ambilValuasi())));
 
-  const buffer = await tableExcel(
-    'Valuasi Stok',
-    [
-      { header: 'SKU', key: 'sku', width: 16 },
-      { header: 'Nama Produk', key: 'name', width: 32 },
-      { header: 'Kategori', key: 'category', width: 16 },
-      { header: 'Unit', key: 'unit', width: 8 },
-      { header: 'Pemasok', key: 'supplier_name', width: 22 },
-      { header: 'Stok', key: 'stock', width: 10 },
-      { header: 'HPP / Unit', key: 'cost', width: 14, money: true },
-      { header: 'Harga Jual', key: 'price', width: 14, money: true },
-      { header: 'Nilai Persediaan', key: 'stock_value', width: 18, money: true },
-    ],
-    rows.map((r) => ({ ...r, stock_value: r2(r.stock_value) })),
-    [['TOTAL NILAI PERSEDIAAN', r2(rows.reduce((s, r) => s + r.stock_value, 0))]]
-  );
+// ------------------------------------------------------------------
+// Unduhan — satu definisi kolom menghasilkan Excel dan PDF sekaligus
+// ------------------------------------------------------------------
 
-  res
-    .set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    .set('Content-Disposition', `attachment; filename="valuasi-stok-${todayLocal()}.xlsx"`)
-    .send(buffer);
-}));
+daftarkanEkspor(router, {
+  path: '/products',
+  judul: 'Master Produk',
+  kolom: [
+    { header: 'SKU', key: 'sku', width: 16 },
+    { header: 'Nama Produk', key: 'name', width: 34 },
+    { header: 'Kategori', key: 'category', width: 16 },
+    { header: 'Satuan', key: 'unit', width: 9 },
+    { header: 'Pemasok', key: 'supplier_name', width: 22 },
+    { header: 'Stok', key: 'stock', width: 9 },
+    { header: 'Stok Minimum', key: 'min_stock', width: 12 },
+    { header: 'HPP / Satuan', key: 'cost', width: 14, money: true },
+    { header: 'Harga Jual', key: 'price', width: 14, money: true },
+    { header: 'Nilai Persediaan', key: 'stock_value', width: 16, money: true },
+  ],
+  ambil: (req) => {
+    const d = ambilProduk(req);
+    return {
+      rows: d.products,
+      subtitle: req.query.q ? `Pencarian: ${req.query.q}` : 'Seluruh produk aktif',
+      meta: [
+        ['Jumlah produk', d.products.length],
+        ['Total nilai persediaan', d.totalValue],
+      ],
+    };
+  },
+});
+
+daftarkanEkspor(router, {
+  path: '/moves',
+  judul: 'Mutasi Stok',
+  kolom: [
+    { header: 'Tanggal', key: 'move_date', width: 12 },
+    { header: 'Jenis', key: 'move_type', width: 8 },
+    { header: 'SKU', key: 'sku', width: 15 },
+    { header: 'Produk', key: 'product_name', width: 32 },
+    { header: 'Satuan', key: 'unit', width: 9 },
+    { header: 'Jumlah', key: 'qty', width: 10 },
+    { header: 'HPP / Satuan', key: 'unit_cost', width: 14, money: true },
+    { header: 'Nilai', key: 'value', width: 15, money: true },
+    { header: 'Saldo Sesudah', key: 'balance_after', width: 12 },
+    { header: 'Referensi', key: 'ref', width: 18 },
+    { header: 'Dicatat Oleh', key: 'user_name', width: 18 },
+  ],
+  ambil: (req) => {
+    const d = ambilMutasi(req);
+    return {
+      rows: d.rows,
+      subtitle: `Periode ${d.from} s/d ${d.to}`,
+      meta: [
+        ['Unit masuk', d.summary.inQty],
+        ['Unit keluar', d.summary.outQty],
+        ['Nilai barang masuk', d.summary.inValue],
+        ['Nilai barang keluar', d.summary.outValue],
+      ],
+    };
+  },
+});
+
+daftarkanEkspor(router, {
+  path: '/valuation',
+  judul: 'Valuasi Stok',
+  kolom: [
+    { header: 'SKU', key: 'sku', width: 16 },
+    { header: 'Nama Produk', key: 'name', width: 34 },
+    { header: 'Kategori', key: 'category', width: 16 },
+    { header: 'Satuan', key: 'unit', width: 9 },
+    { header: 'Pemasok', key: 'supplier_name', width: 22 },
+    { header: 'Stok', key: 'stock', width: 9 },
+    { header: 'HPP / Satuan', key: 'cost', width: 14, money: true },
+    { header: 'Harga Jual', key: 'price', width: 14, money: true },
+    { header: 'Nilai Persediaan', key: 'stock_value', width: 16, money: true },
+    { header: 'Potensi Pendapatan', key: 'potential_revenue', width: 18, money: true },
+  ],
+  ambil: () => {
+    const d = ambilValuasi();
+    return {
+      rows: d.rows,
+      subtitle: `Posisi ${new Date().toLocaleDateString('id-ID')}`,
+      meta: [
+        ['Jumlah SKU', d.totalSku],
+        ['Total unit', d.totalQty],
+        ['Total nilai persediaan', d.totalValue],
+        ['Potensi pendapatan', d.potentialRevenue],
+      ],
+    };
+  },
+});
+
+daftarkanEkspor(router, {
+  path: '/opname',
+  judul: 'Riwayat Stok Opname',
+  kolom: [
+    { header: 'Nomor', key: 'opname_no', width: 20 },
+    { header: 'Tanggal', key: 'opname_date', width: 12 },
+    { header: 'Status', key: 'status', width: 12 },
+    { header: 'Jumlah Produk', key: 'line_count', width: 13 },
+    { header: 'Nilai Selisih', key: 'total_diff_value', width: 16, money: true },
+    { header: 'Catatan', key: 'note', width: 40 },
+    { header: 'Dicatat Oleh', key: 'user_name', width: 18 },
+  ],
+  ambil: () => {
+    const rows = ambilOpname();
+    return {
+      rows,
+      subtitle: 'Seluruh riwayat penyesuaian stok',
+      meta: [
+        ['Jumlah opname', rows.length],
+        ['Total nilai selisih', r2(rows.reduce((s, r) => s + (r.total_diff_value || 0), 0))],
+      ],
+    };
+  },
+});
+
 
 // ==================================================================
 // STOK OPNAME
@@ -441,8 +541,9 @@ router.post('/opname', requireRole('admin', 'manager'), ah((req, res) => {
   res.status(201).json({ ok: true, ...createOpname(body, req.user.id) });
 }));
 
-router.get('/opname', ah((req, res) => {
-  const rows = db
+/** Pengambil riwayat opname — dipakai layar dan berkas unduhan. */
+function ambilOpname() {
+  return db
     .prepare(
       `SELECT o.*, u.name AS user_name,
               (SELECT COUNT(*) FROM stock_opname_lines l WHERE l.opname_id = o.id) AS line_count
@@ -450,8 +551,9 @@ router.get('/opname', ah((req, res) => {
         ORDER BY o.opname_date DESC, o.id DESC LIMIT 200`
     )
     .all();
-  res.json({ rows });
-}));
+}
+
+router.get('/opname', ah((req, res) => res.json({ rows: ambilOpname() })));
 
 router.get('/opname/:id', ah((req, res) => {
   const header = db.prepare('SELECT * FROM stock_opnames WHERE id = ?').get(req.params.id);

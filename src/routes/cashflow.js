@@ -1,4 +1,5 @@
 'use strict';
+const { daftarkanEkspor } = require('../utils/ekspor');
 /**
  * Kas Masuk / Kas Keluar dan Utang / Piutang.
  *
@@ -95,7 +96,8 @@ router.post('/entries', requireRole('admin', 'manager', 'staff'), ah((req, res) 
 }));
 
 /** GET /api/cashflow/entries — riwayat kas masuk & keluar. */
-router.get('/entries', ah((req, res) => {
+/** Pengambil daftar kas masuk & keluar — dipakai layar dan berkas unduhan. */
+function ambilKas(req) {
   const { from, to } = dateRange(req.query);
 
   const rows = db
@@ -117,15 +119,43 @@ router.get('/entries', ah((req, res) => {
     )
     .all(from, to);
 
-  res.json({
+  return {
     from, to, rows,
     summary: {
       masuk: r2(rows.reduce((s, r) => s + r.masuk, 0)),
       keluar: r2(rows.reduce((s, r) => s + r.keluar, 0)),
       net: r2(rows.reduce((s, r) => s + r.masuk - r.keluar, 0)),
     },
-  });
-}));
+  };
+}
+
+router.get('/entries', ah((req, res) => res.json(ambilKas(req))));
+
+daftarkanEkspor(router, {
+  path: '/entries',
+  judul: 'Kas Masuk & Keluar',
+  kolom: [
+    { header: 'Tanggal', key: 'entry_date', width: 12 },
+    { header: 'Nomor', key: 'entry_no', width: 18 },
+    { header: 'Keterangan', key: 'description', width: 40 },
+    { header: 'Kategori', key: 'kategori', width: 26 },
+    { header: 'Masuk', key: 'masuk', width: 16, money: true },
+    { header: 'Keluar', key: 'keluar', width: 16, money: true },
+    { header: 'Dicatat Oleh', key: 'user_name', width: 18 },
+  ],
+  ambil: (req) => {
+    const d = ambilKas(req);
+    return {
+      rows: d.rows,
+      subtitle: `Periode ${d.from} s/d ${d.to}`,
+      meta: [
+        ['Total kas masuk', d.summary.masuk],
+        ['Total kas keluar', d.summary.keluar],
+        ['Selisih bersih', d.summary.net],
+      ],
+    };
+  },
+});
 
 router.delete('/entries/:id', requireRole('admin', 'manager'), ah((req, res) => {
   const journal = db.prepare("SELECT * FROM journals WHERE id = ? AND source = 'CASH'").get(req.params.id);
@@ -158,7 +188,8 @@ function accountWithBalance(partnerId, subtype) {
 }
 
 /** GET /api/cashflow/ar-ap — daftar piutang & utang per mitra. */
-router.get('/ar-ap', ah((req, res) => {
+/** Pengambil saldo utang & piutang per mitra — dipakai layar dan unduhan. */
+function ambilUtangPiutang() {
   const rows = db
     .prepare(
       `SELECT p.id, p.name, p.code, p.kind, p.phone, p.term_days,
@@ -178,13 +209,42 @@ router.get('/ar-ap', ah((req, res) => {
   const piutang = rows.filter((r) => r.piutang > 0.004);
   const utang = rows.filter((r) => r.utang > 0.004);
 
-  res.json({
+  return {
     piutang,
     utang,
     totalPiutang: r2(piutang.reduce((s, r) => s + r.piutang, 0)),
     totalUtang: r2(utang.reduce((s, r) => s + r.utang, 0)),
-  });
-}));
+  };
+}
+
+router.get('/ar-ap', ah((req, res) => res.json(ambilUtangPiutang())));
+
+daftarkanEkspor(router, {
+  path: '/ar-ap',
+  judul: 'Utang & Piutang',
+  kolom: [
+    { header: 'Kode', key: 'code', width: 14 },
+    { header: 'Mitra', key: 'name', width: 30 },
+    { header: 'Jenis', key: 'kind', width: 12 },
+    { header: 'Telepon', key: 'phone', width: 18 },
+    { header: 'Tempo (hari)', key: 'term_days', width: 12 },
+    { header: 'Piutang', key: 'piutang', width: 16, money: true },
+    { header: 'Utang', key: 'utang', width: 16, money: true },
+    { header: 'Transaksi Terakhir', key: 'transaksi_terakhir', width: 16 },
+  ],
+  ambil: () => {
+    const d = ambilUtangPiutang();
+    // Satu mitra bisa punya utang sekaligus piutang, jadi digabung agar tidak
+    // muncul dua kali dengan angka yang saling melengkapi.
+    const gabung = new Map();
+    for (const r of [...d.piutang, ...d.utang]) gabung.set(r.id, { ...gabung.get(r.id), ...r });
+    return {
+      rows: [...gabung.values()].sort((a, b) => (b.piutang + b.utang) - (a.piutang + a.utang)),
+      subtitle: 'Saldo berjalan menurut buku besar',
+      meta: [['Total piutang', d.totalPiutang], ['Total utang', d.totalUtang]],
+    };
+  },
+});
 
 const settlementSchema = z.object({
   entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),

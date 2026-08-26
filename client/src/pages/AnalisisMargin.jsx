@@ -5,7 +5,7 @@ import {
   LineChart, Line, Legend,
 } from 'recharts';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast } from '../components/ui';
+import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, TombolEkspor } from '../components/ui';
 import { rupiah, rupiahShort, num, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 
 const FEE_KEYS = [
@@ -52,7 +52,9 @@ export default function AnalisisMargin() {
 
   return (
     <div>
-      <PageHeader title="Analisis Margin" subtitle="Profitabilitas per channel penjualan dan per produk" />
+      <PageHeader title="Analisis Margin" subtitle="Profitabilitas per channel penjualan dan per produk">
+        <TombolEkspor path="/api/sales/analytics" params={range} nama="analisis-margin" />
+      </PageHeader>
       <DateRangeFilter range={range} onChange={setRange} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
