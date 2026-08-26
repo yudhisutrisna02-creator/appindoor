@@ -5,7 +5,10 @@ import { PageHeader, Spinner, EmptyState, Modal, useToast, Field } from '../comp
 import { rupiah, num, pct } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
-const EMPTY = { sku: '', name: '', category: 'Umum', unit: 'PCS', cost: 0, price: 0, min_stock: 0, active: true };
+const EMPTY = {
+  sku: '', name: '', category: 'Umum', unit: 'PCS',
+  cost: 0, price: 0, min_stock: 0, supplier_id: null, active: true,
+};
 
 export default function Produk() {
   const toast = useToast();
@@ -14,19 +17,25 @@ export default function Produk() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [suppliers, setSuppliers] = useState([]);
   const [editing, setEditing] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.get('/api/inventory/products', { q, category }));
+      setData(await api.get('/api/inventory/products', { q, category, supplier_id: supplierId }));
     } catch (err) {
       toast.error(err.message);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, category]);
+  }, [q, category, supplierId]);
+
+  useEffect(() => {
+    api.get('/api/partners', { kind: 'SUPPLIER' }).then((d) => setSuppliers(d.partners)).catch(() => {});
+  }, []);
 
   // Pencarian ditunda sesaat agar tidak memanggil API pada setiap ketikan.
   useEffect(() => {
@@ -41,6 +50,7 @@ export default function Produk() {
       cost: Number(editing.cost),
       price: Number(editing.price),
       min_stock: Number(editing.min_stock),
+      supplier_id: editing.supplier_id ? Number(editing.supplier_id) : null,
     };
     try {
       if (editing.id) {
@@ -86,9 +96,13 @@ export default function Produk() {
             value={q} onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        <select className="input sm:w-56" value={category} onChange={(e) => setCategory(e.target.value)}>
+        <select className="input sm:w-52" value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="">Semua Kategori</option>
           {data?.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="input sm:w-52" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+          <option value="">Semua Pemasok</option>
+          {suppliers.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
         </select>
       </div>
 
@@ -108,7 +122,7 @@ export default function Produk() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Produk</th><th>Kategori</th><th>Stok</th>
+                    <th>Produk</th><th>Pemasok</th><th>Stok</th>
                     <th>HPP</th><th>Harga Jual</th><th>Margin</th><th>Nilai</th>
                     {canManage && <th>Aksi</th>}
                   </tr>
@@ -125,7 +139,11 @@ export default function Produk() {
                           {!p.active && <span className="badge-slate ml-2">nonaktif</span>}
                         </p>
                       </td>
-                      <td className="text-xs text-slate-500">{p.category}</td>
+                      <td className="text-xs">
+                        {p.supplier_name
+                          ? <span className="text-slate-600">{p.supplier_name}</span>
+                          : <span className="text-slate-400">belum diisi</span>}
+                      </td>
                       <td className="tabular">
                         <span
                           className={
@@ -188,6 +206,17 @@ export default function Produk() {
             <Field label="Nama Produk *" className="sm:col-span-2">
               <input className="input" required value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </Field>
+            <Field label="Pemasok" hint="Supplier utama barang ini" className="sm:col-span-2">
+              <select
+                className="input"
+                value={editing.supplier_id || ''}
+                onChange={(e) => setEditing({ ...editing, supplier_id: e.target.value || null })}
+              >
+                <option value="">— belum ditentukan —</option>
+                {suppliers.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+              </select>
+            </Field>
+
             <Field label="Unit">
               <input className="input" value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })} placeholder="PCS / BOX / KG" />
             </Field>

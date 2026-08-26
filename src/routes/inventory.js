@@ -22,6 +22,7 @@ const productSchema = z.object({
   cost: z.number().nonnegative().default(0),
   price: z.number().nonnegative().default(0),
   min_stock: z.number().nonnegative().default(0),
+  supplier_id: z.number().int().positive().optional().nullable(),
   active: z.boolean().default(true),
 });
 
@@ -32,13 +33,16 @@ router.get('/products', ah((req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT * FROM products
-        WHERE (sku LIKE ? OR name LIKE ?)
-          ${category ? 'AND category = ?' : ''}
-          ${req.query.includeInactive === '1' ? '' : 'AND active = 1'}
-        ORDER BY name`
+      `SELECT p.*, s.name AS supplier_name
+         FROM products p
+         LEFT JOIN partners s ON s.id = p.supplier_id
+        WHERE (p.sku LIKE ? OR p.name LIKE ?)
+          ${category ? 'AND p.category = ?' : ''}
+          ${req.query.supplier_id ? 'AND p.supplier_id = ?' : ''}
+          ${req.query.includeInactive === '1' ? '' : 'AND p.active = 1'}
+        ORDER BY p.name`
     )
-    .all(...[search, search, category].filter((x) => x !== undefined));
+    .all(...[search, search, category, req.query.supplier_id].filter((x) => x !== undefined));
 
   const products = rows.map((p) => ({
     ...p,
@@ -65,10 +69,11 @@ router.post('/products', requireRole('admin', 'manager'), ah((req, res) => {
 
   const info = db
     .prepare(
-      `INSERT INTO products (sku, name, category, unit, cost, price, min_stock, active)
-       VALUES (?,?,?,?,?,?,?,?)`
+      `INSERT INTO products (sku, name, category, unit, cost, price, min_stock, supplier_id, active)
+       VALUES (?,?,?,?,?,?,?,?,?)`
     )
-    .run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock, p.active ? 1 : 0);
+    .run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock,
+      p.supplier_id || null, p.active ? 1 : 0);
 
   res.status(201).json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid) });
 }));
@@ -82,9 +87,11 @@ router.put('/products/:id', requireRole('admin', 'manager'), ah((req, res) => {
   if (dupe) throw httpError(409, `SKU ${p.sku} sudah dipakai produk lain`);
 
   db.prepare(
-    `UPDATE products SET sku=?, name=?, category=?, unit=?, cost=?, price=?, min_stock=?, active=?
+    `UPDATE products SET sku=?, name=?, category=?, unit=?, cost=?, price=?, min_stock=?,
+            supplier_id=?, active=?
       WHERE id=?`
-  ).run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock, p.active ? 1 : 0, existing.id);
+  ).run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock,
+    p.supplier_id || null, p.active ? 1 : 0, existing.id);
 
   res.json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id) });
 }));

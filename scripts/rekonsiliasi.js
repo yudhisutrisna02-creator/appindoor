@@ -101,7 +101,7 @@ async function bacaExcel() {
   const katalog = new Map();
   const ganda = [];
 
-  const tambah = (sku, nama, satuan, hpp, jual, stok) => {
+  const tambah = (sku, nama, satuan, hpp, jual, stok, pemasok) => {
     if (!sku || !nama) return;
     if (katalog.has(sku)) { ganda.push(`${sku} — ${nama}`); return; }
     katalog.set(sku, {
@@ -111,6 +111,8 @@ async function bacaExcel() {
       cost: hpp,
       price: jual,
       stock: stok,
+      // Kolom WILAYAH pada DAFTAR BARANG berisi nama pemasok
+      supplier: (pemasok || '').trim(),
     });
   };
 
@@ -123,7 +125,8 @@ async function bacaExcel() {
       b['SATUAN'],
       angka(b['HARGA BELI']) || angka(h && h['HARGA BELI']),
       angka(h && h['HARGA JUAL']),
-      angka(b['STOK AKHIR'])
+      angka(b['STOK AKHIR']),
+      b['WILAYAH']
     );
   }
 
@@ -131,7 +134,7 @@ async function bacaExcel() {
   for (const h of harga) {
     const sku = (h['BARCODE'] || '').toUpperCase();
     if (katalog.has(sku)) continue;
-    tambah(sku, h['NAMA BARANG'] || '', h['SATUAN'], angka(h['HARGA BELI']), angka(h['HARGA JUAL']), 0);
+    tambah(sku, h['NAMA BARANG'] || '', h['SATUAN'], angka(h['HARGA BELI']), angka(h['HARGA JUAL']), 0, '');
   }
 
   return { katalog, ganda };
@@ -177,6 +180,34 @@ async function main() {
     if (!katalog.has(sku) && p.active) hilangDariExcel.push(p);
   }
 
+  // --- Pemasok ---
+  const mitraRes = await call('GET', '/api/partners?includeInactive=1');
+  const mitraAda = new Map(mitraRes.partners.map((m) => [m.name.trim().toUpperCase(), m]));
+
+  const pemasokExcel = new Map();
+  for (const x of katalog.values()) {
+    if (!x.supplier) continue;
+    const kunci = x.supplier.toUpperCase();
+    if (!pemasokExcel.has(kunci)) pemasokExcel.set(kunci, { nama: x.supplier, produk: [] });
+    pemasokExcel.get(kunci).produk.push(x.sku);
+  }
+  const pemasokBaru = [...pemasokExcel.values()].filter((s2) => !mitraAda.has(s2.nama.toUpperCase()));
+  const tanpaPemasok = [...katalog.values()].filter((x) => !x.supplier).length;
+
+  // Produk yang sudah ada tapi belum tertaut ke pemasoknya.
+  // Dibandingkan lewat NAMA, bukan id — saat pengecekan ini berjalan,
+  // pemasoknya mungkin memang belum dibuat sehingga id-nya masih null.
+  const perluTaut = [];
+  for (const [sku, x] of katalog) {
+    if (!x.supplier) continue;
+    const prod = ada.get(sku);
+    if (!prod) continue;                       // produk baru ditangani terpisah
+    const terpasang = (prod.supplier_name || '').trim().toUpperCase();
+    if (terpasang !== x.supplier.toUpperCase()) {
+      perluTaut.push({ produk: prod, namaPemasok: x.supplier });
+    }
+  }
+
   const nilaiSelisih = bedaStok.reduce((s, x) => s + x.selisih * (x.cost || x.hppAplikasi), 0);
 
   console.log('─'.repeat(64));
@@ -194,6 +225,16 @@ async function main() {
     console.log(`  Barcode ganda di Excel (dilewati): ${ganda.length}`);
     ganda.slice(0, 5).forEach((g) => console.log(`      ${g}`));
   }
+
+  console.log('');
+  console.log(`  Pemasok di Excel (WILAYAH)    : ${pemasokExcel.size}`);
+  console.log(`  Pemasok belum ada di aplikasi : ${pemasokBaru.length}`);
+  [...pemasokExcel.values()].forEach((s2) => {
+    const sudah = mitraAda.has(s2.nama.toUpperCase()) ? 'sudah ada' : 'akan dibuat';
+    console.log(`      ${s2.nama.padEnd(20)} ${String(s2.produk.length).padStart(3)} produk   (${sudah})`);
+  });
+  console.log(`  Produk tanpa pemasok          : ${tanpaPemasok}`);
+  console.log(`  Produk perlu ditautkan        : ${perluTaut.length}`);
 
   if (bedaStok.length) {
     console.log('');
@@ -230,6 +271,47 @@ async function main() {
 
   const hariIni = new Date().toLocaleDateString('sv-SE');
 
+  // 0) Pemasok dibuat lebih dulu supaya produk bisa langsung ditautkan
+  let pemasokDibuat = 0;
+  for (const s2 of pemasokBaru) {
+    try {
+      const res = await call('POST', '/api/partners', {
+        name: s2.nama, kind: 'SUPPLIER', term_days: 0,
+        note: 'Diambil dari kolom WILAYAH pada REPORT INVENTORY',
+      });
+      mitraAda.set(s2.nama.toUpperCase(), res.partner);
+      pemasokDibuat += 1;
+    } catch (err) {
+      console.log(`  GAGAL buat pemasok ${s2.nama}: ${err.message}`);
+    }
+  }
+  console.log(`  Pemasok dibuat                : ${pemasokDibuat}`);
+
+  const idPemasok = (nama) => {
+    if (!nama) return null;
+    const m2 = mitraAda.get(nama.trim().toUpperCase());
+    return m2 ? m2.id : null;
+  };
+
+  // 0b) Menautkan produk lama ke pemasoknya
+  let ditautkan = 0;
+  for (const t of perluTaut) {
+    const prod = t.produk;
+    const sid = idPemasok(t.namaPemasok);
+    if (!sid) continue;
+    try {
+      await call('PUT', `/api/inventory/products/${prod.id}`, {
+        sku: prod.sku, name: prod.name, category: prod.category, unit: prod.unit,
+        cost: prod.cost, price: prod.price, min_stock: prod.min_stock,
+        supplier_id: sid, active: !!prod.active,
+      });
+      ditautkan += 1;
+    } catch (err) {
+      console.log(`  GAGAL tautkan ${prod.sku}: ${err.message}`);
+    }
+  }
+  console.log(`  Produk ditautkan ke pemasok   : ${ditautkan}`);
+
   // 1) Produk baru — dibuat tanpa stok dulu
   let dibuat = 0;
   const idBaru = new Map();
@@ -238,6 +320,7 @@ async function main() {
       const res = await call('POST', '/api/inventory/products', {
         sku: x.sku, name: x.name, category: 'Produk Organik',
         unit: x.unit || 'PCS', cost: x.cost, price: x.price, min_stock: 0,
+        supplier_id: idPemasok(x.supplier),
       });
       idBaru.set(x.sku, res.product.id);
       dibuat += 1;
@@ -332,6 +415,17 @@ async function main() {
   console.log(`  Belum cocok                   : ${belumCocok.length}`);
   belumCocok.slice(0, 10).forEach((b) => console.log(`      ${b}`));
   console.log(`  SKU duplikat di aplikasi      : ${duplikat}${duplikat ? '  <-- MASALAH' : ''}`);
+
+  let pemasokCocok = 0;
+  const pemasokBelum = [];
+  for (const [sku, x] of katalog) {
+    if (!x.supplier) continue;
+    const prod = akhir.get(sku);
+    if (prod && (prod.supplier_name || '').trim().toUpperCase() === x.supplier.toUpperCase()) pemasokCocok += 1;
+    else pemasokBelum.push(`${sku} — seharusnya ${x.supplier}`);
+  }
+  console.log(`  Pemasok sudah tertaut         : ${pemasokCocok} dari ${katalog.size - tanpaPemasok}`);
+  pemasokBelum.slice(0, 5).forEach((x) => console.log(`      ${x}`));
 
   const valuasi = await call('GET', '/api/inventory/valuation');
   const neraca = await call('GET', '/api/finance/reports/balance-sheet');

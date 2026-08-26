@@ -56,6 +56,11 @@ function runMigrations(db) {
   // sehingga tidak ada sumber kebenaran kedua yang bisa berbeda.
   addColumn(db, 'journal_lines', 'partner_id', 'INTEGER REFERENCES partners(id)', applied);
 
+  // --- Pemasok utama tiap produk ---
+  // Dipakai menjawab "barang ini biasanya dibeli dari siapa", terpisah dari
+  // partner_id pada stock_moves yang mencatat pembelian per transaksi.
+  addColumn(db, 'products', 'supplier_id', 'INTEGER REFERENCES partners(id)', applied);
+
   // --- Jatuh tempo ---
   addColumn(db, 'sales_orders', 'due_date', 'TEXT', applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
@@ -64,6 +69,7 @@ function runMigrations(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_jl_partner ON journal_lines(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_partner ON sales_orders(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_mv_partner ON stock_moves(partner_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_prod_supplier ON products(supplier_id)');
 
   return applied;
 }
