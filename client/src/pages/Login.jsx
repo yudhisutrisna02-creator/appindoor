@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { NAMA_APP, MODUL_APP } from '../lib/brand';
 import { LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useToast } from '../components/ui';
@@ -31,10 +32,8 @@ export default function Login() {
           <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-brand-600 text-2xl font-bold text-white shadow-lg">
             E
           </div>
-          <h1 className="text-2xl font-bold text-white">ERP Kebumen</h1>
-          <p className="mt-1 text-sm text-slate-300">
-            Presensi • Keuangan • Gudang • Penjualan
-          </p>
+          <h1 className="text-2xl font-bold text-white">{NAMA_APP}</h1>
+          <p className="mt-1 text-sm text-slate-300">{MODUL_APP}</p>
         </div>
 
         <form onSubmit={onSubmit} className="rounded-2xl bg-white p-6 shadow-2xl">

@@ -42,7 +42,7 @@ function autoBorder(sheet) {
 // ------------------------------------------------------------------
 async function attendanceExcel(rows, { from, to }) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'ERP Kebumen';
+  wb.creator = 'ERP System Indoor';
   const ws = wb.addWorksheet('Rekap Absensi', {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
@@ -188,7 +188,7 @@ async function attendancePdf(rows, { from, to, company }) {
  */
 async function tableExcel(sheetName, columns, rows, meta = []) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'ERP Kebumen';
+  wb.creator = 'ERP System Indoor';
   const ws = wb.addWorksheet(sheetName.slice(0, 30), { views: [{ state: 'frozen', ySplit: 1 }] });
 
   ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width || 16 }));

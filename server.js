@@ -183,7 +183,7 @@ app.use((err, req, res, next) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`ERP Kebumen berjalan di port ${PORT} (${process.env.NODE_ENV || 'development'})`);
+  console.log(`ERP System Indoor berjalan di port ${PORT} (${process.env.NODE_ENV || 'development'})`);
   console.log(`Frontend: ${hasBuild ? 'tersedia' : 'BELUM di-build — jalankan npm run build'}`);
 });
 

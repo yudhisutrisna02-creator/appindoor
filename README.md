@@ -1,4 +1,4 @@
-# ERP Kebumen
+# ERP System Indoor
 
 Aplikasi web full-stack untuk UMKM dagang multi-channel. Empat modul terintegrasi
 dalam satu basis data, sehingga presensi, stok, penjualan, dan pembukuan selalu
@@ -117,7 +117,7 @@ SMOKE_BASE_URL=http://localhost:3100 npm run smoke
 ```bash
 git init
 git add .
-git commit -m "ERP Kebumen: rilis awal"
+git commit -m "ERP System Indoor: rilis awal"
 git branch -M main
 git remote add origin https://github.com/USERNAME/NAMA-REPO.git
 git push -u origin main

@@ -3,10 +3,11 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
-  Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store,
+  Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
+import { NAMA_APP, NAMA_PERUSAHAAN } from './lib/brand';
 import { Spinner } from './components/ui';
 
 import Login from './pages/Login';
@@ -30,9 +31,16 @@ import Retur from './pages/Retur';
 import Toko from './pages/Toko';
 
 const NAV = [
-  { section: 'Ringkasan', items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }] },
+  {
+    section: 'Ringkasan',
+    key: 'ringkasan',
+    // Satu-satunya pintasan ke halaman depan — tidak perlu dilipat.
+    collapsible: false,
+    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }],
+  },
   {
     section: 'Presensi',
+    key: 'presensi',
     items: [
       { to: '/presensi', label: 'Absen Sekarang', icon: Fingerprint },
       { to: '/presensi/rekap', label: 'Rekap Absensi', icon: CalendarClock },
@@ -40,6 +48,7 @@ const NAV = [
   },
   {
     section: 'Gudang',
+    key: 'gudang',
     items: [
       { to: '/gudang/valuasi', label: 'Valuasi Stok', icon: Warehouse },
       { to: '/gudang/produk', label: 'Master Produk', icon: Package },
@@ -49,6 +58,7 @@ const NAV = [
   },
   {
     section: 'Penjualan',
+    key: 'penjualan',
     items: [
       { to: '/penjualan', label: 'Order Penjualan', icon: ShoppingCart },
       { to: '/penjualan/analisis', label: 'Analisis Margin', icon: TrendingUp },
@@ -58,6 +68,7 @@ const NAV = [
   },
   {
     section: 'Keuangan',
+    key: 'keuangan',
     items: [
       { to: '/keuangan/kas', label: 'Kas Masuk & Keluar', icon: Wallet },
       { to: '/keuangan/utang-piutang', label: 'Utang & Piutang', icon: HandCoins },
@@ -68,48 +79,115 @@ const NAV = [
   },
   {
     section: 'Mitra',
+    key: 'mitra',
     items: [{ to: '/mitra', label: 'Supplier & Pelanggan', icon: Contact }],
   },
-  { section: 'Sistem', items: [{ to: '/pengaturan', label: 'Pengaturan', icon: Settings }] },
+  {
+    section: 'Sistem',
+    key: 'sistem',
+    items: [{ to: '/pengaturan', label: 'Pengaturan', icon: Settings }],
+  },
 ];
+
+const KUNCI_LIPATAN = 'erp-menu-terlipat';
+
+/** Grup mana yang sedang terlipat — disimpan agar pilihan bertahan antar sesi. */
+function bacaLipatan() {
+  try {
+    const isi = JSON.parse(localStorage.getItem(KUNCI_LIPATAN));
+    return Array.isArray(isi) ? isi : [];
+  } catch {
+    return [];
+  }
+}
+
+function simpanLipatan(daftar) {
+  try {
+    localStorage.setItem(KUNCI_LIPATAN, JSON.stringify(daftar));
+  } catch {
+    /* mode privat menolak penyimpanan — cukup abaikan, tampilan tetap jalan */
+  }
+}
+
+/** Apakah salah satu menu di grup ini sedang dibuka? */
+function grupSedangAktif(group, pathname) {
+  return group.items.some((i) => (i.end ? pathname === i.to : pathname.startsWith(i.to)));
+}
 
 function Sidebar({ onNavigate }) {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const [terlipat, setTerlipat] = useState(bacaLipatan);
+
+  function toggle(key) {
+    setTerlipat((lama) => {
+      const baru = lama.includes(key) ? lama.filter((k) => k !== key) : [...lama, key];
+      simpanLipatan(baru);
+      return baru;
+    });
+  }
 
   return (
     <div className="flex h-full flex-col bg-slate-900 text-slate-300">
       <div className="flex items-center gap-2.5 px-5 py-5">
         <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 font-bold text-white">E</div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-white">ERP Kebumen</p>
-          <p className="truncate text-[11px] text-slate-400">Terpadu 4 Modul</p>
+          <p className="truncate text-sm font-bold text-white">{NAMA_APP}</p>
+          <p className="truncate text-[11px] text-slate-400">{NAMA_PERUSAHAAN}</p>
         </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4">
-        {NAV.map((group) => (
-          <div key={group.section} className="mb-4">
-            <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              {group.section}
-            </p>
-            {group.items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                onClick={onNavigate}
-                className={({ isActive }) =>
-                  `mb-0.5 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
-                    isActive ? 'bg-brand-600 text-white shadow-sm' : 'hover:bg-slate-800 hover:text-white'
-                  }`
-                }
-              >
-                <item.icon size={17} className="shrink-0" />
-                <span className="truncate">{item.label}</span>
-              </NavLink>
-            ))}
-          </div>
-        ))}
+        {NAV.map((group) => {
+          const bisaDilipat = group.collapsible !== false;
+          const tertutup = bisaDilipat && terlipat.includes(group.key);
+          const adaYangAktif = grupSedangAktif(group, location.pathname);
+
+          return (
+            <div key={group.key} className="mb-4">
+              {bisaDilipat ? (
+                <button
+                  type="button"
+                  onClick={() => toggle(group.key)}
+                  aria-expanded={!tertutup}
+                  className="mb-1.5 flex w-full items-center gap-1.5 rounded-lg px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition hover:bg-slate-800/70 hover:text-slate-300"
+                >
+                  <ChevronDown
+                    size={13}
+                    className={`shrink-0 transition-transform duration-200 ${tertutup ? '-rotate-90' : ''}`}
+                  />
+                  <span className={`truncate ${tertutup && adaYangAktif ? 'text-brand-400' : 'text-slate-500'}`}>
+                    {group.section}
+                  </span>
+                  {/* Saat dilipat, titik ini menandai grup tempat halaman aktif berada. */}
+                  {tertutup && adaYangAktif && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />}
+                </button>
+              ) : (
+                <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  {group.section}
+                </p>
+              )}
+
+              {!tertutup &&
+                group.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    onClick={onNavigate}
+                    className={({ isActive }) =>
+                      `mb-0.5 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                        isActive ? 'bg-brand-600 text-white shadow-sm' : 'hover:bg-slate-800 hover:text-white'
+                      }`
+                    }
+                  >
+                    <item.icon size={17} className="shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </NavLink>
+                ))}
+            </div>
+          );
+        })}
       </nav>
 
       <div className="border-t border-slate-800 p-3">
@@ -136,7 +214,7 @@ function Layout({ children }) {
 
   const currentLabel =
     NAV.flatMap((g) => g.items).find((i) => (i.end ? location.pathname === i.to : location.pathname.startsWith(i.to)))
-      ?.label || 'ERP Kebumen';
+      ?.label || NAMA_APP;
 
   return (
     <div className="min-h-screen lg:flex">

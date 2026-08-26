@@ -1,4 +1,4 @@
-# Panduan Deploy ERP Kebumen ke Hostinger
+# Panduan Deploy ERP System Indoor ke Hostinger
 
 > **Status: SUDAH LIVE di https://erp.indonesiaorganik.id**
 > (paket Business, Web Apps Node.js, auto-deploy dari GitHub aktif)
