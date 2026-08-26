@@ -121,6 +121,8 @@ app.get('/api/health', (req, res) =>
     version: require('./package.json').version,
     env: process.env.NODE_ENV || 'development',
     time: new Date().toISOString(),
+    // Dipakai untuk memastikan runtime mengenali zona waktu operasional.
+    waktu: require('./src/utils/time').statusZona(),
   })
 );
 
