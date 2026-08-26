@@ -12,7 +12,10 @@ const { getSetting } = require('../db');
 
 /** Zona waktu operasional; dapat diubah lewat tabel settings. */
 function tz() {
-  return getSetting('timezone', process.env.TZ_NAME || 'Asia/Jakarta');
+  // Pengaturan yang pernah tersimpan kosong harus diperlakukan sebagai belum
+  // diisi — string kosong bukan nama zona yang sah dan akan ditolak Intl.
+  const tersimpan = (getSetting('timezone', '') || '').trim();
+  return tersimpan || (process.env.TZ_NAME || '').trim() || 'Asia/Jakarta';
 }
 
 /**

@@ -150,6 +150,17 @@ router.put('/settings', requireRole('admin'), ah((req, res) => {
     if (key === 'work_start' || key === 'work_end') {
       if (!/^\d{2}:\d{2}$/.test(String(value))) throw httpError(400, `${key} harus berformat HH:mm`);
     }
+    if (key === 'timezone') {
+      // Zona kosong pernah membuat halaman depan gagal total, jadi nilainya
+      // diuji dulu ke runtime sebelum disimpan.
+      const nama = String(value).trim();
+      if (!nama) throw httpError(400, 'Zona waktu tidak boleh kosong, mis. Asia/Jakarta');
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: nama }).format(new Date());
+      } catch {
+        throw httpError(400, `Zona waktu "${nama}" tidak dikenali, mis. Asia/Jakarta`);
+      }
+    }
     setSetting(key, value);
     applied[key] = String(value);
   }
