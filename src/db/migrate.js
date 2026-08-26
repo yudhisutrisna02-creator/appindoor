@@ -61,6 +61,24 @@ function runMigrations(db) {
   // partner_id pada stock_moves yang mencatat pembelian per transaksi.
   addColumn(db, 'products', 'supplier_id', 'INTEGER REFERENCES partners(id)', applied);
 
+  // --- Kolom pendukung penjualan marketplace ---
+  // Diambil dari sheet "3. Penjualan": tiap order marketplace membawa
+  // identitas pesanan, ekspedisi, status pencairan, dan data pembeli yang
+  // tidak muat pada struktur order sederhana.
+  addColumn(db, 'sales_orders', 'shop_id', 'INTEGER REFERENCES shops(id)', applied);
+  addColumn(db, 'sales_orders', 'order_ref', 'TEXT', applied);          // NO PESANAN
+  addColumn(db, 'sales_orders', 'courier', 'TEXT', applied);            // EKSPEDISI
+  addColumn(db, 'sales_orders', 'tracking_no', 'TEXT', applied);        // RESI / KODE BOOKING
+  addColumn(db, 'sales_orders', 'fulfillment_status', "TEXT NOT NULL DEFAULT 'DIPROSES'", applied);
+  addColumn(db, 'sales_orders', 'payout_date', 'TEXT', applied);        // TGL CAIR
+  addColumn(db, 'sales_orders', 'shipping_charged', 'REAL NOT NULL DEFAULT 0', applied);  // ONGKIR ditagih ke pembeli
+  addColumn(db, 'sales_orders', 'buyer_name', 'TEXT', applied);
+  addColumn(db, 'sales_orders', 'buyer_account', 'TEXT', applied);
+  addColumn(db, 'sales_orders', 'buyer_phone', 'TEXT', applied);
+  addColumn(db, 'sales_orders', 'buyer_address', 'TEXT', applied);
+  addColumn(db, 'sales_orders', 'buyer_city', 'TEXT', applied);         // ASAL KOTA
+  addColumn(db, 'sales_orders', 'lead_source', 'TEXT', applied);        // ASAL LEADS
+
   // --- Jatuh tempo ---
   addColumn(db, 'sales_orders', 'due_date', 'TEXT', applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
@@ -70,6 +88,9 @@ function runMigrations(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_partner ON sales_orders(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_mv_partner ON stock_moves(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_prod_supplier ON products(supplier_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_so_shop ON sales_orders(shop_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_so_fulfillment ON sales_orders(fulfillment_status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_so_payout ON sales_orders(payout_date)');
 
   return applied;
 }

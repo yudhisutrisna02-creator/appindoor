@@ -17,6 +17,19 @@ const emptyOrder = () => ({
   customer: '',
   partner_id: null,
   marketplace_ref: '',
+  shop_id: null,
+  order_ref: '',
+  courier: '',
+  tracking_no: '',
+  fulfillment_status: 'DIPROSES',
+  payout_date: '',
+  shipping_charged: 0,
+  buyer_name: '',
+  buyer_account: '',
+  buyer_phone: '',
+  buyer_address: '',
+  buyer_city: '',
+  lead_source: '',
   items: [{ product_id: '', qty: 1, price: '' }],
   discount: 0,
   admin_fee_pct: 0,
@@ -38,6 +51,7 @@ export default function Penjualan() {
   const [data, setData] = useState(null);
   const [products, setProducts] = useState([]);
   const [partners, setPartners] = useState([]);
+  const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -64,6 +78,7 @@ export default function Penjualan() {
 
   useEffect(() => {
     api.get('/api/partners', { kind: 'CUSTOMER' }).then((d) => setPartners(d.partners)).catch(() => {});
+    api.get('/api/shops').then((d) => setShops(d.shops)).catch(() => {});
   }, []);
 
   // ---------- Kalkulasi margin langsung di browser (cermin logika server) ----------
@@ -118,6 +133,19 @@ export default function Penjualan() {
         customer: form.customer || null,
         partner_id: form.partner_id || null,
         marketplace_ref: form.marketplace_ref || null,
+        shop_id: form.shop_id ? Number(form.shop_id) : null,
+        order_ref: form.order_ref || null,
+        courier: form.courier || null,
+        tracking_no: form.tracking_no || null,
+        fulfillment_status: form.fulfillment_status,
+        payout_date: form.payout_date || null,
+        shipping_charged: Number(form.shipping_charged) || 0,
+        buyer_name: form.buyer_name || null,
+        buyer_account: form.buyer_account || null,
+        buyer_phone: form.buyer_phone || null,
+        buyer_address: form.buyer_address || null,
+        buyer_city: form.buyer_city || null,
+        lead_source: form.lead_source || null,
         note: form.note || null,
         items: form.items
           .filter((i) => i.product_id && Number(i.qty) > 0)
@@ -377,6 +405,80 @@ export default function Penjualan() {
               </Field>
               <Field label="Biaya Lain (Rp)">
                 <input type="number" min="0" step="any" className="input" value={form.other_cost} onChange={(e) => setForm({ ...form, other_cost: e.target.value })} />
+              </Field>
+            </div>
+
+            {/* ---- Data pesanan marketplace ---- */}
+            <p className="label">Data Pesanan Marketplace</p>
+            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <Field label="Toko" hint="Akun toko tempat order masuk">
+                <select
+                  className="input" value={form.shop_id || ''}
+                  onChange={(e) => {
+                    const sh = shops.find((x) => x.id === Number(e.target.value));
+                    setForm({
+                      ...form,
+                      shop_id: e.target.value ? Number(e.target.value) : null,
+                      channel: sh ? sh.channel : form.channel,
+                      admin_fee_pct: sh ? (ADMIN_FEE_PRESET[sh.channel] ?? form.admin_fee_pct) : form.admin_fee_pct,
+                    });
+                  }}
+                >
+                  <option value="">— tidak dicatat —</option>
+                  {shops.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
+                </select>
+              </Field>
+              <Field label="No. Pesanan" hint="Nomor dari marketplace">
+                <input className="input" value={form.order_ref} onChange={(e) => setForm({ ...form, order_ref: e.target.value })} />
+              </Field>
+              <Field label="Status Pesanan">
+                <select className="input" value={form.fulfillment_status} onChange={(e) => setForm({ ...form, fulfillment_status: e.target.value })}>
+                  <option value="DIPROSES">Diproses</option>
+                  <option value="DIKIRIM">Dikirim</option>
+                  <option value="SELESAI">Selesai</option>
+                  <option value="CAIR">Cair</option>
+                  <option value="RETUR">Retur</option>
+                  <option value="BATAL">Batal</option>
+                </select>
+              </Field>
+
+              <Field label="Ekspedisi">
+                <input className="input" list="ekspedisi-list" value={form.courier} onChange={(e) => setForm({ ...form, courier: e.target.value })} />
+                <datalist id="ekspedisi-list">
+                  {['SPXpress', 'SPXpress COD', 'JNT', 'JNT COD', 'JNT CARGO', 'JNE', 'AnterAja', 'AnterAja COD', 'POS Indonesia', 'CASH'].map((x) => <option key={x} value={x} />)}
+                </datalist>
+              </Field>
+              <Field label="Resi / Kode Booking">
+                <input className="input" value={form.tracking_no} onChange={(e) => setForm({ ...form, tracking_no: e.target.value })} />
+              </Field>
+              <Field label="Tanggal Cair" hint="Kosongkan bila belum cair">
+                <input type="date" className="input" value={form.payout_date} onChange={(e) => setForm({ ...form, payout_date: e.target.value })} />
+              </Field>
+            </div>
+
+            {/* ---- Data pembeli ---- */}
+            <p className="label">Data Pembeli</p>
+            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <Field label="Nama Pembeli">
+                <input className="input" value={form.buyer_name} onChange={(e) => setForm({ ...form, buyer_name: e.target.value })} />
+              </Field>
+              <Field label="Akun Pembeli" hint="Username di marketplace">
+                <input className="input" value={form.buyer_account} onChange={(e) => setForm({ ...form, buyer_account: e.target.value })} />
+              </Field>
+              <Field label="No. HP">
+                <input className="input" value={form.buyer_phone} onChange={(e) => setForm({ ...form, buyer_phone: e.target.value })} />
+              </Field>
+              <Field label="Kota">
+                <input className="input" value={form.buyer_city} onChange={(e) => setForm({ ...form, buyer_city: e.target.value })} />
+              </Field>
+              <Field label="Asal Leads" hint="mis. MP, TT, WA">
+                <input className="input" value={form.lead_source} onChange={(e) => setForm({ ...form, lead_source: e.target.value })} />
+              </Field>
+              <Field label="Ongkir Ditagih ke Pembeli (Rp)" hint="Bukan biaya; hanya catatan">
+                <input type="number" min="0" step="any" className="input" value={form.shipping_charged} onChange={(e) => setForm({ ...form, shipping_charged: e.target.value })} />
+              </Field>
+              <Field label="Alamat Pembeli" className="sm:col-span-3">
+                <input className="input" value={form.buyer_address} onChange={(e) => setForm({ ...form, buyer_address: e.target.value })} />
               </Field>
             </div>
 

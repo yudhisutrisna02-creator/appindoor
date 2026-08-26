@@ -49,6 +49,21 @@ const orderSchema = z.object({
   packing_cost: z.number().nonnegative().default(0),
   other_cost: z.number().nonnegative().default(0),
 
+  // --- Kolom pendukung marketplace ---
+  shop_id: z.number().int().positive().optional().nullable(),
+  order_ref: z.string().trim().max(80).optional().nullable(),
+  courier: z.string().trim().max(50).optional().nullable(),
+  tracking_no: z.string().trim().max(80).optional().nullable(),
+  fulfillment_status: z.enum(['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR', 'BATAL']).default('DIPROSES'),
+  payout_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  shipping_charged: z.number().nonnegative().default(0),
+  buyer_name: z.string().trim().max(120).optional().nullable(),
+  buyer_account: z.string().trim().max(120).optional().nullable(),
+  buyer_phone: z.string().trim().max(30).optional().nullable(),
+  buyer_address: z.string().trim().max(300).optional().nullable(),
+  buyer_city: z.string().trim().max(80).optional().nullable(),
+  lead_source: z.string().trim().max(50).optional().nullable(),
+
   payment_status: z.enum(['PAID', 'UNPAID']).default('PAID'),
   note: z.string().max(300).optional().nullable(),
 });
@@ -141,8 +156,12 @@ const createOrder = db.transaction((body, userId) => {
          admin_fee_pct, admin_fee, handling_fee, shipping_extra, voucher_platform,
          tax_pct, tax_amount, packing_cost, other_cost,
          net_revenue, total_fees, gross_profit, net_profit, margin_pct,
-         payment_status, status, note, user_id, partner_id, due_date
-       ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, 'POSTED', ?, ?, ?, ?)`
+         payment_status, status, note, user_id, partner_id, due_date,
+         shop_id, order_ref, courier, tracking_no, fulfillment_status, payout_date,
+         shipping_charged, buyer_name, buyer_account, buyer_phone, buyer_address,
+         buyer_city, lead_source
+       ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, 'POSTED', ?, ?, ?, ?,
+                 ?,?,?,?,?,?, ?,?,?,?,?, ?,?)`
     )
     .run(
       orderNo, body.order_date, body.channel, body.customer || null, body.marketplace_ref || null,
@@ -151,7 +170,12 @@ const createOrder = db.transaction((body, userId) => {
       body.tax_pct, calc.tax_amount, r2(body.packing_cost), r2(body.other_cost),
       calc.net_revenue, calc.total_fees, calc.gross_profit, calc.net_profit, calc.margin_pct,
       body.payment_status, body.note || null, userId,
-      body.partner_id || null, body.due_date || null
+      body.partner_id || null, body.due_date || null,
+      body.shop_id || null, body.order_ref || null, body.courier || null,
+      body.tracking_no || null, body.fulfillment_status, body.payout_date || null,
+      r2(body.shipping_charged), body.buyer_name || null, body.buyer_account || null,
+      body.buyer_phone || null, body.buyer_address || null,
+      body.buyer_city || null, body.lead_source || null
     );
 
   const orderId = info.lastInsertRowid;
@@ -209,6 +233,14 @@ function orderFilter(query) {
     where += ' AND o.channel = ?';
     params.push(query.channel);
   }
+  if (query.shop_id) {
+    where += ' AND o.shop_id = ?';
+    params.push(Number(query.shop_id));
+  }
+  if (query.fulfillment_status) {
+    where += ' AND o.fulfillment_status = ?';
+    params.push(query.fulfillment_status);
+  }
   return { from, to, where, params };
 }
 
@@ -217,9 +249,11 @@ router.get('/', ah((req, res) => {
   const { from, to, where, params } = orderFilter(req.query);
   const rows = db
     .prepare(
-      `SELECT o.*, u.name AS user_name,
+      `SELECT o.*, u.name AS user_name, sh.name AS shop_name,
               (SELECT COUNT(*) FROM sales_items i WHERE i.order_id = o.id) AS item_count
-         FROM sales_orders o LEFT JOIN users u ON u.id = o.user_id
+         FROM sales_orders o
+         LEFT JOIN users u  ON u.id = o.user_id
+         LEFT JOIN shops sh ON sh.id = o.shop_id
          ${where}
         ORDER BY o.order_date DESC, o.id DESC LIMIT 500`
     )

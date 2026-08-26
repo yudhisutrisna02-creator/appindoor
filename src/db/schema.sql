@@ -271,3 +271,18 @@ CREATE TABLE IF NOT EXISTS partners (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_partner_kind ON partners(kind);
+
+-- ---------- TOKO / AKUN MARKETPLACE ----------
+-- Satu perusahaan bisa punya banyak akun toko pada marketplace yang sama.
+-- Profitabilitas per toko sering berbeda jauh karena biaya iklan, voucher,
+-- dan tarif admin yang tidak seragam.
+CREATE TABLE IF NOT EXISTS shops (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  channel    TEXT NOT NULL DEFAULT 'SHOPEE'
+             CHECK (channel IN ('OFFLINE_WA','SOCIAL_MEDIA','WEBSITE','SHOPEE','TOKOPEDIA','TIKTOK_SHOP')),
+  note       TEXT,
+  active     INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_shop_channel ON shops(channel);

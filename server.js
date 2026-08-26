@@ -130,6 +130,7 @@ app.use('/api/attendance', require('./src/routes/attendance'));
 app.use('/api/finance', require('./src/routes/finance'));
 app.use('/api/inventory', require('./src/routes/inventory'));
 app.use('/api/sales', require('./src/routes/sales'));
+app.use('/api/shops', require('./src/routes/shops'));
 app.use('/api/partners', require('./src/routes/partners').router);
 app.use('/api/cashflow', require('./src/routes/cashflow'));
 app.use('/api/admin', require('./src/routes/admin'));

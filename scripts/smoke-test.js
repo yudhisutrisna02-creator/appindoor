@@ -235,7 +235,13 @@ async function main() {
   console.log('\n7. Dashboard & Presensi');
   const dash = await call('GET', '/api/dashboard');
   check('dashboard memuat keempat modul',
-    dash.attendance && dash.inventory && dash.sales && dash.finance);
+    !!(dash.penjualan && dash.presensi && dash.stok && dash.keuangan));
+  check('dashboard punya bagian realtime hari ini',
+    !!(dash.penjualan.hariIni && dash.presensi.hariIni));
+  check('dashboard menyertakan analisis otomatis', Array.isArray(dash.temuan));
+  check('setiap temuan menyebutkan dasar hitungnya',
+    dash.temuan.every((t) => t.judul && t.pesan && t.dasar && t.aksi),
+    `(${dash.temuan.length} temuan)`);
 
   const att = await call('GET', '/api/attendance/today');
   check('status presensi hari ini tersedia', !!att.date);

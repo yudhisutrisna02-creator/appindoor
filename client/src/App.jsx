@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
-  Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact,
+  Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -27,6 +27,7 @@ import KasMasukKeluar from './pages/KasMasukKeluar';
 import UtangPiutang from './pages/UtangPiutang';
 import Mitra from './pages/Mitra';
 import Retur from './pages/Retur';
+import Toko from './pages/Toko';
 
 const NAV = [
   { section: 'Ringkasan', items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }] },
@@ -52,6 +53,7 @@ const NAV = [
       { to: '/penjualan', label: 'Order Penjualan', icon: ShoppingCart },
       { to: '/penjualan/analisis', label: 'Analisis Margin', icon: TrendingUp },
       { to: '/penjualan/retur', label: 'Retur Penjualan', icon: Undo2 },
+      { to: '/penjualan/toko', label: 'Toko / Marketplace', icon: Store },
     ],
   },
   {
@@ -194,6 +196,7 @@ export default function App() {
         <Route path="/penjualan" element={<Penjualan />} />
         <Route path="/penjualan/analisis" element={<AnalisisMargin />} />
         <Route path="/penjualan/retur" element={<Retur />} />
+        <Route path="/penjualan/toko" element={<Toko />} />
         <Route path="/keuangan/kas" element={<KasMasukKeluar />} />
         <Route path="/keuangan/utang-piutang" element={<UtangPiutang />} />
         <Route path="/keuangan/laporan" element={<LaporanKeuangan />} />
