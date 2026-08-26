@@ -223,6 +223,20 @@ router.post('/moves', requireRole('admin', 'manager', 'staff'), ah((req, res) =>
 }));
 
 /** GET /api/inventory/moves — kartu stok / log mutasi. */
+/**
+ * Batas jumlah baris yang dikembalikan.
+ *
+ * Angkanya dulu dipatok 1000 di dalam kueri. Saat dipakai menghitung koreksi
+ * pembukuan, daftar yang terpotong itu menghasilkan angka yang tampak masuk akal
+ * tetapi salah — jenis kekeliruan yang paling sulit disadari karena tidak ada
+ * tanda apa pun bahwa datanya kurang.
+ */
+function batasBaris(nilai, bawaan = 1000, atap = 20000) {
+  const n = Number(nilai);
+  if (!Number.isFinite(n) || n <= 0) return bawaan;
+  return Math.min(Math.floor(n), atap);
+}
+
 /** Pengambil daftar mutasi stok — dipakai layar dan berkas unduhan. */
 function ambilMutasi(req) {
   const { from, to } = dateRange(req.query);
@@ -240,12 +254,13 @@ function ambilMutasi(req) {
          LEFT JOIN users u ON u.id = m.user_id
          ${where}
         ORDER BY m.move_date DESC, m.id DESC
-        LIMIT 1000`
+        LIMIT ?`
     )
-    .all(...params);
+    .all(...params, batasBaris(req.query.limit));
 
   return {
     from, to, rows,
+    terpotong: rows.length >= batasBaris(req.query.limit),
     summary: {
       inQty: r2(rows.filter((r) => r.move_type === 'IN').reduce((s, r) => s + r.qty, 0)),
       outQty: r2(rows.filter((r) => r.move_type === 'OUT').reduce((s, r) => s + r.qty, 0)),

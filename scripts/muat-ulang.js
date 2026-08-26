@@ -458,11 +458,21 @@ async function jalankan() {
       supplier: k.supplier,
     }))
     .filter((k) => k.qty > 0);
-  // Posisi awal hanya disetel sekali. Bila sudah ada penjualan Agustus yang
-  // tercatat, menyetelnya lagi akan mengembalikan stok ke posisi Juli seolah
-  // penjualan itu tidak pernah terjadi.
+  // Posisi awal hanya boleh disetel sekali, dan ada dua cara ia bisa terlanjur
+  // ada. Pertama, penjualan Agustus sudah tercatat — menyetel ulang posisi Juli
+  // akan mengembalikan stok seolah penjualan itu tidak pernah terjadi. Kedua,
+  // saldo awalnya memang sudah pernah dicatat, dan mencatatnya lagi menambah
+  // Modal Pemilik dua kali sekaligus memaksa opname penutup menghapus
+  // kelebihannya sebagai kerugian. Yang kedua ini pernah benar-benar terjadi
+  // di produksi, jadi keduanya kini diperiksa.
   const orderSudahAda = await api('GET', `/api/sales?from=${AWAL_AGU}&to=${AKHIR_AGU}&limit=1`);
-  const perluOpnameAwal = orderSudahAda.summary.orders === 0;
+  const mutasiAwal = await api('GET', '/api/inventory/moves?from=2000-01-01&to=2099-12-31&move_type=IN&limit=20000');
+  const saldoAwalAda = (mutasiAwal.rows || []).some((m) => m.ref === 'SALDO-AWAL');
+
+  const perluOpnameAwal = orderSudahAda.summary.orders === 0 && !saldoAwalAda;
+  if (saldoAwalAda && orderSudahAda.summary.orders === 0) {
+    console.log('catatan            : saldo awal sudah pernah dicatat — tidak diulang');
+  }
 
   // Barang yang sudah ada di gudang sebelum sistem ini dipakai dicatat sebagai
   // saldo awal: persediaan bertambah dengan lawan Modal Pemilik.

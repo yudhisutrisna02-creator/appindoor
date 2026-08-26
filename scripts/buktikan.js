@@ -196,6 +196,24 @@ function cek(judul, benar, keterangan = '') {
 
   cek('neraca saldo seimbang', saldo.balanced === true,
     `D ${rupiah(saldo.totalDebit)} = K ${rupiah(saldo.totalCredit)}`);
+  // Pemeriksaan di atas semuanya menguji konsistensi hitungan, dan hitungan
+  // yang salah pun bisa konsisten. Yang berikut menguji kewajarannya: saat
+  // saldo awal sempat tercatat dua kali di produksi, seluruh pemeriksaan
+  // aritmetika tetap lulus sementara laba bersih minus dan modal hampir dua
+  // kali lipat. Angka yang tidak masuk akal harus ikut ketahuan.
+  cek('laba bersih tidak melebihi laba kotor',
+    pnl.netProfit <= pnl.grossProfit + 1,
+    `${rupiah(pnl.netProfit)} vs ${rupiah(pnl.grossProfit)}`);
+  cek('usaha yang laba usahanya positif tidak berakhir rugi bersih',
+    pnl.operatingProfit <= 0 || pnl.netProfit > 0,
+    `laba usaha ${rupiah(pnl.operatingProfit)}, laba bersih ${rupiah(pnl.netProfit)}`);
+  cek('selisih opname wajar terhadap nilai persediaan',
+    Math.abs(pnl.otherIncome - pnl.otherExpense) < val.totalValue * 0.25,
+    `selisih ${rupiah(Math.abs(pnl.otherIncome - pnl.otherExpense))} atas persediaan ${rupiah(val.totalValue)}`);
+  cek('modal pemilik wajar terhadap nilai persediaan',
+    neraca.equity.capital <= val.totalValue * 1.5,
+    `modal ${rupiah(neraca.equity.capital)} atas persediaan ${rupiah(val.totalValue)}`);
+
   // Keempat laporan harus bisa diunduh dalam kedua bentuk. Neraca saldo dulu
   // satu-satunya yang tidak punya berkas, padahal paling sering diminta.
   const bentukLaporan = ['income-statement', 'balance-sheet', 'cash-flow', 'trial-balance'];
