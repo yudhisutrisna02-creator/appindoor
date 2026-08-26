@@ -261,7 +261,7 @@ function incomeLines(rep) {
   lines.push({ label: 'Total Beban Operasional', value: -rep.opex, bold: true });
   lines.push({ label: 'LABA USAHA', value: rep.operatingProfit, bold: true });
   lines.push({ divider: true });
-  if (rep.otherIncome) lines.push({ label: 'Pendapatan Lain-lain', value: rep.otherIncome });
+  (rep.otherIncomeRows || []).forEach((r) => lines.push({ label: `${r.code} ${r.name}`, value: r.amount, indent: true }));
   rep.otherExpenseRows.forEach((r) => lines.push({ label: `${r.code} ${r.name}`, value: -r.amount, indent: true }));
   lines.push({ divider: true });
   lines.push({ label: 'LABA BERSIH', value: rep.netProfit, bold: true });
@@ -334,6 +334,28 @@ const REPORT_BUILDERS = {
     const { from, to } = dateRange(q);
     const rep = cashFlow(from, to);
     return { title: 'LAPORAN ARUS KAS', subtitle: `Periode ${from} s/d ${to}`, lines: cashFlowLines(rep), file: `arus-kas-${from}_${to}` };
+  },
+  // Neraca saldo dulu satu-satunya laporan tanpa berkas unduhan, padahal justru
+  // laporan inilah yang paling sering diminta pemeriksa untuk dicocokkan.
+  'trial-balance': (q) => {
+    const { from, to } = dateRange(q);
+    const rep = trialBalance(from, to);
+    const lines = [];
+    for (const r of rep.rows) {
+      // Tiap akun ditulis pada sisi saldonya sendiri agar terbaca seperti
+      // neraca saldo pada umumnya, bukan sebagai satu kolom angka campuran.
+      if (r.debit > 0.004) lines.push({ label: `${r.code} ${r.name} (D)`, value: r.debit, indent: true });
+      if (r.credit > 0.004) lines.push({ label: `${r.code} ${r.name} (K)`, value: r.credit, indent: true });
+    }
+    lines.push({ divider: true });
+    lines.push({ label: 'TOTAL DEBIT', value: rep.totalDebit, bold: true });
+    lines.push({ label: 'TOTAL KREDIT', value: rep.totalCredit, bold: true });
+    lines.push({
+      label: rep.balanced ? 'Seimbang — Debit = Kredit' : 'TIDAK SEIMBANG',
+      value: null,
+      bold: true,
+    });
+    return { title: 'NERACA SALDO', subtitle: `Periode ${from} s/d ${to}`, lines, file: `neraca-saldo-${from}_${to}` };
   },
 };
 

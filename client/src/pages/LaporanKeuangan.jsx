@@ -15,14 +15,21 @@ export default function LaporanKeuangan() {
   const toast = useToast();
   const [tab, setTab] = useState('income-statement');
   const [range, setRange] = useState(defaultRange);
-  const [data, setData] = useState(null);
+  // Data disimpan bersama nama laporan asalnya.
+  //
+  // Mengganti tab mengubah pilihan seketika, sementara permintaan datanya baru
+  // berjalan setelah render berikutnya. Tanpa penanda ini, sekali render terjadi
+  // dengan tab "Neraca" tetapi isi data masih Laba Rugi — dan halaman langsung
+  // kosong karena mencari kolom yang tidak ada di sana.
+  const [hasil, setHasil] = useState({ tab: null, data: null });
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = tab === 'balance-sheet' ? { asOf: range.to } : range;
-      setData(await api.get(`/api/finance/reports/${tab}`, params));
+      const d = await api.get(`/api/finance/reports/${tab}`, params);
+      setHasil({ tab, data: d });
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -46,17 +53,11 @@ export default function LaporanKeuangan() {
     }
   }
 
-  const exportable = tab !== 'trial-balance';
-
   return (
     <div>
-      <PageHeader title="Laporan Keuangan" subtitle="Dual-entry accounting — Laba Rugi, Neraca, dan Arus Kas">
-        {exportable && (
-          <>
-            <button className="btn-secondary" onClick={() => download('excel')}><FileSpreadsheet size={16} /> Excel</button>
-            <button className="btn-secondary" onClick={() => download('pdf')}><FileText size={16} /> PDF</button>
-          </>
-        )}
+      <PageHeader title="Laporan Keuangan" subtitle="Dual-entry accounting — Laba Rugi, Neraca, Arus Kas, dan Neraca Saldo">
+        <button className="btn-secondary" onClick={() => download('excel')}><FileSpreadsheet size={16} /> Excel</button>
+        <button className="btn-secondary" onClick={() => download('pdf')}><FileText size={16} /> PDF</button>
       </PageHeader>
 
       <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">
@@ -81,16 +82,16 @@ export default function LaporanKeuangan() {
         )}
       </DateRangeFilter>
 
-      {loading || !data ? (
+      {loading || hasil.tab !== tab || !hasil.data ? (
         <Spinner />
       ) : tab === 'income-statement' ? (
-        <IncomeStatement rep={data} />
+        <IncomeStatement rep={hasil.data} />
       ) : tab === 'balance-sheet' ? (
-        <BalanceSheet rep={data} />
+        <BalanceSheet rep={hasil.data} />
       ) : tab === 'cash-flow' ? (
-        <CashFlow rep={data} />
+        <CashFlow rep={hasil.data} />
       ) : (
-        <TrialBalance rep={data} />
+        <TrialBalance rep={hasil.data} />
       )}
     </div>
   );
@@ -154,7 +155,11 @@ function IncomeStatement({ rep }) {
         {(rep.otherIncome > 0 || rep.otherExpenseRows.length > 0) && (
           <>
             <Section title="Pendapatan & Beban Lain" />
-            {rep.otherIncome > 0 && <Line label="Pendapatan Lain-lain" value={rep.otherIncome} indent tone="green" />}
+            {/* Dirinci per akun, bukan satu angka gabungan: selisih stok opname
+                yang menguntungkan perlu terlihat sumbernya agar bisa ditelusuri. */}
+            {(rep.otherIncomeRows || []).map((r) => (
+              <Line key={r.code} label={`${r.code} · ${r.name}`} value={r.amount} indent tone="green" />
+            ))}
             {rep.otherExpenseRows.map((r) => <Line key={r.code} label={`${r.code} · ${r.name}`} value={-r.amount} indent tone="red" />)}
           </>
         )}

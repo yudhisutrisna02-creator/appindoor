@@ -300,6 +300,89 @@ async function main() {
   }
   check('total dua baris yang melebihi stok ditolak', gandaMelebihi);
 
+  // ---------- Mengubah order yang sudah tersimpan ----------
+  console.log('\n8. Ubah order penjualan');
+
+  const stokSblmUbah = (await call('GET', `/api/inventory/products?q=${sku}`)).products[0].stock;
+  const belumBayar = await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', customer: 'Uji Ubah',
+    items: [{ product_id: product.id, qty: 4, price: 25000 }],
+    admin_fee: 5000, payment_status: 'UNPAID', fulfillment_status: 'DIKIRIM',
+  });
+  const idUbah = belumBayar.order.id;
+
+  const akunSaldo = async (kode) => {
+    const { accounts } = await call('GET', `/api/finance/accounts?asOf=${today}`);
+    return accounts.find((a) => a.code === kode).balance;
+  };
+  // Dana marketplace yang belum cair punya akunnya sendiri, terpisah dari
+  // piutang usaha biasa, jadi kodenya disebut eksplisit.
+  const KODE_PIUTANG = '1110';
+
+  const piutangAwal = await akunSaldo(KODE_PIUTANG);
+  check('order belum cair menambah piutang', piutangAwal > 0, `(${piutangAwal})`);
+
+  // Hanya status pengiriman yang berubah — angka tidak boleh bergeser.
+  await call('PUT', `/api/sales/${idUbah}`, { fulfillment_status: 'SELESAI' });
+  const setelahStatus = await call('GET', `/api/sales/${idUbah}`);
+  check('status pesanan bisa diubah', setelahStatus.order.fulfillment_status === 'SELESAI');
+  check('mengubah status pesanan tidak menggeser laba',
+    near(setelahStatus.order.net_profit, belumBayar.order.net_profit),
+    `(${setelahStatus.order.net_profit})`);
+  check('mengubah status pesanan tidak menggeser piutang',
+    near(await akunSaldo(KODE_PIUTANG), piutangAwal, 1));
+
+  // Dana cair: piutang harus berpindah ke bank.
+  await call('PUT', `/api/sales/${idUbah}`, {
+    payment_status: 'PAID', fulfillment_status: 'CAIR', payout_date: today,
+  });
+  const piutangSetelahCair = await akunSaldo(KODE_PIUTANG);
+  const nilaiBersih = belumBayar.order.net_revenue - belumBayar.order.total_fees;
+  check('menandai lunas memindahkan piutang ke kas/bank',
+    near(piutangSetelahCair, piutangAwal - nilaiBersih, 1),
+    `(${piutangAwal} menjadi ${piutangSetelahCair}, nilai ${nilaiBersih})`);
+
+  const bsUbah = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah status pembayaran diubah', bsUbah.balanced);
+
+  // Mengubah isi pesanan harus menggerakkan stok sesuai selisihnya.
+  const stokSebelumItem = (await call('GET', `/api/inventory/products?q=${sku}`)).products[0].stock;
+  await call('PUT', `/api/sales/${idUbah}`, {
+    items: [{ product_id: product.id, qty: 6, price: 25000 }],
+  });
+  const stokSesudahItem = (await call('GET', `/api/inventory/products?q=${sku}`)).products[0].stock;
+  check('menambah 2 unit pada order mengurangi stok 2 unit',
+    stokSesudahItem === stokSebelumItem - 2,
+    `(${stokSebelumItem} menjadi ${stokSesudahItem})`);
+
+  const stlhItem = await call('GET', `/api/sales/${idUbah}`);
+  check('penjualan kotor ikut dihitung ulang', near(stlhItem.order.gross_sales, 150_000),
+    `(${stlhItem.order.gross_sales})`);
+
+  // Menandai pesanan batal harus benar-benar membatalkan, bukan sekadar label.
+  await call('PUT', `/api/sales/${idUbah}`, { fulfillment_status: 'BATAL' });
+  const stokSetelahBatal = (await call('GET', `/api/inventory/products?q=${sku}`)).products[0].stock;
+  check('menandai batal mengembalikan seluruh stok order',
+    stokSetelahBatal === stokSblmUbah,
+    `(${stokSetelahBatal}, sebelum order dibuat ${stokSblmUbah})`);
+
+  const batalDetail = await call('GET', `/api/sales/${idUbah}`);
+  check('order batal tidak lagi berstatus POSTED', batalDetail.order.status === 'CANCELLED',
+    `(${batalDetail.order.status})`);
+  check('piutang kembali seperti semula setelah order dibatalkan',
+    near(await akunSaldo(KODE_PIUTANG), piutangAwal - nilaiBersih, 1));
+
+  const bsBatal = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah order dibatalkan', bsBatal.balanced);
+
+  let tolakUbahBatal = false;
+  try {
+    await call('PUT', `/api/sales/${idUbah}`, { fulfillment_status: 'DIKIRIM' });
+  } catch {
+    tolakUbahBatal = true;
+  }
+  check('order yang sudah dibatalkan menolak diubah lagi', tolakUbahBatal);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -10,7 +10,7 @@
 const ExcelJS = require('exceljs');
 
 const FILE_INV = process.env.FILE_INVENTORY || 'C:/Users/HP/Downloads/REPORT INVENTORY 2025-2026.xlsx';
-const FILE_WS = process.env.FILE_WORKSHEET || 'C:/09. INDOOR/Worksheet INDOOR AGUSTUS 2026.xlsx';
+const FILE_WS = process.env.FILE_WORKSHEET || 'C:/Users/HP/Downloads/Worksheet INDOOR AGUSTUS 2026.xlsx';
 
 /** Nilai sel apa adanya — rumus diambil hasilnya, bukan teks rumusnya. */
 function isi(cell) {
@@ -106,19 +106,38 @@ async function bacaInventory(file = FILE_INV) {
 }
 
 /**
+ * Cari baris tempat tabel transaksi berakhir.
+ *
+ * Di bawah daftar transaksi ada tabel rekap produk yang bentuknya mirip dan
+ * akan ikut terbaca sebagai transaksi bila tidak dipotong. Batasnya dikenali
+ * dari kepala tabel rekap ("PRODUK" pada kolom B) supaya tetap benar ketika
+ * jumlah baris transaksi bertambah — mematoknya pada nomor baris tertentu
+ * hanya bekerja sampai berkasnya diperbarui.
+ */
+function batasTransaksi(ws) {
+  let batas = null;
+  ws.eachRow((row, r) => {
+    if (batas || r < 5) return;
+    const b = row.getCell(2).value;
+    if (typeof b === 'string' && b.trim().toUpperCase() === 'PRODUK') batas = r - 1;
+  });
+  return batas || ws.actualRowCount;
+}
+
+/**
  * Sheet "3. Penjualan" menulis tanggal sekali di baris pertama tiap hari,
  * lalu membiarkan sel di bawahnya kosong. Tanggal itu diteruskan ke bawah.
- * Di bawah baris 1663 ada tabel rekap produk, bukan transaksi — jadi dipotong.
  */
 async function bacaPenjualan(file = FILE_WS) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(file);
   const ws = wb.getWorksheet('3. Penjualan');
+  const batas = batasTransaksi(ws);
   const baris = [];
   let tgl = null;
 
   ws.eachRow((row, r) => {
-    if (r < 5 || r > 1663) return;
+    if (r < 5 || r > batas) return;
     const t = row.getCell(2).value;
     if (t instanceof Date) tgl = t.toISOString().slice(0, 10);
 

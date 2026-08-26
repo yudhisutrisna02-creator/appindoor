@@ -12,6 +12,7 @@ const router = express.Router();
 router.use(requireAuth);
 
 const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
+const { ubahSchema, buatPengubah } = require('./sales-ubah');
 
 const orderSchema = z.object({
   order_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),
@@ -368,6 +369,28 @@ const cancelOrder = db.transaction((orderId) => {
 
   return order.order_no;
 });
+
+/**
+ * PUT /api/sales/:id — ubah order yang sudah tersimpan.
+ *
+ * Semua kolom boleh diubah dan semuanya bersifat pilihan, jadi mengubah status
+ * pengiriman cukup mengirim satu kolom saja. Setiap perubahan yang menyentuh
+ * uang menulis ulang jurnalnya di transaksi yang sama.
+ */
+const ubahOrder = buatPengubah({ resolveItems, computeOrder, cancelOrder });
+
+router.put('/:id(\\d+)', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+  const badan = parse(ubahSchema, req.body);
+  const hasil = ubahOrder(Number(req.params.id), badan, req.user.id);
+
+  res.json({
+    ok: true,
+    message: hasil.dibatalkan
+      ? `Order ${hasil.orderNo} dibatalkan — stok dikembalikan dan jurnalnya dihapus`
+      : `Order ${hasil.orderNo} diperbarui`,
+    order: db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(hasil.orderId),
+  });
+}));
 
 router.delete('/:id', requireRole('admin', 'manager'), ah((req, res) => {
   const orderNo = cancelOrder(Number(req.params.id));

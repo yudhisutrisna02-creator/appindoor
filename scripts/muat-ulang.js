@@ -448,28 +448,51 @@ async function jalankan() {
   console.log(`toko               : ${tokoDipakai.length} dipakai, ${tBaru} baru`);
 
   // 4. Opname posisi 31 Juli
-  const barisOpnameJuli = r.katalog
+  const posisiJuli = r.katalog
     .filter((k) => idProduk.has(k.sku.toUpperCase()))
     .map((k) => ({
+      sku: k.sku,
       product_id: idProduk.get(k.sku.toUpperCase()),
-      physical_qty: Math.max(0, Math.round(k.stokJuli + (r.kurang.get(k.sku) || 0))),
-    }));
+      qty: Math.max(0, Math.round(k.stokJuli + (r.kurang.get(k.sku) || 0))),
+      beli: Math.round(k.beli || 0),
+      supplier: k.supplier,
+    }))
+    .filter((k) => k.qty > 0);
   // Posisi awal hanya disetel sekali. Bila sudah ada penjualan Agustus yang
   // tercatat, menyetelnya lagi akan mengembalikan stok ke posisi Juli seolah
   // penjualan itu tidak pernah terjadi.
   const orderSudahAda = await api('GET', `/api/sales?from=${AWAL_AGU}&to=${AKHIR_AGU}&limit=1`);
   const perluOpnameAwal = orderSudahAda.summary.orders === 0;
 
-  const opJuli = perluOpnameAwal ? await api('POST', '/api/inventory/opname', {
-    opname_date: AKHIR_JUL,
-    note: 'Posisi awal dari REPORT INVENTORY: stok awal + mutasi sampai 31 Juli 2026' +
-      (r.kurang.size ? ', ditambah koreksi selisih catatan penjualan' : ''),
-    lines: barisOpnameJuli,
-  }) : null;
+  // Barang yang sudah ada di gudang sebelum sistem ini dipakai dicatat sebagai
+  // saldo awal: persediaan bertambah dengan lawan Modal Pemilik.
+  //
+  // Sebelumnya posisi awal disetel lewat stok opname, dan itu keliru secara
+  // pembukuan — opname mencatat selisihnya sebagai untung atau rugi, sehingga
+  // persediaan awal Rp 65,9 juta muncul sebagai keuntungan dan membuat laba
+  // bersih lebih besar daripada laba kotor. Barang yang memang sudah dimiliki
+  // bukan keuntungan bulan ini; ia modal yang sudah tertanam.
+  let saldoAwal = 0;
+  if (perluOpnameAwal) {
+    for (const k of posisiJuli) {
+      await api('POST', '/api/inventory/moves', {
+        product_id: k.product_id,
+        move_date: AKHIR_JUL,
+        move_type: 'IN',
+        qty: k.qty,
+        unit_cost: k.beli,
+        payment: 'OPENING',
+        partner_id: k.supplier ? petaMitra.get(k.supplier.toUpperCase()) || null : null,
+        ref: 'SALDO-AWAL',
+        note: 'Posisi 31 Juli 2026 menurut REPORT INVENTORY (stok awal + mutasi sampai Juli)',
+      });
+      saldoAwal += 1;
+    }
+  }
   console.log(
     perluOpnameAwal
-      ? `opname 31 Juli     : ${opJuli.opname_no} (${barisOpnameJuli.length} produk)`
-      : 'opname 31 Juli     : dilewati — sudah ada penjualan Agustus yang tercatat'
+      ? `saldo awal 31 Juli : ${saldoAwal} produk dicatat sebagai modal awal`
+      : 'saldo awal 31 Juli : dilewati — sudah ada penjualan Agustus yang tercatat'
   );
 
   // 5. Barang masuk Agustus

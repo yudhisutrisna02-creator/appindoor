@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2 } from 'lucide-react';
+import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
-import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL } from '../lib/format';
+import UbahOrder from './UbahOrder';
+import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 /** Preset biaya admin tipikal per marketplace — tetap dapat diubah manual. */
@@ -55,6 +56,7 @@ export default function Penjualan() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [ubah, setUbah] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -242,7 +244,7 @@ export default function Penjualan() {
                   <thead>
                     <tr>
                       <th>No. Order</th><th>Tanggal</th><th>Channel</th><th>Pelanggan</th>
-                      <th>Pendapatan</th><th>HPP</th><th>Biaya</th><th>Laba Bersih</th><th>Margin</th><th>Status</th><th></th>
+                      <th>Pendapatan</th><th>HPP</th><th>Biaya</th><th>Laba Bersih</th><th>Margin</th><th>Pesanan</th><th>Bayar</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -264,8 +266,13 @@ export default function Penjualan() {
                           </span>
                         </td>
                         <td>
+                          <span className={WARNA_STATUS[o.fulfillment_status] || 'badge-slate'}>
+                            {STATUS_PESANAN[o.fulfillment_status] || o.fulfillment_status || '-'}
+                          </span>
+                        </td>
+                        <td>
                           <span className={o.payment_status === 'PAID' ? 'badge-green' : 'badge-amber'}>
-                            {o.payment_status === 'PAID' ? 'Lunas' : 'Belum'}
+                            {o.payment_status === 'PAID' ? 'Lunas' : 'Belum cair'}
                           </span>
                         </td>
                         <td>
@@ -277,7 +284,12 @@ export default function Penjualan() {
                             >
                               <Eye size={14} />
                             </button>
-                            {canManage && (
+                            {canManage && o.status !== 'CANCELLED' && (
+                              <button className="btn-ghost !px-2 !py-1" onClick={() => setUbah(o)} aria-label="Ubah">
+                                <Pencil size={14} />
+                              </button>
+                            )}
+                            {canManage && o.status !== 'CANCELLED' && (
                               <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => cancel(o)} aria-label="Batalkan">
                                 <XCircle size={14} />
                               </button>
@@ -530,6 +542,14 @@ export default function Penjualan() {
       </Modal>
 
       {/* ---------- DETAIL ORDER ---------- */}
+      <UbahOrder
+        order={ubah}
+        shops={shops}
+        open={!!ubah}
+        onClose={() => setUbah(null)}
+        onSaved={() => { load(); refreshProducts(); }}
+      />
+
       <Modal open={!!detail} onClose={() => setDetail(null)} title={`Detail ${detail?.order.order_no || ''}`} wide>
         {detail && (
           <div>

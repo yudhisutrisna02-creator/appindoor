@@ -82,9 +82,28 @@ function incomeStatement(from, to) {
   const opex         = r2(selling + admin);
   const operatingProfit = r2(grossProfit - opex);
 
-  const otherIncome  = sumBy(rows, (r) => r.subtype === 'OTHER_INCOME');
-  const otherExpenseRows = listBy(rows, (r) => ['TAX', 'FINANCE', 'OTHER'].includes(r.subtype) && r.type === 'EXPENSE');
-  const otherExpense = sumBy(rows, (r) => ['TAX', 'FINANCE', 'OTHER'].includes(r.subtype) && r.type === 'EXPENSE');
+  // Akun di luar usaha pokok bisa berbalik arah: selisih stok opname yang
+  // menguntungkan bersaldo kredit di akun beban, dan kalau dijumlahkan apa
+  // adanya ia muncul sebagai "beban lain −69 juta" — angka yang menaikkan laba
+  // bersih melampaui laba kotor dan membuat laporan tidak masuk akal dibaca.
+  // Karena itu tiap akun ditempatkan menurut arah saldonya, bukan menurut
+  // golongan yang tertulis pada bagan akun.
+  const diLuarUsaha = (r) =>
+    (r.type === 'EXPENSE' && ['TAX', 'FINANCE', 'OTHER'].includes(r.subtype)) ||
+    (r.type === 'REVENUE' && r.subtype === 'OTHER_INCOME');
+
+  const barisLuar = rows.filter((r) => diLuarUsaha(r) && Math.abs(r.balance) > 0.004);
+  const keBaris = (r) => ({ code: r.code, name: r.name, amount: r2(Math.abs(r.balance)) });
+
+  // Untung bila akun pendapatan bersaldo normal, atau akun beban berbalik kredit.
+  // Tipe akun pendapatan di bagan akun ini bernama REVENUE, bukan INCOME.
+  const menguntungkan = (r) => (r.type === 'REVENUE' ? r.balance > 0 : r.balance < 0);
+
+  const otherIncomeRows = barisLuar.filter(menguntungkan).map(keBaris);
+  const otherExpenseRows = barisLuar.filter((r) => !menguntungkan(r)).map(keBaris);
+
+  const otherIncome = r2(otherIncomeRows.reduce((s, r) => s + r.amount, 0));
+  const otherExpense = r2(otherExpenseRows.reduce((s, r) => s + r.amount, 0));
 
   const netProfit    = r2(operatingProfit + otherIncome - otherExpense);
 
@@ -101,7 +120,7 @@ function incomeStatement(from, to) {
     admin, adminRows,
     opex,
     operatingProfit,
-    otherIncome,
+    otherIncome, otherIncomeRows,
     otherExpense, otherExpenseRows,
     netProfit,
     netMarginPct: netSales ? r2((netProfit / netSales) * 100) : 0,

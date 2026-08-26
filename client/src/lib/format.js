@@ -58,3 +58,26 @@ export const STATUS_LABEL = {
 
 /** Palet grafik konsisten lintas halaman. */
 export const CHART_COLORS = ['#1a5cf5', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+/**
+ * Tahapan pesanan marketplace, dari barang disiapkan sampai dananya cair.
+ * Ditaruh di sini karena dipakai daftar order, formulir, dan dashboard.
+ */
+export const STATUS_PESANAN = {
+  DIPROSES: 'Diproses',
+  DIKIRIM: 'Dikirim',
+  SELESAI: 'Selesai',
+  CAIR: 'Cair',
+  RETUR: 'Retur',
+  BATAL: 'Batal',
+};
+
+/** Warna badge tiap tahapan — hijau hanya untuk yang uangnya sudah diterima. */
+export const WARNA_STATUS = {
+  DIPROSES: 'badge-slate',
+  DIKIRIM: 'badge-amber',
+  SELESAI: 'badge-amber',
+  CAIR: 'badge-green',
+  RETUR: 'badge-red',
+  BATAL: 'badge-red',
+};
