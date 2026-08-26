@@ -107,7 +107,9 @@ const moveSchema = z.object({
   qty: z.number().positive('jumlah harus lebih dari 0'),
   unit_cost: z.number().nonnegative().optional(),
   // Sumber dana pembelian (khusus IN) / akun beban (khusus OUT)
-  payment: z.enum(['CASH', 'BANK', 'CREDIT']).default('CASH'),
+  // OPENING = saldo awal persediaan saat mulai memakai sistem; lawannya
+  // Modal Pemilik, bukan kas, karena barangnya memang sudah ada sebelum ini.
+  payment: z.enum(['CASH', 'BANK', 'CREDIT', 'OPENING']).default('CASH'),
   partner_id: z.number().int().positive().optional().nullable(),
   due_date: z.string().optional().nullable(),
   ref: z.string().max(60).optional().nullable(),
@@ -161,7 +163,10 @@ const applyMove = db.transaction((body, userId) => {
   const value = r2(qty * unitCost);
   if (value > 0) {
     const counterAccount =
-      body.payment === 'CREDIT' ? ACC.AP : body.payment === 'BANK' ? ACC.BANK : ACC.CASH;
+      body.payment === 'OPENING' ? ACC.CAPITAL
+        : body.payment === 'CREDIT' ? ACC.AP
+        : body.payment === 'BANK' ? ACC.BANK
+        : ACC.CASH;
 
     const lines =
       body.move_type === 'IN'
@@ -169,7 +174,9 @@ const applyMove = db.transaction((body, userId) => {
             { code: ACC.INVENTORY, debit: value, credit: 0, memo: `Stok masuk ${product.name}` },
             {
               code: counterAccount, debit: 0, credit: value,
-              memo: body.payment === 'CREDIT' ? 'Utang supplier' : 'Pembayaran pembelian',
+              memo: body.payment === 'OPENING' ? 'Saldo awal persediaan'
+                : body.payment === 'CREDIT' ? 'Utang supplier'
+                : 'Pembayaran pembelian',
               partner_id: body.payment === 'CREDIT' ? body.partner_id || null : null,
             },
           ]

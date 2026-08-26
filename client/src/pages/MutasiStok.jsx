@@ -201,6 +201,7 @@ export default function MutasiStok() {
                   <option value="CASH">Kas Tunai</option>
                   <option value="BANK">Bank / Transfer</option>
                   <option value="CREDIT">Utang Supplier (tempo)</option>
+                  <option value="OPENING">Saldo Awal (modal pemilik)</option>
                 </select>
               </Field>
             )}
