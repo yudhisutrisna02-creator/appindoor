@@ -386,11 +386,31 @@ async function jalankan() {
   const petaProduk = new Map((produkAda.products || []).map((p) => [p.sku.trim().toUpperCase(), p]));
   let pBaru = 0;
   let pUbah = 0;
+  // Barang yang benar-benar perlu ada: yang stoknya dipantau di DAFTAR BARANG,
+  // dan yang dipakai penjualan Agustus. Entri yang hanya muncul di daftar harga
+  // tanpa stok dan tanpa penjualan tidak dibuat — daftar harga memuat banyak
+  // barang yang tidak lagi ditangani, dan menghidupkannya kembali akan membatalkan
+  // perapian katalog yang sudah dikerjakan manual.
+  const skuDipakai = new Set();
+  for (const o of r.daftarOrder) for (const i of o.items) skuDipakai.add(i.sku.toUpperCase());
+  for (const m of r.masuk) skuDipakai.add(m.barcode.toUpperCase());
+
+  let pLewat = 0;
   for (const k of r.katalog) {
+    const kunci = k.sku.trim().toUpperCase();
+    const lama = petaProduk.get(kunci);
+    const perlu = k.dipantau || skuDipakai.has(kunci) || !!lama;
+    if (!perlu) {
+      pLewat += 1;
+      continue;
+    }
+
     const badan = {
       sku: k.sku,
       name: k.nama,
-      category: 'Produk Organik',
+      // Kategori tidak diambil dari Excel — kolomnya memang tidak ada di sana,
+      // dan yang sudah dikelompokkan manual di aplikasi tidak boleh tertimpa.
+      category: lama ? lama.category : 'Produk Organik',
       unit: (k.satuan || 'PCS').toUpperCase(),
       cost: Math.round(k.beli || 0),
       price: Math.round(k.jual || 0),
@@ -398,17 +418,17 @@ async function jalankan() {
       supplier_id: k.supplier ? petaMitra.get(k.supplier.toUpperCase()) || null : null,
       active: true,
     };
-    const lama = petaProduk.get(k.sku.trim().toUpperCase());
+
     if (!lama) {
       const hasil = await api('POST', '/api/inventory/products', badan);
-      petaProduk.set(k.sku.trim().toUpperCase(), hasil.product || hasil);
+      petaProduk.set(kunci, hasil.product || hasil);
       pBaru += 1;
     } else {
       await api('PUT', `/api/inventory/products/${lama.id}`, badan);
       pUbah += 1;
     }
   }
-  console.log(`produk             : ${pBaru} baru, ${pUbah} diperbarui`);
+  console.log(`produk             : ${pBaru} baru, ${pUbah} diperbarui, ${pLewat} dilewati (hanya ada di daftar harga)`);
 
   const idProduk = new Map();
   const segar = await api('GET', '/api/inventory/products?limit=2000');
