@@ -38,6 +38,76 @@ function addColumn(db, table, column, definition, applied) {
 }
 
 /**
+ * Melepas batasan CHECK pada kolom channel.
+ *
+ * Daftar kanal jualan bertambah seiring waktu — Lazada muncul setelah tabel
+ * dibuat, dan besok bisa muncul yang lain. Menuliskannya sebagai CHECK di dalam
+ * tabel berarti setiap kanal baru menuntut pembongkaran tabel berisi data,
+ * jadi daftar itu dipindahkan ke lapisan validasi (Zod) yang memang boleh
+ * berubah. Isi kolomnya tetap divalidasi, hanya tempat validasinya yang pindah.
+ *
+ * SQLite tidak bisa mengubah CHECK lewat ALTER TABLE, jadi tabelnya disusun
+ * ulang mengikuti prosedur resmi: matikan foreign key, salin ke tabel baru,
+ * bandingkan jumlah baris, baru buang tabel lama. Seluruhnya dalam satu
+ * transaksi sehingga kegagalan di tengah jalan tidak meninggalkan tabel
+ * separuh jadi.
+ */
+function lepasCekKanal(db, tabel, applied) {
+  if (!tableExists(db, tabel)) return;
+
+  const asli = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tabel);
+  if (!asli || !asli.sql) return;
+  if (!/CHECK\s*\(\s*channel\s+IN/i.test(asli.sql)) return; // sudah pernah dilepas
+
+  const ddlBaru = asli.sql.replace(/\s*CHECK\s*\(\s*channel\s+IN\s*\([^)]*\)\s*\)/i, '');
+  if (/CHECK\s*\(\s*channel\s+IN/i.test(ddlBaru)) {
+    throw new Error(`Gagal melepas CHECK channel pada ${tabel}: pola tidak dikenali`);
+  }
+
+  const kolom = columnsOf(db, tabel).map((c) => `"${c}"`).join(', ');
+  const indeks = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL")
+    .all(tabel)
+    .map((r) => r.sql);
+
+  const sebelum = db.prepare(`SELECT COUNT(*) AS c FROM ${tabel}`).get().c;
+
+  // Rename bawaan SQLite ikut menulis ulang klausa REFERENCES di tabel lain;
+  // mode lawas mematikan perilaku itu supaya tabel anak tetap menunjuk nama asli.
+  const fkSemula = db.pragma('foreign_keys', { simple: true });
+  db.pragma('foreign_keys = OFF');
+  db.pragma('legacy_alter_table = ON');
+
+  try {
+    db.transaction(() => {
+      db.exec(`ALTER TABLE ${tabel} RENAME TO ${tabel}_lama_migrasi`);
+      db.exec(ddlBaru);
+      db.exec(`INSERT INTO ${tabel} (${kolom}) SELECT ${kolom} FROM ${tabel}_lama_migrasi`);
+
+      const sesudah = db.prepare(`SELECT COUNT(*) AS c FROM ${tabel}`).get().c;
+      if (sesudah !== sebelum) {
+        throw new Error(`Penyalinan ${tabel} tidak utuh: ${sebelum} baris menjadi ${sesudah}`);
+      }
+
+      db.exec(`DROP TABLE ${tabel}_lama_migrasi`);
+      for (const sql of indeks) db.exec(sql);
+    })();
+  } finally {
+    db.pragma('legacy_alter_table = OFF');
+    db.pragma(`foreign_keys = ${fkSemula ? 'ON' : 'OFF'}`);
+  }
+
+  const rusak = db.pragma('foreign_key_check');
+  if (rusak.length) {
+    throw new Error(`Relasi rusak setelah menyusun ulang ${tabel}: ${JSON.stringify(rusak.slice(0, 3))}`);
+  }
+
+  applied.push(`${tabel}.channel (CHECK dilepas, ${sebelum} baris disalin)`);
+}
+
+/**
  * Menjalankan seluruh migrasi. Dipanggil sekali saat boot, setelah schema.sql.
  * @returns {string[]} daftar perubahan yang benar-benar diterapkan
  */
@@ -82,6 +152,10 @@ function runMigrations(db) {
   // --- Jatuh tempo ---
   addColumn(db, 'sales_orders', 'due_date', 'TEXT', applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
+
+  // --- Daftar kanal jualan tidak lagi dikunci di dalam tabel ---
+  lepasCekKanal(db, 'sales_orders', applied);
+  lepasCekKanal(db, 'shops', applied);
 
   // Indeks menyusul kolomnya
   db.exec('CREATE INDEX IF NOT EXISTS idx_jl_partner ON journal_lines(partner_id)');

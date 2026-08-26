@@ -8,7 +8,7 @@ import { useAuth } from '../lib/auth';
 
 /** Preset biaya admin tipikal per marketplace — tetap dapat diubah manual. */
 const ADMIN_FEE_PRESET = {
-  SHOPEE: 8, TOKOPEDIA: 6.5, TIKTOK_SHOP: 8, WEBSITE: 2.9, SOCIAL_MEDIA: 0, OFFLINE_WA: 0,
+  SHOPEE: 8, TOKOPEDIA: 6.5, TIKTOK_SHOP: 8, LAZADA: 7, WEBSITE: 2.9, SOCIAL_MEDIA: 0, OFFLINE_WA: 0,
 };
 
 const emptyOrder = () => ({

@@ -7,18 +7,11 @@ const { r2 } = require('../utils/accounting');
 const { incomeStatement, balanceSheet, cashFlow } = require('../utils/reports');
 const { todayLocal } = require('../utils/time');
 const analisa = require('../utils/insights');
+const { CHANNEL_LABEL } = require('../utils/kanal');
 
 const router = express.Router();
 router.use(requireAuth);
 
-const CHANNEL_LABEL = {
-  OFFLINE_WA: 'Offline / WhatsApp',
-  SOCIAL_MEDIA: 'Social Media',
-  WEBSITE: 'Website',
-  SHOPEE: 'Shopee',
-  TOKOPEDIA: 'Tokopedia',
-  TIKTOK_SHOP: 'TikTok Shop',
-};
 
 /**
  * GET /api/dashboard — ringkasan lintas modul + analisis otomatis.

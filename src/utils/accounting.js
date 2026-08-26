@@ -1,4 +1,5 @@
 'use strict';
+const { CHANNEL_MARKETPLACE } = require('./kanal');
 const { db, nextNumber } = require('../db');
 const { ACC } = require('../db/coa');
 
@@ -125,7 +126,7 @@ function deleteJournalsBySource(source, sourceId) {
 function buildSalesJournalLines(o) {
   const lines = [];
   const settleAccount = o.payment_status === 'PAID'
-    ? (['SHOPEE', 'TOKOPEDIA', 'TIKTOK_SHOP'].includes(o.channel) ? ACC.BANK : ACC.CASH)
+    ? (CHANNEL_MARKETPLACE.includes(o.channel) ? ACC.BANK : ACC.CASH)
     : ACC.AR_MARKETPLACE;
 
   const settlement = r2(o.net_revenue - o.total_fees);

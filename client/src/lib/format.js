@@ -40,6 +40,7 @@ export const CHANNEL_LABEL = {
   SHOPEE: 'Shopee',
   TOKOPEDIA: 'Tokopedia',
   TIKTOK_SHOP: 'TikTok Shop',
+  LAZADA: 'Lazada',
 };
 
 export const WORK_TYPE_LABEL = {

@@ -11,15 +11,7 @@ const { todayLocal } = require('../utils/time');
 const router = express.Router();
 router.use(requireAuth);
 
-const CHANNELS = ['OFFLINE_WA', 'SOCIAL_MEDIA', 'WEBSITE', 'SHOPEE', 'TOKOPEDIA', 'TIKTOK_SHOP'];
-const CHANNEL_LABEL = {
-  OFFLINE_WA: 'Offline / WhatsApp',
-  SOCIAL_MEDIA: 'Social Media',
-  WEBSITE: 'Website',
-  SHOPEE: 'Shopee',
-  TOKOPEDIA: 'Tokopedia',
-  TIKTOK_SHOP: 'TikTok Shop',
-};
+const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
 
 const orderSchema = z.object({
   order_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),
@@ -103,13 +95,26 @@ function computeOrder(input, items) {
   return { gross_sales, cogs, discount, net_revenue, admin_fee, tax_amount, total_fees, gross_profit, net_profit, margin_pct };
 }
 
-/** Menyiapkan baris item dengan snapshot HPP saat transaksi. */
+/**
+ * Menyiapkan baris item dengan snapshot HPP saat transaksi.
+ *
+ * Kecukupan stok diperiksa terhadap TOTAL permintaan per produk, bukan per
+ * baris. Satu order boleh memuat produk yang sama lebih dari sekali — misalnya
+ * dua harga berbeda dalam satu pesanan — dan memeriksa tiap baris sendiri-
+ * sendiri akan meloloskan pesanan yang jumlah keseluruhannya melebihi stok.
+ */
 function resolveItems(rawItems, { checkStock = true } = {}) {
+  const totalPerProduk = new Map();
+  for (const it of rawItems) {
+    totalPerProduk.set(it.product_id, (totalPerProduk.get(it.product_id) || 0) + it.qty);
+  }
+
   return rawItems.map((it) => {
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(it.product_id);
     if (!product) throw httpError(404, `Produk id ${it.product_id} tidak ditemukan`);
-    if (checkStock && it.qty > product.stock) {
-      throw httpError(422, `Stok ${product.name} tidak cukup (tersedia ${product.stock} ${product.unit}, diminta ${it.qty})`);
+    const diminta = totalPerProduk.get(it.product_id);
+    if (checkStock && diminta > product.stock) {
+      throw httpError(422, `Stok ${product.name} tidak cukup (tersedia ${product.stock} ${product.unit}, diminta ${diminta})`);
     }
     const qty = r2(it.qty);
     const price = r2(it.price);
@@ -190,10 +195,19 @@ const createOrder = db.transaction((body, userId) => {
      VALUES (?,?,'OUT',?,?,?,?, 'SALES', ?, ?, ?)`
   );
 
+  /** Sisa stok berjalan selama satu order diproses, per produk. */
+  const sisaStok = new Map();
+
   for (const it of items) {
     insertItem.run(orderId, it.product_id, it.qty, it.price, it.cost, it.subtotal, it.subcost);
 
-    const newStock = r2(it.product.stock - it.qty);
+    // Saldo dihitung dari sisa berjalan, bukan dari snapshot produk. Bila satu
+    // order memuat produk yang sama dua kali, snapshot membuat pengurangan
+    // kedua menimpa yang pertama — stok tampak masih utuh padahal barangnya
+    // sudah keluar dua kali, dan buku besar ikut salah karenanya.
+    const sebelum = sisaStok.has(it.product_id) ? sisaStok.get(it.product_id) : it.product.stock;
+    const newStock = r2(sebelum - it.qty);
+    sisaStok.set(it.product_id, newStock);
     db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, it.product_id);
     insertMove.run(
       it.product_id, body.order_date, it.qty, it.cost, newStock, orderNo, orderId,
@@ -245,6 +259,20 @@ function orderFilter(query) {
 }
 
 /** GET /api/sales — daftar order + ringkasan. */
+/**
+ * Batas jumlah baris yang dikembalikan.
+ *
+ * Sebelumnya angkanya dipatok 500 di dalam kueri, sehingga satu bulan dengan
+ * lebih dari 500 order diam-diam terpotong — daftar tampak lengkap padahal
+ * tidak. Sekarang batasnya bisa diminta pemanggil, tetap dengan atap agar satu
+ * permintaan tidak menarik seluruh riwayat sekaligus.
+ */
+function batas(nilai, bawaan = 500, atap = 5000) {
+  const n = Number(nilai);
+  if (!Number.isFinite(n) || n <= 0) return bawaan;
+  return Math.min(Math.floor(n), atap);
+}
+
 router.get('/', ah((req, res) => {
   const { from, to, where, params } = orderFilter(req.query);
   const rows = db
@@ -255,15 +283,20 @@ router.get('/', ah((req, res) => {
          LEFT JOIN users u  ON u.id = o.user_id
          LEFT JOIN shops sh ON sh.id = o.shop_id
          ${where}
-        ORDER BY o.order_date DESC, o.id DESC LIMIT 500`
+        ORDER BY o.order_date DESC, o.id DESC LIMIT ?`
     )
-    .all(...params);
+    .all(...params, batas(req.query.limit));
 
   const sum = (k) => r2(rows.reduce((s, r) => s + r[k], 0));
   const netRevenue = sum('net_revenue');
 
+  const diminta = batas(req.query.limit);
   res.json({
     from, to, rows,
+    // Beri tahu pemanggil bila daftar kemungkinan terpotong, supaya angka di
+    // layar tidak dikira lengkap padahal bukan.
+    terpotong: rows.length >= diminta,
+    limit: diminta,
     summary: {
       orders: rows.length,
       grossSales: sum('gross_sales'),

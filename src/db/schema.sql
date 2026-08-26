@@ -184,8 +184,9 @@ CREATE TABLE IF NOT EXISTS sales_orders (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   order_no        TEXT NOT NULL UNIQUE,
   order_date      TEXT NOT NULL,
-  channel         TEXT NOT NULL
-                  CHECK (channel IN ('OFFLINE_WA','SOCIAL_MEDIA','WEBSITE','SHOPEE','TOKOPEDIA','TIKTOK_SHOP')),
+  -- Daftar kanal divalidasi di lapisan aplikasi, bukan di sini: kanal baru
+  -- muncul dari waktu ke waktu dan tidak boleh menuntut pembongkaran tabel.
+  channel         TEXT NOT NULL,
   customer        TEXT,
   marketplace_ref TEXT,
 
@@ -279,8 +280,7 @@ CREATE INDEX IF NOT EXISTS idx_partner_kind ON partners(kind);
 CREATE TABLE IF NOT EXISTS shops (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL UNIQUE,
-  channel    TEXT NOT NULL DEFAULT 'SHOPEE'
-             CHECK (channel IN ('OFFLINE_WA','SOCIAL_MEDIA','WEBSITE','SHOPEE','TOKOPEDIA','TIKTOK_SHOP')),
+  channel    TEXT NOT NULL DEFAULT 'SHOPEE',
   note       TEXT,
   active     INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

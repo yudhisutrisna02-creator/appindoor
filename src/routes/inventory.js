@@ -252,11 +252,16 @@ router.get('/moves', ah((req, res) => {
 router.get('/valuation', ah((req, res) => {
   const rows = db
     .prepare(
-      `SELECT id, sku, name, category, unit, stock, cost, price, min_stock,
-              (stock * cost)  AS stock_value,
-              (stock * price) AS potential_revenue
-         FROM products WHERE active = 1
-        ORDER BY (stock * cost) DESC`
+      // Nama pemasok ikut dibawa supaya halaman valuasi bisa menjawab
+      // "barang senilai sekian ini dipasok siapa" tanpa pindah menu.
+      `SELECT p.id, p.sku, p.name, p.category, p.unit, p.stock, p.cost, p.price, p.min_stock,
+              mp.name AS supplier_name,
+              (p.stock * p.cost)  AS stock_value,
+              (p.stock * p.price) AS potential_revenue
+         FROM products p
+         LEFT JOIN partners mp ON mp.id = p.supplier_id
+        WHERE p.active = 1
+        ORDER BY (p.stock * p.cost) DESC`
     )
     .all();
 
@@ -293,8 +298,11 @@ router.get('/valuation', ah((req, res) => {
 router.get('/valuation/export/excel', ah(async (req, res) => {
   const rows = db
     .prepare(
-      `SELECT sku, name, category, unit, stock, cost, price, (stock*cost) AS stock_value
-         FROM products WHERE active = 1 ORDER BY category, name`
+      `SELECT p.sku, p.name, p.category, p.unit, mp.name AS supplier_name,
+              p.stock, p.cost, p.price, (p.stock*p.cost) AS stock_value
+         FROM products p
+         LEFT JOIN partners mp ON mp.id = p.supplier_id
+        WHERE p.active = 1 ORDER BY p.category, p.name`
     )
     .all();
 
@@ -305,6 +313,7 @@ router.get('/valuation/export/excel', ah(async (req, res) => {
       { header: 'Nama Produk', key: 'name', width: 32 },
       { header: 'Kategori', key: 'category', width: 16 },
       { header: 'Unit', key: 'unit', width: 8 },
+      { header: 'Pemasok', key: 'supplier_name', width: 22 },
       { header: 'Stok', key: 'stock', width: 10 },
       { header: 'HPP / Unit', key: 'cost', width: 14, money: true },
       { header: 'Harga Jual', key: 'price', width: 14, money: true },

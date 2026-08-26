@@ -259,6 +259,47 @@ async function main() {
   }
   check('presensi WFO di luar geofence ditolak', geoGuard);
 
+  // ---------- Kasus yang pernah merusak buku ----------
+  // Ditaruh paling akhir karena menambah transaksi baru, sehingga tidak
+  // mengganggu angka yang diperiksa pemeriksaan sebelumnya.
+  console.log('\n7. Order dengan produk berulang');
+
+  // Satu order boleh memuat produk yang sama dua kali. Dulu pengurangan kedua
+  // menimpa yang pertama, sehingga stok tampak masih utuh padahal barangnya
+  // sudah keluar dua kali — dan buku besar ikut salah karenanya.
+  const sblmGanda = (await call('GET', `/api/inventory/products?q=${sku}`)).products[0].stock;
+  await call('POST', '/api/sales', {
+    order_date: today, channel: 'WEBSITE',
+    items: [
+      { product_id: product.id, qty: 3, price: 25000 },
+      { product_id: product.id, qty: 2, price: 24000 },
+    ],
+  });
+  const ssdhGanda = (await call('GET', `/api/inventory/products?q=${sku}`)).products[0].stock;
+  check('produk yang sama dua kali dalam satu order mengurangi stok dua kali',
+    ssdhGanda === sblmGanda - 5, `(${sblmGanda} menjadi ${ssdhGanda}, seharusnya ${sblmGanda - 5})`);
+
+  const mutasiGanda = await call('GET', `/api/inventory/moves?from=${today}&to=${today}`);
+  const duaBaris = mutasiGanda.rows.filter((m) => m.sku === sku && m.move_type === 'OUT').slice(0, 2);
+  check('saldo pada mutasi ikut menurun bertahap',
+    duaBaris.length === 2 && duaBaris[0].balance_after !== duaBaris[1].balance_after,
+    duaBaris.map((m) => m.balance_after).join(' & '));
+
+  // Kecukupan stok harus diukur dari total permintaan, bukan per baris.
+  let gandaMelebihi = false;
+  try {
+    await call('POST', '/api/sales', {
+      order_date: today, channel: 'WEBSITE',
+      items: [
+        { product_id: product.id, qty: ssdhGanda, price: 25000 },
+        { product_id: product.id, qty: 1, price: 25000 },
+      ],
+    });
+  } catch {
+    gandaMelebihi = true;
+  }
+  check('total dua baris yang melebihi stok ditolak', gandaMelebihi);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -17,7 +17,7 @@ const { r2 } = require('../utils/accounting');
 const router = express.Router();
 router.use(requireAuth);
 
-const CHANNELS = ['OFFLINE_WA', 'SOCIAL_MEDIA', 'WEBSITE', 'SHOPEE', 'TOKOPEDIA', 'TIKTOK_SHOP'];
+const { CHANNELS } = require('../utils/kanal');
 
 const shopSchema = z.object({
   name: z.string().trim().min(1, 'nama toko wajib diisi').max(100),
