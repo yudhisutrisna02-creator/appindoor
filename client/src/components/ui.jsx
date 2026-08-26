@@ -89,7 +89,10 @@ export function StatCard({ label, value, sub, icon: Icon, tone = 'brand' }) {
         <div className="min-w-0">
           <p className="card-title truncate">{label}</p>
           <p className="tabular mt-1.5 text-lg font-bold text-slate-900 sm:text-xl">{value}</p>
-          {sub && <p className="mt-0.5 truncate text-xs text-slate-500">{sub}</p>}
+          {/* Keterangan dibiarkan membungkus, bukan dipotong — kalimat yang
+              terpenggal di tengah lebih membingungkan daripada kartu yang
+              sedikit lebih tinggi. */}
+          {sub && <p className="mt-0.5 text-xs leading-snug text-slate-500">{sub}</p>}
         </div>
         {Icon && (
           <div className={`shrink-0 rounded-xl p-2.5 ${tones[tone]}`}>

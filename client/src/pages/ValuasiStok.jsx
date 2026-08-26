@@ -59,7 +59,11 @@ export default function ValuasiStok() {
         />
         <StatCard
           label="Perlu Restock" value={data.lowStock.length}
-          sub={`${data.outOfStock} SKU habis total`}
+          sub={
+            data.neverStocked
+              ? `${data.outOfStock} habis • ${data.neverStocked} belum diberi stok minimum`
+              : `${data.outOfStock} SKU habis total`
+          }
           icon={AlertTriangle} tone={data.lowStock.length ? 'amber' : 'green'}
         />
       </div>
@@ -87,7 +91,14 @@ export default function ValuasiStok() {
         <div className="card">
           <h2 className="card-title mb-3">Perlu Segera Restock</h2>
           {data.lowStock.length === 0 ? (
-            <EmptyState message="Semua produk di atas stok minimum" hint="Tidak ada tindakan yang diperlukan" />
+            <EmptyState
+              message="Tidak ada yang perlu direstock"
+              hint={
+                data.neverStocked
+                  ? `${data.neverStocked} produk berstok nol, tapi belum diberi ambang stok minimum. Isi kolom "Stok Minimum" di Master Produk agar ikut terpantau.`
+                  : 'Semua produk masih di atas ambang minimumnya'
+              }
+            />
           ) : (
             <div className="table-wrap max-h-[260px] overflow-y-auto">
               <table className="table">
@@ -99,8 +110,9 @@ export default function ValuasiStok() {
                         <p className="font-medium text-slate-900">{p.name}</p>
                         <p className="text-xs text-slate-400">{p.sku}</p>
                       </td>
-                      <td className={`tabular font-semibold ${p.stock <= 0 ? 'text-rose-600' : 'text-amber-600'}`}>
+                      <td className={`tabular font-semibold ${p.out_of_stock ? 'text-rose-600' : 'text-amber-600'}`}>
                         {num(p.stock)} {p.unit}
+                        {p.out_of_stock && <span className="ml-1 text-xs font-normal">(habis)</span>}
                       </td>
                       <td className="tabular text-slate-500">{num(p.min_stock)}</td>
                       <td className="tabular">{rupiah(p.stock_value)}</td>

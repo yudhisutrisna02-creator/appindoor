@@ -108,7 +108,7 @@ export default function Produk() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>SKU</th><th>Produk</th><th>Kategori</th><th>Stok</th>
+                    <th>Produk</th><th>Kategori</th><th>Stok</th>
                     <th>HPP</th><th>Harga Jual</th><th>Margin</th><th>Nilai</th>
                     {canManage && <th>Aksi</th>}
                   </tr>
@@ -116,21 +116,38 @@ export default function Produk() {
                 <tbody>
                   {data.products.map((p) => (
                     <tr key={p.id}>
-                      <td className="font-mono text-xs">{p.sku}</td>
+                      {/* SKU disatukan dengan nama agar tabel muat tanpa
+                          memotong kolom Aksi di layar sempit. */}
                       <td>
                         <p className="font-medium text-slate-900">{p.name}</p>
-                        {!p.active && <span className="badge-slate">nonaktif</span>}
+                        <p className="font-mono text-xs text-slate-400">
+                          {p.sku}
+                          {!p.active && <span className="badge-slate ml-2">nonaktif</span>}
+                        </p>
                       </td>
                       <td className="text-xs text-slate-500">{p.category}</td>
-                      <td className={`tabular ${p.low_stock ? 'font-semibold text-amber-600' : ''}`}>
-                        {num(p.stock)} {p.unit}
+                      <td className="tabular">
+                        <span
+                          className={
+                            p.out_of_stock ? 'font-semibold text-rose-600'
+                              : p.low_stock ? 'font-semibold text-amber-600'
+                              : ''
+                          }
+                        >
+                          {num(p.stock)} {p.unit}
+                        </span>
                       </td>
                       <td className="tabular">{rupiah(p.cost)}</td>
                       <td className="tabular">{rupiah(p.price)}</td>
                       <td className="tabular">
-                        <span className={p.margin_base >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-                          {rupiah(p.margin_base)} ({pct(p.margin_base_pct)})
-                        </span>
+                        {/* Margin tidak bermakna selama harga jual belum diisi */}
+                        {p.margin_base === null ? (
+                          <span className="text-xs text-slate-400">belum ada harga jual</span>
+                        ) : (
+                          <span className={p.margin_base >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                            {rupiah(p.margin_base)} ({pct(p.margin_base_pct)})
+                          </span>
+                        )}
                       </td>
                       <td className="tabular font-semibold">{rupiah(p.stock_value)}</td>
                       {canManage && (

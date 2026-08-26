@@ -51,8 +51,20 @@
     @apply mb-1.5 block text-xs font-semibold text-slate-600;
   }
 
+  /* Tabel lebar digulir di dalam kotaknya sendiri. Padding kanan menyisakan
+     ruang supaya kolom aksi tidak menempel di tepi dan terlihat terpotong. */
   .table-wrap {
-    @apply -mx-4 overflow-x-auto sm:mx-0;
+    @apply -mx-4 overflow-x-auto pb-1 sm:mx-0;
+    scrollbar-width: thin;
+  }
+  .table-wrap::-webkit-scrollbar {
+    height: 8px;
+  }
+  .table-wrap::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+  .table-wrap::-webkit-scrollbar-track {
+    @apply bg-slate-100;
   }
   .table {
     @apply w-full min-w-full border-collapse text-sm;

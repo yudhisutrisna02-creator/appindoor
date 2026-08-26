@@ -43,9 +43,12 @@ router.get('/products', ah((req, res) => {
   const products = rows.map((p) => ({
     ...p,
     stock_value: r2(p.stock * p.cost),
-    margin_base: r2(p.price - p.cost),
-    margin_base_pct: p.price ? r2(((p.price - p.cost) / p.price) * 100) : 0,
-    low_stock: p.stock <= p.min_stock,
+    margin_base: p.price ? r2(p.price - p.cost) : null,
+    margin_base_pct: p.price ? r2(((p.price - p.cost) / p.price) * 100) : null,
+    // Habis dan menipis dibedakan: produk yang belum pernah diberi stok minimum
+    // tidak perlu ikut membanjiri daftar "perlu restock".
+    out_of_stock: p.stock <= 0,
+    low_stock: p.stock > 0 && p.min_stock > 0 && p.stock <= p.min_stock,
   }));
 
   res.json({
@@ -268,8 +271,13 @@ router.get('/valuation', ah((req, res) => {
     totalValue,
     potentialRevenue,
     potentialMargin: r2(potentialRevenue - totalValue),
-    lowStock: rows.filter((r) => r.stock <= r.min_stock).map((r) => ({ ...r, stock_value: r2(r.stock_value) })),
+    // Perlu ditindak = stok menipis tapi belum habis, plus barang habis yang
+    // memang punya ambang minimum. Produk yang tidak pernah distok tidak ikut.
+    lowStock: rows
+      .filter((r) => r.min_stock > 0 && r.stock <= r.min_stock)
+      .map((r) => ({ ...r, stock_value: r2(r.stock_value), out_of_stock: r.stock <= 0 })),
     outOfStock: rows.filter((r) => r.stock <= 0).length,
+    neverStocked: rows.filter((r) => r.stock <= 0 && r.min_stock <= 0).length,
     byCategory: Object.values(byCategory).sort((a, b) => b.value - a.value),
     rows: rows.map((r) => ({ ...r, stock_value: r2(r.stock_value), potential_revenue: r2(r.potential_revenue) })),
   });

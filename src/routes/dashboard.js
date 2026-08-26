@@ -38,7 +38,8 @@ router.get('/', ah((req, res) => {
               COALESCE(SUM(stock), 0) AS total_qty,
               COALESCE(SUM(stock * cost), 0) AS total_value,
               COALESCE(SUM(stock * price), 0) AS potential_revenue,
-              SUM(CASE WHEN stock <= min_stock THEN 1 ELSE 0 END) AS low_stock_count
+              SUM(CASE WHEN min_stock > 0 AND stock <= min_stock THEN 1 ELSE 0 END) AS low_stock_count,
+              SUM(CASE WHEN stock <= 0 THEN 1 ELSE 0 END) AS out_of_stock_count
          FROM products WHERE active = 1`
     )
     .get();
@@ -106,6 +107,7 @@ router.get('/', ah((req, res) => {
       potentialRevenue: r2(inventory.potential_revenue),
       potentialMargin: r2(inventory.potential_revenue - inventory.total_value),
       lowStockCount: inventory.low_stock_count || 0,
+      outOfStockCount: inventory.out_of_stock_count || 0,
     },
     sales: {
       orders: sales.orders,
