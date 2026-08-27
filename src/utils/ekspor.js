@@ -53,8 +53,11 @@ function daftarkanEkspor(router, { path, judul, kolom, ambil }) {
       return res.send(buffer);
     });
 
-  router.get(`${path}/export/excel`, kirim('excel'));
-  router.get(`${path}/export/pdf`, kirim('pdf'));
+  // Path '/' akan menghasilkan '//export/excel' bila disambung apa adanya,
+  // dan Express tidak mencocokkan alamat berisi garis miring ganda.
+  const awalan = path === '/' ? '' : path;
+  router.get(`${awalan}/export/excel`, kirim('excel'));
+  router.get(`${awalan}/export/pdf`, kirim('pdf'));
 }
 
 module.exports = { daftarkanEkspor, namaBerkas };

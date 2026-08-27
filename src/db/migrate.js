@@ -177,6 +177,8 @@ function runMigrations(db) {
   lepasCekKanal(db, 'shops', applied);
 
   // Indeks menyusul kolomnya
+  db.exec('CREATE INDEX IF NOT EXISTS idx_ads_date ON ad_spends(spend_date)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_ads_shop ON ad_spends(shop_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_jl_partner ON journal_lines(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_partner ON sales_orders(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_mv_partner ON stock_moves(partner_id)');

@@ -303,3 +303,23 @@ CREATE TABLE IF NOT EXISTS shops (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_shop_channel ON shops(channel);
+
+-- ---------- BIAYA IKLAN & PEMASARAN ----------
+-- Iklan dibelanjakan per akun toko, bukan per pesanan: satu kampanye menarik
+-- banyak order sekaligus, dan sebagian tidak menghasilkan order sama sekali.
+-- Karena itu biayanya dicatat sebagai baris tersendiri lalu dibandingkan dengan
+-- penjualan toko yang sama pada periode yang sama — bukan dibebankan ke order.
+CREATE TABLE IF NOT EXISTS ad_spends (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  spend_date  TEXT    NOT NULL,
+  shop_id     INTEGER REFERENCES shops(id),
+  channel     TEXT    NOT NULL,
+  platform    TEXT,                       -- Shopee Ads, TikTok Ads, Meta Ads, Google Ads
+  amount      REAL    NOT NULL,
+  payment     TEXT    NOT NULL DEFAULT 'BANK',  -- CASH, BANK, CREDIT
+  note        TEXT,
+  user_id     INTEGER REFERENCES users(id),
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ads_date ON ad_spends(spend_date);
+CREATE INDEX IF NOT EXISTS idx_ads_shop ON ad_spends(shop_id);

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Wallet, TrendingUp, Warehouse, Users, ShoppingCart, Scale, Truck,
   AlertTriangle, Lightbulb, Target, Clock, Timer,
-  RefreshCw, Activity, CircleDollarSign, Boxes,
+  RefreshCw, Activity, CircleDollarSign, Boxes, Megaphone,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -81,7 +81,7 @@ export default function Dashboard() {
       </PageHeader>
 
       {/* ---------- REALTIME HARI INI ---------- */}
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard
           label="Penjualan Hari Ini" value={rupiahShort(penjualan.hariIni.netRevenue)}
           sub={`${penjualan.hariIni.orders} order • ${
@@ -93,6 +93,12 @@ export default function Dashboard() {
           label="Laba Hari Ini" value={rupiahShort(penjualan.hariIni.netProfit)}
           sub={`Margin ${pct(penjualan.hariIni.marginPct)}`}
           icon={TrendingUp} tone={penjualan.hariIni.netProfit >= 0 ? 'green' : 'red'}
+        />
+        <StatCard
+          label="Laba Setelah Iklan" value={rupiahShort(penjualan.iklan.labaHariIniSetelahIklan)}
+          sub={`Iklan hari ini ${rupiahShort(penjualan.iklan.hariIni)}`}
+          icon={Megaphone}
+          tone={penjualan.iklan.labaHariIniSetelahIklan >= 0 ? 'green' : 'red'}
         />
         <StatCard
           label="Hadir Hari Ini" value={`${presensi.hariIni.hadir}/${presensi.karyawanAktif}`}
@@ -178,10 +184,30 @@ function TabPenjualan({ p }) {
 
   return (
     <div className="grid gap-4">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Pendapatan Periode" value={rupiahShort(p.periode.netRevenue)} sub={`${p.periode.orders} order`} />
-        <StatCard label="Laba Bersih" value={rupiahShort(p.periode.netProfit)} sub={`Margin ${pct(p.periode.marginPct)}`} tone={p.periode.netProfit >= 0 ? 'green' : 'red'} />
+      {/* Urutannya mengikuti perjalanan uang: dari yang tercatat di nota,
+          dipotong marketplace, dipotong HPP, lalu dipotong iklan. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <StatCard label="Pendapatan Kotor" value={rupiahShort(p.periode.netRevenue)} sub={`${p.periode.orders} order • sebelum potongan`} />
         <StatCard label="Biaya Channel" value={rupiahShort(p.periode.totalFees)} sub="admin, voucher, ongkir, packing" tone="amber" />
+        <StatCard label="Pendapatan Bersih" value={rupiahShort(p.periode.netReceived)} sub="yang benar-benar diterima" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="HPP" value={rupiahShort(p.periode.cogs)} tone="slate" />
+        <StatCard label="Laba Bersih" value={rupiahShort(p.periode.netProfit)} sub={`Margin ${pct(p.periode.marginPct)}`} tone={p.periode.netProfit >= 0 ? 'green' : 'red'} />
+        <StatCard
+          label="Biaya Iklan" value={rupiahShort(p.iklan.periode)}
+          sub={p.iklan.roas != null ? `ROAS ${p.iklan.roas.toFixed(2)}× • ${pct(p.iklan.rasioPct)} dari penjualan` : 'belum ada catatan iklan'}
+          icon={Megaphone} tone="amber"
+        />
+        <StatCard
+          label="Laba Setelah Iklan" value={rupiahShort(p.iklan.labaSetelahIklan)}
+          sub={`Sebelum iklan ${rupiahShort(p.periode.netProfit)}`}
+          tone={p.iklan.labaSetelahIklan >= 0 ? 'green' : 'red'}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
         <StatCard
           label="Dana Belum Cair" value={rupiahShort(p.danaTertahan.nilai)}
           sub={`${p.danaTertahan.orders} order menunggu pencairan`}

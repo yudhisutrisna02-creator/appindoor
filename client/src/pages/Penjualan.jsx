@@ -111,6 +111,8 @@ export default function Penjualan() {
 
     return {
       gross, cogs, discount, netRevenue, adminFee, taxAmount, fees, grossProfit, netProfit,
+      // Yang benar-benar diterima setelah seluruh potongan marketplace.
+      netReceived: netRevenue - fees,
       marginPct: netRevenue ? (netProfit / netRevenue) * 100 : 0,
     };
   }, [form, products]);
@@ -216,9 +218,15 @@ export default function Penjualan() {
         <>
           <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
             <StatCard label="Jumlah Order" value={data.summary.orders} sub={`AOV ${rupiahShort(data.summary.avgOrderValue)}`} icon={ShoppingCart} />
-            <StatCard label="Pendapatan Bersih" value={rupiahShort(data.summary.netRevenue)} sub={`Kotor ${rupiahShort(data.summary.grossSales)}`} />
+            <StatCard
+              label="Pendapatan Kotor" value={rupiahShort(data.summary.netRevenue)}
+              sub={`Penjualan ${rupiahShort(data.summary.grossSales)} − diskon`}
+            />
+            <StatCard
+              label="Pendapatan Bersih" value={rupiahShort(data.summary.netReceived)}
+              sub={`Setelah biaya channel ${rupiahShort(data.summary.totalFees)}`}
+            />
             <StatCard label="HPP" value={rupiahShort(data.summary.cogs)} tone="slate" />
-            <StatCard label="Total Biaya Channel" value={rupiahShort(data.summary.totalFees)} tone="amber" />
             <StatCard
               label="Laba Bersih" value={rupiahShort(data.summary.netProfit)}
               sub={`Margin ${pct(data.summary.marginPct)}`}
@@ -517,10 +525,10 @@ export default function Penjualan() {
                 <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
                   <SumRow label="Penjualan Kotor" value={calc.gross} />
                   <SumRow label="Diskon" value={-calc.discount} />
-                  <SumRow label="Pendapatan Bersih" value={calc.netRevenue} bold />
-                  <SumRow label="HPP" value={-calc.cogs} />
-                  <SumRow label="Laba Kotor" value={calc.grossProfit} bold />
+                  <SumRow label="Pendapatan Kotor" value={calc.netRevenue} bold />
                   <SumRow label="Total Biaya Channel" value={-calc.fees} tone="amber" />
+                  <SumRow label="Pendapatan Bersih" value={calc.netReceived} bold />
+                  <SumRow label="HPP" value={-calc.cogs} />
                 </div>
                 <div className="mt-3 flex items-center justify-between border-t border-slate-700 pt-3">
                   <span className="text-sm font-semibold">LABA BERSIH</span>
@@ -578,9 +586,14 @@ export default function Penjualan() {
               <dl className="space-y-1 text-sm">
                 <DetailRow label="Penjualan Kotor" value={rupiah(detail.order.gross_sales)} />
                 <DetailRow label="Diskon" value={`− ${rupiah(detail.order.discount)}`} />
-                <DetailRow label="Pendapatan Bersih" value={rupiah(detail.order.net_revenue)} bold />
+                <DetailRow label="Pendapatan Kotor" value={rupiah(detail.order.net_revenue)} bold />
+                <DetailRow label="Total Biaya Channel" value={`− ${rupiah(detail.order.total_fees)}`} />
+                <DetailRow
+                  label="Pendapatan Bersih"
+                  value={rupiah(detail.order.net_revenue - detail.order.total_fees)}
+                  bold
+                />
                 <DetailRow label="HPP" value={`− ${rupiah(detail.order.cogs)}`} />
-                <DetailRow label="Laba Kotor" value={rupiah(detail.order.gross_profit)} bold />
               </dl>
               <dl className="space-y-1 text-sm">
                 <DetailRow label="Admin Marketplace" value={`− ${rupiah(detail.order.admin_fee)}`} />

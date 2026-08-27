@@ -316,7 +316,12 @@ router.get('/', ah((req, res) => {
     summary: {
       orders: total.orders,
       grossSales: r2(total.gross_sales),
+      // netRevenue = penjualan dikurangi diskon, sebelum potongan marketplace.
+      // Di layar disebut Pendapatan Kotor: uang sebesar itu tidak pernah
+      // benar-benar masuk rekening, karena marketplace memotong lebih dulu.
       netRevenue: r2(total.net_revenue),
+      // Yang benar-benar diterima setelah seluruh potongan.
+      netReceived: r2(total.net_revenue - total.total_fees),
       cogs: r2(total.cogs),
       totalFees: r2(total.total_fees),
       grossProfit: r2(total.gross_profit),

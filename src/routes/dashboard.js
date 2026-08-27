@@ -42,7 +42,11 @@ router.get('/', ah((req, res) => {
     return {
       orders: row.orders,
       grossSales: r2(row.gross_sales),
+      // netRevenue = penjualan − diskon, sebelum potongan marketplace.
+      // Di layar disebut Pendapatan Kotor karena uang sebesar itu tidak pernah
+      // benar-benar masuk rekening.
       netRevenue: r2(row.net_revenue),
+      netReceived: r2(row.net_revenue - row.total_fees),
       cogs: r2(row.cogs),
       totalFees: r2(row.total_fees),
       grossProfit: r2(row.gross_profit),
@@ -207,6 +211,42 @@ router.get('/', ah((req, res) => {
   const bs = balanceSheet(to);
   const cf = cashFlow(from, to);
 
+  // ================= IKLAN =================
+  // Iklan tidak menempel pada pesanan mana pun, jadi angkanya diambil terpisah
+  // lalu dikurangkan dari laba periode yang sama.
+  const iklanPeriode = db
+    .prepare('SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM ad_spends WHERE spend_date BETWEEN ? AND ?')
+    .get(from, to);
+  const iklanHariIni = db
+    .prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM ad_spends WHERE spend_date = ?')
+    .get(today);
+  const iklanBulanIni = db
+    .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM ad_spends WHERE strftime('%Y-%m', spend_date) = strftime('%Y-%m', ?)")
+    .get(today);
+
+  const iklanPerToko = db
+    .prepare(
+      `SELECT a.shop_id, COALESCE(s.name, 'Tanpa toko') AS shop_name,
+              COALESCE(SUM(a.amount), 0) AS iklan
+         FROM ad_spends a LEFT JOIN shops s ON s.id = a.shop_id
+        WHERE a.spend_date BETWEEN ? AND ?
+        GROUP BY a.shop_id ORDER BY iklan DESC`
+    )
+    .all(from, to)
+    .map((x) => ({ ...x, iklan: r2(x.iklan) }));
+
+  const iklan = {
+    hariIni: r2(iklanHariIni.total),
+    periode: r2(iklanPeriode.total),
+    bulanIni: r2(iklanBulanIni.total),
+    jumlahCatatan: iklanPeriode.n,
+    perToko: iklanPerToko,
+    labaSetelahIklan: r2(periode.netProfit - iklanPeriode.total),
+    labaHariIniSetelahIklan: r2(hariIni.netProfit - iklanHariIni.total),
+    roas: iklanPeriode.total > 0 ? r2(periode.netRevenue / iklanPeriode.total) : null,
+    rasioPct: periode.netRevenue > 0 ? r2((iklanPeriode.total / periode.netRevenue) * 100) : null,
+  };
+
   // ================= ANALISIS =================
   const toko = analisa.performaToko(from, to);
   const akanHabis = analisa.stokAkanHabis();
@@ -239,6 +279,7 @@ router.get('/', ah((req, res) => {
       danaTertahan: tertahan,
       kota: analisa.kotaTeratas(from, to),
       ekspedisi: analisa.ekspedisiTeratas(from, to),
+      iklan,
     },
 
     presensi: {

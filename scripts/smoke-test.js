@@ -466,6 +466,87 @@ async function main() {
     pdfLaporan.ok && isiPdf.includes(Buffer.from('/Image')),
     `${isiPdf.length} byte`);
 
+  // ---------- Biaya iklan & penamaan pendapatan ----------
+  console.log('\n10. Biaya iklan & pendapatan kotor/bersih');
+
+  const daftarOrder = await call('GET', `/api/sales?from=${today}&to=${today}`);
+  const rk = daftarOrder.summary;
+  check('pendapatan bersih = pendapatan kotor − biaya channel',
+    near(rk.netReceived, rk.netRevenue - rk.totalFees, 1),
+    `${rk.netReceived} = ${rk.netRevenue} − ${rk.totalFees}`);
+  check('laba bersih = pendapatan bersih − HPP',
+    near(rk.netProfit, rk.netReceived - rk.cogs, 1),
+    `${rk.netProfit} = ${rk.netReceived} − ${rk.cogs}`);
+
+  const tokoIklan = await call('POST', '/api/shops', { name: `Toko Iklan ${Date.now()}`, channel: 'SHOPEE' });
+  const idToko = (tokoIklan.shop || tokoIklan).id;
+
+  const kasSblmIklan = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`)).assets.current.totalCash;
+  const catat = await call('POST', '/api/iklan', {
+    spend_date: today, shop_id: idToko, channel: 'SHOPEE',
+    platform: 'Shopee Ads', amount: 300000, payment: 'BANK', note: 'Uji kampanye',
+  });
+  check('biaya iklan tersimpan', catat.spend.amount === 300000);
+
+  const bsIklan = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah biaya iklan', bsIklan.balanced);
+  check('biaya iklan mengurangi kas/bank',
+    near(bsIklan.assets.current.totalCash, kasSblmIklan - 300000, 1),
+    `${kasSblmIklan} menjadi ${bsIklan.assets.current.totalCash}`);
+
+  const pnlIklan = await call('GET', `/api/finance/reports/income-statement?from=2000-01-01&to=${today}`);
+  const barisIklan = (pnlIklan.sellingRows || []).find((x) => x.code === '6050');
+  check('biaya iklan masuk beban usaha di laba rugi',
+    !!barisIklan && near(barisIklan.amount, 300000, 1),
+    barisIklan ? String(barisIklan.amount) : 'baris 6050 tidak ada');
+
+  const ringkasIklan = await call('GET', `/api/iklan?from=${today}&to=${today}`);
+  check('ringkasan iklan menghitung total belanja',
+    near(ringkasIklan.ringkas.totalIklan, 300000, 1), String(ringkasIklan.ringkas.totalIklan));
+  check('laba setelah iklan = laba sebelum iklan − belanja iklan',
+    near(ringkasIklan.ringkas.labaSetelahIklan, ringkasIklan.ringkas.labaSebelumIklan - 300000, 1),
+    `${ringkasIklan.ringkas.labaSetelahIklan}`);
+
+  const tokoDiRingkas = ringkasIklan.perToko.find((t) => t.shop_id === idToko);
+  check('belanja iklan menempel pada tokonya', !!tokoDiRingkas && tokoDiRingkas.iklan === 300000);
+
+  const dashIklan = await call('GET', `/api/dashboard?from=${today}&to=${today}`);
+  check('dashboard memuat pendapatan kotor dan bersih',
+    dashIklan.penjualan.periode.netReceived !== undefined &&
+    near(dashIklan.penjualan.periode.netReceived,
+      dashIklan.penjualan.periode.netRevenue - dashIklan.penjualan.periode.totalFees, 1));
+  check('dashboard memuat laba setelah iklan',
+    near(dashIklan.penjualan.iklan.labaSetelahIklan,
+      dashIklan.penjualan.periode.netProfit - dashIklan.penjualan.iklan.periode, 1),
+    `${dashIklan.penjualan.iklan.labaSetelahIklan}`);
+
+  // Mengubah nilainya harus menulis ulang jurnalnya, bukan menambah baris baru.
+  await call('PUT', `/api/iklan/${catat.spend.id}`, {
+    spend_date: today, shop_id: idToko, channel: 'SHOPEE',
+    platform: 'Shopee Ads', amount: 100000, payment: 'BANK', note: 'Dikoreksi',
+  });
+  const bsIklanUbah = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('mengubah biaya iklan menulis ulang jurnalnya',
+    near(bsIklanUbah.assets.current.totalCash, kasSblmIklan - 100000, 1) && bsIklanUbah.balanced,
+    `kas ${bsIklanUbah.assets.current.totalCash}`);
+
+  await call('DELETE', `/api/iklan/${catat.spend.id}`);
+  const bsIklanHapus = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('menghapus biaya iklan mengembalikan kas dan tetap seimbang',
+    near(bsIklanHapus.assets.current.totalCash, kasSblmIklan, 1) && bsIklanHapus.balanced,
+    `kas ${bsIklanHapus.assets.current.totalCash}`);
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/iklan/export/${bentuk}?from=${today}&to=${today}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`biaya iklan bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
+      `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
