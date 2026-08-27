@@ -13,7 +13,7 @@ const { z } = require('zod');
 const { db } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, postJournal, deleteJournalsBySource, accountByCode } = require('../utils/accounting');
+const { r2, ACC, postJournal, deleteJournalsBySource, accountByCode } = require('../utils/accounting');
 const { todayLocal } = require('../utils/time');
 
 const router = express.Router();
@@ -24,12 +24,28 @@ function cashAccounts() {
   return db.prepare('SELECT id, code, name FROM accounts WHERE is_cash = 1 AND active = 1 ORDER BY code').all();
 }
 
+/**
+ * Akun yang punya menu sendiri, sehingga tidak boleh dicatat lewat layar kas.
+ *
+ * Biaya iklan dicatat di menu Biaya Iklan karena di sana belanjanya menempel ke
+ * toko — itulah yang membuat ROAS dan laba per toko bisa dihitung. Bila akun
+ * yang sama juga bisa dipilih di layar kas, satu belanja yang tercatat di
+ * kedua tempat akan terhitung dua kali pada akun yang sama, dan labanya tampak
+ * lebih kecil daripada yang sebenarnya tanpa ada tanda apa pun.
+ */
+const AKUN_BERMENU_SENDIRI = {
+  [ACC.FEE_ADS]: 'Biaya Iklan (menu Penjualan → Biaya Iklan)',
+};
+
 /** Kategori yang masuk akal untuk pemasukan / pengeluaran non-penjualan. */
 function categoryAccounts(direction) {
   const where = direction === 'IN'
     ? "type = 'REVENUE' AND subtype IN ('OTHER_INCOME','SALES')"
     : "type = 'EXPENSE' AND subtype IN ('SELLING','ADMIN','TAX','FINANCE','OTHER','COGS')";
-  return db.prepare(`SELECT id, code, name, subtype FROM accounts WHERE ${where} AND active = 1 ORDER BY code`).all();
+  return db
+    .prepare(`SELECT id, code, name, subtype FROM accounts WHERE ${where} AND active = 1 ORDER BY code`)
+    .all()
+    .filter((a) => !AKUN_BERMENU_SENDIRI[a.code]);
 }
 
 /** GET /api/cashflow/options — isi dropdown form. */
@@ -68,6 +84,17 @@ router.post('/entries', butuhIzin('keuangan.kas'), ah((req, res) => {
 
   const kategori = accountByCode(body.category_code);
   if (kategori.is_cash) throw httpError(422, 'Kategori tidak boleh berupa akun kas');
+
+  // Ditolak di peladen, bukan hanya disembunyikan dari daftar pilihan: layar
+  // lama yang masih terbuka di peramban lain tetap bisa mengirim kode ini.
+  const menuSendiri = AKUN_BERMENU_SENDIRI[kategori.code];
+  if (menuSendiri) {
+    throw httpError(
+      422,
+      `${kategori.code} · ${kategori.name} dicatat lewat ${menuSendiri}, bukan dari sini. ` +
+        'Mencatatnya di dua tempat membuat satu belanja terhitung dua kali pada akun yang sama.'
+    );
+  }
 
   const nilai = r2(body.amount);
   const lines = body.direction === 'IN'

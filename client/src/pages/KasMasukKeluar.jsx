@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowDownCircle, ArrowUpCircle, Trash2, Wallet, Plus } from 'lucide-react';
 import { api } from '../lib/api';
 import {
@@ -242,6 +243,17 @@ export default function KasMasukKeluar() {
                   <option key={k.code} value={k.code}>{k.code} — {k.name}</option>
                 ))}
               </select>
+              {/* Kategori biaya iklan sengaja tidak ada di sini; tanpa penjelasan,
+                  yang mencarinya akan mengira daftarnya kurang lengkap. */}
+              {form.direction === 'OUT' && (
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  Belanja iklan dicatat di{' '}
+                  <Link to="/penjualan/iklan" className="font-medium text-brand-600 hover:underline">
+                    menu Biaya Iklan
+                  </Link>{' '}
+                  agar menempel ke tokonya dan ROAS-nya terhitung — hasilnya tetap muncul di daftar kas ini.
+                </p>
+              )}
             </Field>
 
             <Field

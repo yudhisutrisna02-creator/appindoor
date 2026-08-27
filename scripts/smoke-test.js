@@ -691,6 +691,25 @@ async function main() {
   check('baris dari modul lain tidak bisa dihapus dari menu Kas',
     !!kasBarisIklan && kasBarisIklan.bisaHapus === false);
 
+  // Satu belanja iklan hanya boleh punya satu pintu masuk. Kalau akun 6050
+  // juga bisa dipilih di layar kas, belanja yang tercatat di kedua tempat akan
+  // terhitung dua kali pada akun yang sama tanpa tanda apa pun.
+  const opsiKas = await call('GET', '/api/cashflow/options');
+  check('akun biaya iklan tidak ditawarkan di pilihan kategori kas',
+    !opsiKas.expenseCategories.some((k) => k.code === '6050'),
+    opsiKas.expenseCategories.map((k) => k.code).join(','));
+
+  let tolakIklanLewatKas = false;
+  try {
+    await call('POST', '/api/cashflow/entries', {
+      entry_date: today, direction: 'OUT', category_code: '6050',
+      cash_code: '1000', amount: 50000, description: 'Uji iklan lewat kas',
+    });
+  } catch {
+    tolakIklanLewatKas = true;
+  }
+  check('peladen menolak biaya iklan yang dicatat lewat layar kas', tolakIklanLewatKas);
+
   let tolakHapusAsing = false;
   try {
     await call('DELETE', `/api/cashflow/entries/${kasBarisIklan.id}`);
