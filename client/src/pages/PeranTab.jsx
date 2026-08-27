@@ -132,7 +132,11 @@ export default function PeranTab() {
                   </div>
                   <p className="font-mono text-[11px] text-slate-400">{r.slug}</p>
                 </td>
-                <td className="max-w-md text-xs text-slate-600">{r.description || '-'}</td>
+                {/* Keterangan bisa panjang; tanpa lebar tetap ia mendorong kolom
+                    angka di sebelahnya sampai saling tumpang tindih. */}
+                <td className="text-xs text-slate-600">
+                  <p className="w-[22rem] max-w-[40vw] leading-relaxed">{r.description || '-'}</p>
+                </td>
                 <td className="tabular text-sm">{r.permissions.length}</td>
                 <td className="tabular text-sm">{r.jumlahPengguna}</td>
                 <td>{r.active ? <span className="badge-green">aktif</span> : <span className="badge-slate">nonaktif</span>}</td>
