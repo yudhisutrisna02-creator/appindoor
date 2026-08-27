@@ -95,32 +95,79 @@ router.post('/entries', butuhIzin('keuangan.kas'), ah((req, res) => {
   });
 }));
 
-/** GET /api/cashflow/entries — riwayat kas masuk & keluar. */
-/** Pengambil daftar kas masuk & keluar — dipakai layar dan berkas unduhan. */
+/** Dari mana sebuah pergerakan kas berasal, dalam bahasa yang dikenali pemakai. */
+const LABEL_SUMBER = {
+  CASH: 'Catatan Kas',
+  ADS: 'Biaya Iklan',
+  SALES: 'Penjualan',
+  STOCK: 'Barang Masuk',
+  SETTLEMENT: 'Pelunasan Utang/Piutang',
+  OPNAME: 'Stok Opname',
+  MANUAL: 'Jurnal Manual',
+};
+
+/**
+ * Riwayat kas masuk & keluar.
+ *
+ * Menampilkan SEMUA jurnal yang menyentuh akun kas atau bank, bukan hanya yang
+ * diketik lewat layar ini. Sebelumnya daftarnya disaring ke source='CASH'
+ * saja, sehingga belanja iklan, pembelian barang, dan penerimaan penjualan —
+ * yang semuanya benar-benar menggerakkan uang — tidak tampak di sini. Akibatnya
+ * total di layar ini tidak pernah cocok dengan saldo kas di Neraca, dan yang
+ * membacanya tidak punya cara tahu ke mana selisihnya pergi.
+ *
+ * Barisnya tetap dibedakan menurut asalnya, dan hanya catatan kas manual yang
+ * boleh dihapus dari sini: menghapus jurnal milik order atau belanja iklan dari
+ * layar ini akan menyisakan dokumen aslinya tanpa jurnal, dan itu justru
+ * merusak kecocokan yang sedang diusahakan.
+ */
 function ambilKas(req) {
   const { from, to } = dateRange(req.query);
 
   const rows = db
     .prepare(
-      `SELECT j.id, j.entry_no, j.entry_date, j.description, u.name AS user_name,
+      `SELECT j.id, j.entry_no, j.entry_date, j.description, j.source, u.name AS user_name,
               (SELECT COALESCE(SUM(l.debit),0) FROM journal_lines l
                  JOIN accounts a ON a.id = l.account_id
                 WHERE l.journal_id = j.id AND a.is_cash = 1) AS masuk,
               (SELECT COALESCE(SUM(l.credit),0) FROM journal_lines l
                  JOIN accounts a ON a.id = l.account_id
                 WHERE l.journal_id = j.id AND a.is_cash = 1) AS keluar,
-              (SELECT a.name FROM journal_lines l
+              (SELECT a.code || ' · ' || a.name FROM journal_lines l
                  JOIN accounts a ON a.id = l.account_id
-                WHERE l.journal_id = j.id AND a.is_cash = 0 LIMIT 1) AS kategori
+                WHERE l.journal_id = j.id AND a.is_cash = 0
+                ORDER BY (l.debit + l.credit) DESC LIMIT 1) AS kategori
          FROM journals j
          LEFT JOIN users u ON u.id = j.created_by
-        WHERE j.source = 'CASH' AND j.entry_date BETWEEN ? AND ?
+        WHERE j.entry_date BETWEEN ? AND ?
+          AND EXISTS (
+            SELECT 1 FROM journal_lines l
+              JOIN accounts a ON a.id = l.account_id
+             WHERE l.journal_id = j.id AND a.is_cash = 1
+          )
         ORDER BY j.entry_date DESC, j.id DESC`
     )
-    .all(from, to);
+    .all(from, to)
+    .map((r) => ({
+      ...r,
+      sumber: LABEL_SUMBER[r.source] || r.source,
+      // Hanya catatan yang lahir di layar ini yang boleh dihapus dari sini.
+      bisaHapus: r.source === 'CASH',
+    }));
+
+  const perSumber = [...rows.reduce((m, r) => {
+    const c = m.get(r.sumber) || { sumber: r.sumber, masuk: 0, keluar: 0, baris: 0 };
+    c.masuk += r.masuk;
+    c.keluar += r.keluar;
+    c.baris += 1;
+    m.set(r.sumber, c);
+    return m;
+  }, new Map()).values()]
+    .map((c) => ({ ...c, masuk: r2(c.masuk), keluar: r2(c.keluar) }))
+    .sort((a, b) => b.keluar + b.masuk - (a.keluar + a.masuk));
 
   return {
-    from, to, rows,
+    from, to, rows, perSumber,
     summary: {
       masuk: r2(rows.reduce((s, r) => s + r.masuk, 0)),
       keluar: r2(rows.reduce((s, r) => s + r.keluar, 0)),
@@ -138,7 +185,8 @@ daftarkanEkspor(router, {
     { header: 'Tanggal', key: 'entry_date', width: 12 },
     { header: 'Nomor', key: 'entry_no', width: 18 },
     { header: 'Keterangan', key: 'description', width: 40 },
-    { header: 'Kategori', key: 'kategori', width: 26 },
+    { header: 'Sumber', key: 'sumber', width: 20 },
+    { header: 'Kategori', key: 'kategori', width: 30 },
     { header: 'Masuk', key: 'masuk', width: 16, money: true },
     { header: 'Keluar', key: 'keluar', width: 16, money: true },
     { header: 'Dicatat Oleh', key: 'user_name', width: 18 },
@@ -158,8 +206,15 @@ daftarkanEkspor(router, {
 });
 
 router.delete('/entries/:id', butuhIzin('keuangan.kas'), ah((req, res) => {
-  const journal = db.prepare("SELECT * FROM journals WHERE id = ? AND source = 'CASH'").get(req.params.id);
+  const journal = db.prepare('SELECT * FROM journals WHERE id = ?').get(req.params.id);
   if (!journal) throw httpError(404, 'Catatan kas tidak ditemukan');
+  if (journal.source !== 'CASH') {
+    throw httpError(
+      422,
+      `${journal.entry_no} berasal dari ${LABEL_SUMBER[journal.source] || journal.source} — ` +
+        'hapus atau ubah dari menu asalnya agar dokumen dan jurnalnya tetap sejalan'
+    );
+  }
 
   db.prepare('DELETE FROM journals WHERE id = ?').run(journal.id);
   res.json({ ok: true, message: `${journal.entry_no} dihapus` });

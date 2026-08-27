@@ -656,6 +656,54 @@ async function main() {
   }
   check('peran yang masih dipakai akun tidak dapat dihapus', tolakHapusTerpakai);
 
+  // ---------- Kas menyeluruh ----------
+  console.log('\n12. Kecocokan kas menyeluruh');
+
+  // Belanja iklan pada seksi 10 sengaja dihapus di akhir pengujiannya, jadi
+  // dicatat satu lagi di sini untuk membuktikan ia muncul sebagai kas keluar.
+  await call('POST', '/api/iklan', {
+    spend_date: today, channel: 'SHOPEE', platform: 'Shopee Ads',
+    amount: 175000, payment: 'BANK', note: 'Uji kas iklan',
+  });
+
+  const kasSemua = await call('GET', `/api/cashflow/entries?from=2000-01-01&to=${today}`);
+  const bsKas = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+
+  // Inti kecocokannya: seluruh pergerakan kas yang pernah tercatat harus
+  // berjumlah sama dengan saldo kas di Neraca. Sebelumnya layar ini hanya
+  // menampilkan catatan yang diketik di sana, sehingga totalnya tidak pernah
+  // cocok dan tidak ada yang bisa menunjukkan ke mana selisihnya pergi.
+  check('total kas di menu Kas = saldo kas di Neraca',
+    near(kasSemua.summary.net, bsKas.assets.current.totalCash, 1),
+    `${kasSemua.summary.net} vs ${bsKas.assets.current.totalCash}`);
+
+  const asal = (kasSemua.perSumber || []).map((x) => x.sumber);
+  check('menu Kas memuat pergerakan dari luar catatan manual',
+    asal.length > 1, asal.join(', '));
+
+  const kasAdaIklan = kasSemua.rows.some((r) => r.source === 'ADS');
+  check('belanja iklan ikut tampil sebagai kas keluar', kasAdaIklan);
+
+  const kasBarisIklan = kasSemua.rows.find((r) => r.source === 'ADS');
+  check('belanja iklan berkategori akun 6050',
+    !!kasBarisIklan && String(kasBarisIklan.kategori || '').startsWith('6050'),
+    kasBarisIklan ? kasBarisIklan.kategori : 'tidak ada');
+  check('baris dari modul lain tidak bisa dihapus dari menu Kas',
+    !!kasBarisIklan && kasBarisIklan.bisaHapus === false);
+
+  let tolakHapusAsing = false;
+  try {
+    await call('DELETE', `/api/cashflow/entries/${kasBarisIklan.id}`);
+  } catch {
+    tolakHapusAsing = true;
+  }
+  check('peladen menolak penghapusan jurnal milik modul lain', tolakHapusAsing);
+
+  // Setelah ditolak, jurnalnya harus benar-benar masih ada.
+  const kasSesudah = await call('GET', `/api/cashflow/entries?from=2000-01-01&to=${today}`);
+  check('jurnal iklan tetap utuh setelah penolakan',
+    near(kasSesudah.summary.net, kasSemua.summary.net, 1));
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -113,6 +113,40 @@ export default function KasMasukKeluar() {
             />
           </div>
 
+          {/* Rincian per asal — supaya jelas bahwa daftar ini bukan hanya berisi
+              catatan yang diketik di layar ini, melainkan seluruh pergerakan
+              kas dari mana pun asalnya. */}
+          {(data.perSumber || []).length > 0 && (
+            <div className="card mb-4">
+              <h2 className="card-title mb-1">Pergerakan Kas menurut Asalnya</h2>
+              <p className="mb-3 text-xs text-slate-500">
+                Daftar ini memuat seluruh jurnal yang menyentuh kas atau bank — termasuk belanja iklan,
+                pembelian barang, dan penerimaan penjualan — sehingga totalnya cocok dengan saldo kas di Neraca.
+                Baris di luar Catatan Kas diubah dari menu asalnya.
+              </p>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr><th>Asal</th><th>Transaksi</th><th>Masuk</th><th>Keluar</th><th>Bersih</th></tr>
+                  </thead>
+                  <tbody>
+                    {data.perSumber.map((x) => (
+                      <tr key={x.sumber}>
+                        <td className="font-medium text-slate-900">{x.sumber}</td>
+                        <td className="tabular">{x.baris}</td>
+                        <td className="tabular text-emerald-600">{x.masuk ? rupiah(x.masuk) : '-'}</td>
+                        <td className="tabular text-rose-600">{x.keluar ? rupiah(x.keluar) : '-'}</td>
+                        <td className={`tabular font-semibold ${x.masuk - x.keluar >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {rupiah(x.masuk - x.keluar)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="card">
             {data.rows.length === 0 ? (
               <EmptyState
@@ -124,7 +158,7 @@ export default function KasMasukKeluar() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Kategori</th>
+                      <th>Tanggal</th><th>No. Jurnal</th><th>Sumber</th><th>Keterangan</th><th>Kategori</th>
                       <th>Masuk</th><th>Keluar</th><th>Dicatat</th>{canManage && <th></th>}
                     </tr>
                   </thead>
@@ -133,6 +167,9 @@ export default function KasMasukKeluar() {
                       <tr key={r.id}>
                         <td className="tabular">{dateID(r.entry_date)}</td>
                         <td className="font-mono text-xs">{r.entry_no}</td>
+                        <td>
+                          <span className={r.source === 'CASH' ? 'badge-blue' : 'badge-slate'}>{r.sumber}</span>
+                        </td>
                         <td className="max-w-[280px] truncate font-medium text-slate-900">
                           {r.description.replace(/^Kas (Masuk|Keluar) — /, '')}
                         </td>
@@ -146,9 +183,16 @@ export default function KasMasukKeluar() {
                         <td className="text-xs text-slate-500">{r.user_name || '-'}</td>
                         {canManage && (
                           <td>
-                            <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => hapus(r)} aria-label="Hapus">
-                              <Trash2 size={14} />
-                            </button>
+                            {/* Jurnal milik order atau belanja iklan diubah dari menu
+                                asalnya; menghapusnya dari sini akan menyisakan
+                                dokumennya tanpa jurnal. */}
+                            {r.bisaHapus ? (
+                              <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => hapus(r)} aria-label="Hapus">
+                                <Trash2 size={14} />
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">dari {r.sumber}</span>
+                            )}
                           </td>
                         )}
                       </tr>

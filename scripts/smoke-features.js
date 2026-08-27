@@ -97,9 +97,22 @@ const today = new Date().toLocaleDateString('sv-SE');
 
   const daftarKas = await call('GET', `/api/cashflow/entries?from=${today}&to=${today}`);
   cek('riwayat kas mencatat kedua transaksi', daftarKas.rows.length >= 2);
-  cek('ringkasan kas benar',
-    near(daftarKas.summary.masuk, 200000) && near(daftarKas.summary.keluar, 500000),
-    `(masuk ${daftarKas.summary.masuk}, keluar ${daftarKas.summary.keluar})`);
+
+  // Daftar ini memuat seluruh pergerakan kas, bukan hanya yang diketik di layar
+  // kas, jadi yang diperiksa adalah kedua catatan manual ini benar-benar ada —
+  // bukan bahwa keduanya satu-satunya isi daftar.
+  const manual = daftarKas.rows.filter((r) => r.source === 'CASH');
+  cek('kedua catatan kas manual muncul di daftar',
+    near(manual.reduce((s2, r) => s2 + r.masuk, 0), 200000) &&
+    near(manual.reduce((s2, r) => s2 + r.keluar, 0), 500000),
+    `(masuk ${manual.reduce((s2, r) => s2 + r.masuk, 0)}, keluar ${manual.reduce((s2, r) => s2 + r.keluar, 0)})`);
+
+  const kasSeluruh = await call('GET', `/api/cashflow/entries?from=2000-01-01&to=${today}`);
+  const neracaKas = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`))
+    .assets.current.totalCash;
+  cek('total kas di menu Kas = saldo kas di Neraca',
+    near(kasSeluruh.summary.net, neracaKas, 1),
+    `(${kasSeluruh.summary.net} vs ${neracaKas})`);
 
   const neraca1 = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
   cek('neraca tetap seimbang setelah kas manual', neraca1.balanced);
