@@ -500,15 +500,31 @@ async function main() {
     !!barisIklan && near(barisIklan.amount, 300000, 1),
     barisIklan ? String(barisIklan.amount) : 'baris 6050 tidak ada');
 
+  // Iklan yang dipotong dari saldo marketplace bukan pengeluaran kas: yang
+  // berkurang adalah dana penjualan yang belum cair, bukan uang di bank.
+  const bsSblmSaldo = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  await call('POST', '/api/iklan', {
+    spend_date: today, shop_id: idToko, channel: 'SHOPEE',
+    platform: 'Shopee Ads', amount: 120000, payment: 'SALDO', note: 'Uji potong saldo',
+  });
+  const bsSaldo = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('iklan dari saldo marketplace tidak mengurangi kas/bank',
+    near(bsSaldo.assets.current.totalCash, bsSblmSaldo.assets.current.totalCash, 1),
+    `${bsSblmSaldo.assets.current.totalCash} -> ${bsSaldo.assets.current.totalCash}`);
+  check('iklan dari saldo marketplace mengurangi piutang marketplace',
+    near(bsSblmSaldo.assets.current.totalReceivable - bsSaldo.assets.current.totalReceivable, 120000, 1),
+    `${bsSblmSaldo.assets.current.totalReceivable} -> ${bsSaldo.assets.current.totalReceivable}`);
+  check('neraca tetap seimbang setelah iklan dari saldo', bsSaldo.balanced);
+
   const ringkasIklan = await call('GET', `/api/iklan?from=${today}&to=${today}`);
   check('ringkasan iklan menghitung total belanja',
-    near(ringkasIklan.ringkas.totalIklan, 300000, 1), String(ringkasIklan.ringkas.totalIklan));
+    near(ringkasIklan.ringkas.totalIklan, 420000, 1), String(ringkasIklan.ringkas.totalIklan));
   check('laba setelah iklan = laba sebelum iklan − belanja iklan',
-    near(ringkasIklan.ringkas.labaSetelahIklan, ringkasIklan.ringkas.labaSebelumIklan - 300000, 1),
+    near(ringkasIklan.ringkas.labaSetelahIklan, ringkasIklan.ringkas.labaSebelumIklan - 420000, 1),
     `${ringkasIklan.ringkas.labaSetelahIklan}`);
 
   const tokoDiRingkas = ringkasIklan.perToko.find((t) => t.shop_id === idToko);
-  check('belanja iklan menempel pada tokonya', !!tokoDiRingkas && tokoDiRingkas.iklan === 300000);
+  check('belanja iklan menempel pada tokonya', !!tokoDiRingkas && tokoDiRingkas.iklan === 420000);
 
   const dashIklan = await call('GET', `/api/dashboard?from=${today}&to=${today}`);
   check('dashboard memuat pendapatan kotor dan bersih',

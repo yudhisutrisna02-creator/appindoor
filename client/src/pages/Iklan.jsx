@@ -21,6 +21,14 @@ const KOSONG = {
   note: '',
 };
 
+/** Sumber dana dalam bahasa layar. */
+const LABEL_DANA = {
+  BANK: 'Bank',
+  CASH: 'Kas',
+  SALDO: 'Saldo marketplace',
+  CREDIT: 'Belum dibayar',
+};
+
 /** Platform iklan yang lazim dipakai; tetap bisa diisi bebas. */
 const PLATFORM = ['Shopee Ads', 'TikTok Ads', 'Meta Ads', 'Google Ads', 'Lazada Ads', 'Tokopedia Ads'];
 
@@ -250,7 +258,7 @@ export default function Iklan() {
                         <td className="text-xs text-slate-500">{b.channel_label}</td>
                         <td className="text-sm">{b.platform || '-'}</td>
                         <td className="tabular font-semibold text-amber-700">{rupiah(b.amount)}</td>
-                        <td className="text-xs">{b.payment === 'CREDIT' ? 'Belum dibayar' : b.payment === 'CASH' ? 'Kas' : 'Bank'}</td>
+                        <td className="text-xs">{LABEL_DANA[b.payment] || b.payment}</td>
                         <td className="text-xs text-slate-500">{b.note || '-'}</td>
                         {canManage && (
                           <td>
@@ -311,6 +319,7 @@ export default function Iklan() {
               <select className="input" value={form.payment} onChange={(e) => setForm({ ...form, payment: e.target.value })}>
                 <option value="BANK">Bank</option>
                 <option value="CASH">Kas tunai</option>
+                <option value="SALDO">Saldo marketplace (potong dana belum cair)</option>
                 <option value="CREDIT">Belum dibayar (utang)</option>
               </select>
             </Field>

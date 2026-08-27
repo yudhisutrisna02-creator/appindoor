@@ -24,9 +24,26 @@ function isi(cell) {
   return x;
 }
 
+/**
+ * Angka dari sel, termasuk yang tersimpan sebagai teks.
+ *
+ * Sebagian sel diketik manual dengan pemisah ribuan gaya Indonesia
+ * ("1.277.500"). Dibaca apa adanya, teks seperti itu menjadi NaN lalu jatuh ke
+ * nol — satu baris belanja Rp 1,2 juta hilang tanpa jejak, dan totalnya tetap
+ * tampak wajar sehingga tidak ada yang curiga. Karena itu titik ribuan dikenali
+ * lebih dulu, dan koma diperlakukan sebagai pemisah desimal.
+ */
 function angka(x) {
   if (x == null || x === '') return 0;
-  const n = Number(String(x).replace(/[^0-9.-]/g, ''));
+  if (typeof x === 'number') return x;
+
+  // Buang apa pun yang bukan angka, titik, koma, atau tanda minus — mis. "Rp".
+  let s = String(x).trim().replace(/[^0-9.,-]/g, '');
+  // Titik sebagai pemisah ribuan: selalu diikuti tepat tiga angka, berulang.
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '');
+  s = s.replace(',', '.');
+
+  const n = Number(s);
   return Number.isNaN(n) ? 0 : n;
 }
 

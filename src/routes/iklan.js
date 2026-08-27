@@ -30,13 +30,33 @@ const spendSchema = z.object({
   channel: z.enum(CHANNELS),
   platform: z.string().trim().max(60).optional().nullable(),
   amount: z.number().positive('nilai iklan harus lebih dari 0'),
-  payment: z.enum(['CASH', 'BANK', 'CREDIT']).default('BANK'),
+  // SALDO = dipotong langsung dari dana marketplace yang belum cair. Uangnya
+  // tidak pernah keluar dari bank; yang berkurang adalah jumlah yang akan
+  // ditransfer marketplace kepada kita.
+  payment: z.enum(['CASH', 'BANK', 'CREDIT', 'SALDO']).default('BANK'),
   note: z.string().trim().max(300).optional().nullable(),
 });
 
-/** Akun lawan sesuai sumber dananya. Kredit berarti tagihan platform belum dibayar. */
+/**
+ * Akun lawan sesuai sumber dananya.
+ *
+ * SALDO bukan pengeluaran kas: iklannya dipotong dari dana penjualan yang belum
+ * cair, jadi yang berkurang piutang marketplace. Menyamakannya dengan
+ * pembayaran bank akan mengurangi saldo bank yang sebenarnya tidak berkurang,
+ * sekaligus membiarkan piutang tampak lebih besar daripada yang akan diterima.
+ */
 const akunLawan = (payment) =>
-  payment === 'CASH' ? ACC.CASH : payment === 'CREDIT' ? ACC.AP : ACC.BANK;
+  payment === 'CASH' ? ACC.CASH
+    : payment === 'CREDIT' ? ACC.AP
+      : payment === 'SALDO' ? ACC.AR_MARKETPLACE
+        : ACC.BANK;
+
+const MEMO_LAWAN = {
+  CASH: 'Pembayaran iklan tunai',
+  BANK: 'Pembayaran iklan lewat bank',
+  CREDIT: 'Tagihan iklan belum dibayar',
+  SALDO: 'Dipotong dari dana marketplace yang belum cair',
+};
 
 const simpanBelanja = db.transaction((body, userId) => {
   if (body.shop_id) {
@@ -60,7 +80,7 @@ const simpanBelanja = db.transaction((body, userId) => {
     description: `Biaya iklan ${CHANNEL_LABEL[body.channel] || body.channel}${body.platform ? ` — ${body.platform}` : ''}`,
     lines: [
       { code: ACC.FEE_ADS, debit: r2(body.amount), credit: 0, memo: body.note || 'Belanja iklan' },
-      { code: akunLawan(body.payment), debit: 0, credit: r2(body.amount), memo: 'Pembayaran iklan' },
+      { code: akunLawan(body.payment), debit: 0, credit: r2(body.amount), memo: MEMO_LAWAN[body.payment] || 'Pembayaran iklan' },
     ],
     source: 'ADS',
     sourceId: id,
@@ -100,7 +120,7 @@ const ubahBelanja = db.transaction((id, body, userId) => {
     description: `Biaya iklan ${CHANNEL_LABEL[body.channel] || body.channel}${body.platform ? ` — ${body.platform}` : ''}`,
     lines: [
       { code: ACC.FEE_ADS, debit: r2(body.amount), credit: 0, memo: body.note || 'Belanja iklan' },
-      { code: akunLawan(body.payment), debit: 0, credit: r2(body.amount), memo: 'Pembayaran iklan' },
+      { code: akunLawan(body.payment), debit: 0, credit: r2(body.amount), memo: MEMO_LAWAN[body.payment] || 'Pembayaran iklan' },
     ],
     source: 'ADS',
     sourceId: id,
