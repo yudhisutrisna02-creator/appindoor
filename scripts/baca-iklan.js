@@ -54,6 +54,7 @@ async function bacaIklan(file = FILE) {
 
   const batas = batasTransaksi(ws);
   const hasil = [];
+  const catatan = [];
 
   for (const b of BLOK) {
     let tgl = null;
@@ -64,8 +65,23 @@ async function bacaIklan(file = FILE) {
       if (t) tgl = t;
 
       const akun = teks(isi(row.getCell(b.kolAkun)));
+      const selNominal = row.getCell(b.kolNominal).value;
       const nominal = angka(isi(row.getCell(b.kolNominal)));
       if (!akun || nominal <= 0 || !tgl) return;
+
+      // Nominal yang diketik sebagai teks — mis. "1.277.500" — tetap terbaca di
+      // sini, tetapi diabaikan oleh SUM di Excel. Akibatnya total di sheet dan
+      // total di aplikasi berbeda tanpa ada yang tahu sebabnya, jadi selnya
+      // dicatat untuk dilaporkan.
+      if (typeof selNominal === 'string') {
+        catatan.push({
+          baris: r,
+          kolom: b.kolNominal,
+          toko: akun,
+          tertulis: selNominal,
+          terbaca: nominal,
+        });
+      }
 
       hasil.push({
         baris: r,
@@ -79,6 +95,7 @@ async function bacaIklan(file = FILE) {
     });
   }
 
+  hasil.catatan = catatan;
   return hasil;
 }
 

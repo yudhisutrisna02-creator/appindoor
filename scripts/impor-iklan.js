@@ -114,6 +114,25 @@ function sumberDana(rekening) {
   console.log('periode        :', DARI, 's/d', SAMPAI);
   console.log('baris terbaca  :', baris.length, '|', rupiah(baris.reduce((s, r) => s + r.nominal, 0)));
 
+  // Sel nominal yang diketik sebagai teks tetap terbaca di sini, tetapi
+  // diabaikan oleh SUM di Excel — itulah sebabnya total di sheet bisa lebih
+  // kecil daripada jumlah barisnya. Dilaporkan agar selisihnya tidak perlu
+  // dicari-cari lagi.
+  const tekstual = (semua.catatan || []).filter((c2) => {
+    const b2 = semua.find((x) => x.baris === c2.baris && x.toko === c2.toko);
+    return b2 && b2.tanggal >= DARI && b2.tanggal <= SAMPAI;
+  });
+  if (tekstual.length) {
+    console.log('\n--- Nominal yang diketik sebagai teks di Excel ---');
+    console.log('    SUM di Excel melewati sel seperti ini, jadi total di sheet');
+    console.log('    akan lebih kecil daripada jumlah barisnya. Nilainya tetap');
+    console.log('    dibaca benar di sini.');
+    for (const c2 of tekstual) {
+      console.log(`  baris ${c2.baris}  ${c2.toko.padEnd(24)} tertulis "${c2.tertulis}"  terbaca ${rupiah(c2.terbaca)}`);
+    }
+    console.log(`    total yang terlewat bila memakai SUM Excel: ${rupiah(tekstual.reduce((s, c2) => s + c2.terbaca, 0))}`);
+  }
+
   const masuk = await api('POST', '/api/auth/login', { email: EMAIL.toLowerCase(), password: SANDI });
   token = masuk.token;
 
