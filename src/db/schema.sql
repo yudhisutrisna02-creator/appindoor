@@ -323,3 +323,24 @@ CREATE TABLE IF NOT EXISTS ad_spends (
 );
 CREATE INDEX IF NOT EXISTS idx_ads_date ON ad_spends(spend_date);
 CREATE INDEX IF NOT EXISTS idx_ads_shop ON ad_spends(shop_id);
+
+-- ---------- PERAN & HAK AKSES ----------
+-- Katalog izinnya ada di kode (src/utils/izin.js); yang disimpan di sini hanya
+-- peran dan izin apa saja yang dipegangnya, supaya peran bisa disusun ulang
+-- tanpa menyentuh kode.
+CREATE TABLE IF NOT EXISTS roles (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug        TEXT    NOT NULL UNIQUE,
+  name        TEXT    NOT NULL,
+  description TEXT,
+  -- Peran bawaan tidak boleh dihapus; izinnya tetap boleh diubah kecuali admin.
+  is_system   INTEGER NOT NULL DEFAULT 0,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id    INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission TEXT    NOT NULL,
+  PRIMARY KEY (role_id, permission)
+);

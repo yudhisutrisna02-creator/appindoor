@@ -14,7 +14,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { db } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, ACC, postJournal, deleteJournalsBySource } = require('../utils/accounting');
 const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
@@ -70,7 +70,7 @@ const simpanBelanja = db.transaction((body, userId) => {
   return id;
 });
 
-router.post('/', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.post('/', butuhIzin('iklan.kelola'), ah((req, res) => {
   const body = parse(spendSchema, req.body);
   const id = simpanBelanja(body, req.user.id);
   res.status(201).json({
@@ -108,7 +108,7 @@ const ubahBelanja = db.transaction((id, body, userId) => {
   });
 });
 
-router.put('/:id(\\d+)', requireRole('admin', 'manager'), ah((req, res) => {
+router.put('/:id(\\d+)', butuhIzin('iklan.kelola'), ah((req, res) => {
   const body = parse(spendSchema, req.body);
   ubahBelanja(Number(req.params.id), body, req.user.id);
   res.json({ ok: true, message: 'Biaya iklan diperbarui', spend: db.prepare('SELECT * FROM ad_spends WHERE id = ?').get(req.params.id) });
@@ -122,7 +122,7 @@ const hapusBelanja = db.transaction((id) => {
   return ada;
 });
 
-router.delete('/:id(\\d+)', requireRole('admin', 'manager'), ah((req, res) => {
+router.delete('/:id(\\d+)', butuhIzin('iklan.kelola'), ah((req, res) => {
   const ada = hapusBelanja(Number(req.params.id));
   res.json({ ok: true, message: `Biaya iklan ${ada.spend_date} dihapus beserta jurnalnya` });
 }));

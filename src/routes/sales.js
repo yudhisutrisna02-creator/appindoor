@@ -2,7 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { db, nextNumber } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
@@ -93,7 +93,16 @@ function computeOrder(input, items) {
   const net_profit = r2(gross_profit - total_fees);
   const margin_pct = net_revenue ? r2((net_profit / net_revenue) * 100) : 0;
 
-  return { gross_sales, cogs, discount, net_revenue, admin_fee, tax_amount, total_fees, gross_profit, net_profit, margin_pct };
+  // Uang yang benar-benar diterima setelah seluruh potongan marketplace.
+  // Tidak disimpan sebagai kolom karena selalu bisa diturunkan dari dua kolom
+  // yang sudah ada — menyimpannya hanya menciptakan angka kedua yang bisa
+  // berbeda bila salah satunya diperbarui sendirian.
+  const net_received = r2(net_revenue - total_fees);
+
+  return {
+    gross_sales, cogs, discount, net_revenue, admin_fee, tax_amount, total_fees,
+    net_received, gross_profit, net_profit, margin_pct,
+  };
 }
 
 /**
@@ -228,7 +237,7 @@ const createOrder = db.transaction((body, userId) => {
   return { orderId, orderNo, calc, journal };
 });
 
-router.post('/', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.post('/', butuhIzin('penjualan.buat'), ah((req, res) => {
   const body = parse(orderSchema, req.body);
   const result = createOrder(body, req.user.id);
   res.status(201).json({
@@ -384,7 +393,7 @@ const cancelOrder = db.transaction((orderId) => {
  */
 const ubahOrder = buatPengubah({ resolveItems, computeOrder, cancelOrder });
 
-router.put('/:id(\\d+)', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.put('/:id(\\d+)', butuhIzin('penjualan.buat'), ah((req, res) => {
   const badan = parse(ubahSchema, req.body);
   const hasil = ubahOrder(Number(req.params.id), badan, req.user.id);
 
@@ -397,7 +406,7 @@ router.put('/:id(\\d+)', requireRole('admin', 'manager', 'staff'), ah((req, res)
   });
 }));
 
-router.delete('/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.delete('/:id', butuhIzin('penjualan.batal'), ah((req, res) => {
   const orderNo = cancelOrder(Number(req.params.id));
   res.json({ ok: true, message: `Order ${orderNo} dibatalkan, stok dikembalikan` });
 }));
@@ -653,7 +662,7 @@ const createReturn = db.transaction((body, userId) => {
   return { id: info.lastInsertRowid, return_no: returnNo, amount };
 });
 
-router.post('/returns', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.post('/returns', butuhIzin('penjualan.buat'), ah((req, res) => {
   const body = parse(returnSchema, req.body);
   res.status(201).json({ ok: true, ...createReturn(body, req.user.id) });
 }));

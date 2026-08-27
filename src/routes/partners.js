@@ -3,7 +3,7 @@ const { daftarkanEkspor } = require('../utils/ekspor');
 const express = require('express');
 const { z } = require('zod');
 const { db } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError } = require('../utils/http');
 const { r2, ACC } = require('../utils/accounting');
 
@@ -101,7 +101,7 @@ daftarkanEkspor(router, {
   },
 });
 
-router.post('/', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.post('/', butuhIzin('mitra.kelola'), ah((req, res) => {
   const p = parse(partnerSchema, req.body);
   if (p.code && db.prepare('SELECT id FROM partners WHERE code = ?').get(p.code)) {
     throw httpError(409, `Kode ${p.code} sudah dipakai mitra lain`);
@@ -117,7 +117,7 @@ router.post('/', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
   res.status(201).json({ ok: true, partner: db.prepare('SELECT * FROM partners WHERE id = ?').get(info.lastInsertRowid) });
 }));
 
-router.put('/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.put('/:id', butuhIzin('mitra.kelola'), ah((req, res) => {
   const p = parse(partnerSchema, req.body);
   const existing = db.prepare('SELECT * FROM partners WHERE id = ?').get(req.params.id);
   if (!existing) throw httpError(404, 'Mitra tidak ditemukan');
@@ -136,7 +136,7 @@ router.put('/:id', requireRole('admin', 'manager'), ah((req, res) => {
   res.json({ ok: true, partner: db.prepare('SELECT * FROM partners WHERE id = ?').get(existing.id) });
 }));
 
-router.delete('/:id', requireRole('admin'), ah((req, res) => {
+router.delete('/:id', butuhIzin('mitra.kelola'), ah((req, res) => {
   const partner = db.prepare('SELECT * FROM partners WHERE id = ?').get(req.params.id);
   if (!partner) throw httpError(404, 'Mitra tidak ditemukan');
 

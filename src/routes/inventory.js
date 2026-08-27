@@ -2,7 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { db, nextNumber } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, ACC, postJournal } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
@@ -71,7 +71,7 @@ function ambilProduk(req) {
 
 router.get('/products', ah((req, res) => res.json(ambilProduk(req))));
 
-router.post('/products', requireRole('admin', 'manager'), ah((req, res) => {
+router.post('/products', butuhIzin('gudang.produk'), ah((req, res) => {
   const p = parse(productSchema, req.body);
   const dupe = db.prepare('SELECT id FROM products WHERE sku = ?').get(p.sku);
   if (dupe) throw httpError(409, `SKU ${p.sku} sudah dipakai produk lain`);
@@ -87,7 +87,7 @@ router.post('/products', requireRole('admin', 'manager'), ah((req, res) => {
   res.status(201).json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid) });
 }));
 
-router.put('/products/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.put('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
   const p = parse(productSchema, req.body);
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!existing) throw httpError(404, 'Produk tidak ditemukan');
@@ -105,7 +105,7 @@ router.put('/products/:id', requireRole('admin', 'manager'), ah((req, res) => {
   res.json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id) });
 }));
 
-router.delete('/products/:id', requireRole('admin'), ah((req, res) => {
+router.delete('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
   const used = db.prepare('SELECT COUNT(*) c FROM sales_items WHERE product_id = ?').get(req.params.id).c;
   if (used > 0) {
     // Produk yang pernah terjual tidak dihapus agar histori laporan tetap utuh
@@ -217,7 +217,7 @@ const applyMove = db.transaction((body, userId) => {
   return db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(info.lastInsertRowid);
 });
 
-router.post('/moves', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.post('/moves', butuhIzin('gudang.mutasi'), ah((req, res) => {
   const body = parse(moveSchema, req.body);
   res.status(201).json({ ok: true, move: applyMove(body, req.user.id) });
 }));
@@ -551,7 +551,7 @@ const createOpname = db.transaction((body, userId) => {
   return { id: opnameId, opname_no: opnameNo, total_diff_value: totalDiffValue, adjustments };
 });
 
-router.post('/opname', requireRole('admin', 'manager'), ah((req, res) => {
+router.post('/opname', butuhIzin('gudang.produk'), ah((req, res) => {
   const body = parse(opnameSchema, req.body);
   res.status(201).json({ ok: true, ...createOpname(body, req.user.id) });
 }));

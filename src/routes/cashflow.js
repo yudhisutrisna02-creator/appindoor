@@ -11,7 +11,7 @@ const { daftarkanEkspor } = require('../utils/ekspor');
 const express = require('express');
 const { z } = require('zod');
 const { db } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, postJournal, deleteJournalsBySource, accountByCode } = require('../utils/accounting');
 const { todayLocal } = require('../utils/time');
@@ -60,7 +60,7 @@ const cashSchema = z.object({
  *   Masuk  : D Kas       K Kategori pendapatan
  *   Keluar : D Kategori  K Kas
  */
-router.post('/entries', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.post('/entries', butuhIzin('keuangan.kas'), ah((req, res) => {
   const body = parse(cashSchema, req.body);
 
   const kas = accountByCode(body.cash_code);
@@ -157,7 +157,7 @@ daftarkanEkspor(router, {
   },
 });
 
-router.delete('/entries/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.delete('/entries/:id', butuhIzin('keuangan.kas'), ah((req, res) => {
   const journal = db.prepare("SELECT * FROM journals WHERE id = ? AND source = 'CASH'").get(req.params.id);
   if (!journal) throw httpError(404, 'Catatan kas tidak ditemukan');
 
@@ -260,7 +260,7 @@ const settlementSchema = z.object({
  *   RECEIVE : D Kas          K Piutang(mitra)
  *   PAY     : D Utang(mitra) K Kas
  */
-router.post('/settlements', requireRole('admin', 'manager', 'staff'), ah((req, res) => {
+router.post('/settlements', butuhIzin('keuangan.kas'), ah((req, res) => {
   const body = parse(settlementSchema, req.body);
 
   const partner = db.prepare('SELECT * FROM partners WHERE id = ?').get(body.partner_id);

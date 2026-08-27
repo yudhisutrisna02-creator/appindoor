@@ -126,17 +126,32 @@ app.get('/api/health', (req, res) =>
   })
 );
 
+/**
+ * Penjaga tingkat halaman.
+ *
+ * Dipasang di titik pemasangan router, bukan di tiap endpoint. Dengan begitu
+ * satu menu baru cukup satu baris, dan tidak ada endpoint yang lolos karena
+ * lupa diberi penjaga sendiri-sendiri — kelalaian yang tidak menimbulkan galat
+ * apa pun sampai ada yang menemukannya.
+ */
+function halaman(...izin) {
+  const { requireAuth, butuhIzin } = require('./src/middleware/auth');
+  const penjaga = butuhIzin(...izin);
+  return (req, res, next) => requireAuth(req, res, (err) => (err ? next(err) : penjaga(req, res, next)));
+}
+
 app.use('/api/auth', require('./src/routes/auth'));
-app.use('/api/dashboard', require('./src/routes/dashboard'));
+app.use('/api/dashboard', halaman('dashboard.lihat'), require('./src/routes/dashboard'));
 app.use('/api/attendance', require('./src/routes/attendance'));
-app.use('/api/finance', require('./src/routes/finance'));
-app.use('/api/inventory', require('./src/routes/inventory'));
-app.use('/api/sales', require('./src/routes/sales'));
-app.use('/api/shops', require('./src/routes/shops'));
-app.use('/api/iklan', require('./src/routes/iklan').router);
-app.use('/api/partners', require('./src/routes/partners').router);
-app.use('/api/cashflow', require('./src/routes/cashflow'));
+app.use('/api/finance', halaman('keuangan.lihat'), require('./src/routes/finance'));
+app.use('/api/inventory', halaman('gudang.lihat'), require('./src/routes/inventory'));
+app.use('/api/sales', halaman('penjualan.lihat'), require('./src/routes/sales'));
+app.use('/api/shops', halaman('penjualan.lihat', 'iklan.lihat'), require('./src/routes/shops'));
+app.use('/api/iklan', halaman('iklan.lihat'), require('./src/routes/iklan').router);
+app.use('/api/partners', halaman('mitra.lihat'), require('./src/routes/partners').router);
+app.use('/api/cashflow', halaman('keuangan.lihat'), require('./src/routes/cashflow'));
 app.use('/api/admin', require('./src/routes/admin'));
+app.use('/api/peran', require('./src/routes/peran'));
 // Identitas perusahaan boleh dibaca sebelum masuk — halaman login perlu logonya.
 app.use('/api/branding', require('./src/routes/branding'));
 

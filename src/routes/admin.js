@@ -3,7 +3,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { z } = require('zod');
 const { db, getSetting, setSetting } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError } = require('../utils/http');
 const { saveDataUrlImage, hapusBerkas } = require('../utils/upload');
 const { daftarkanEkspor } = require('../utils/ekspor');
@@ -21,6 +21,9 @@ const userSchema = z.object({
   email: z.string().email().transform((v) => v.toLowerCase()),
   password: z.string().min(8, 'password minimal 8 karakter').optional(),
   role: z.enum(['admin', 'manager', 'staff']).default('staff'),
+  // Peran baru. Kolom role lama dipertahankan sebagai cadangan bagi akun yang
+  // belum ditautkan, jadi keduanya hidup berdampingan sampai semuanya beralih.
+  role_id: z.number().int().positive().optional().nullable(),
   position: z.string().max(80).optional().nullable(),
   phone: z.string().max(30).optional().nullable(),
   active: z.boolean().default(true),
@@ -50,7 +53,7 @@ const KOLOM_TIM = [
 ];
 
 /** Semua kolom pengguna yang boleh dibaca — password_hash tidak pernah ikut. */
-const KOLOM_TAMPIL = `id, name, email, role, position, phone, active, created_at, photo, ${KOLOM_TIM.join(', ')}`;
+const KOLOM_TAMPIL = `id, name, email, role, role_id, position, phone, active, created_at, photo, ${KOLOM_TIM.join(', ')}`;
 
 /**
  * Simpan foto bila yang dikirim berupa data URL baru.
@@ -73,8 +76,13 @@ function simpanFoto(nilai, fotoLama, prefix) {
   return baru;
 }
 
-router.get('/users', requireRole('admin', 'manager'), ah((req, res) => {
-  const users = db.prepare(`SELECT ${KOLOM_TAMPIL} FROM users ORDER BY name`).all();
+router.get('/users', butuhIzin('sistem.tim'), ah((req, res) => {
+  const users = db
+    .prepare(
+      `SELECT ${KOLOM_TAMPIL.split(', ').map((k) => 'u.' + k).join(', ')}, r.name AS role_name, r.slug AS role_slug
+         FROM users u LEFT JOIN roles r ON r.id = u.role_id ORDER BY u.name`
+    )
+    .all();
   res.json({
     users,
     // Dipakai layar untuk menunjukkan seberapa lengkap data timnya.
@@ -146,7 +154,7 @@ function masaKerja(mulai, sampai) {
   return [tahun ? `${tahun} thn` : '', sisa ? `${sisa} bln` : ''].filter(Boolean).join(' ') || '0 bln';
 }
 
-router.post('/users', requireRole('admin'), ah((req, res) => {
+router.post('/users', butuhIzin('sistem.tim'), ah((req, res) => {
   const u = parse(userSchema, req.body);
   if (!u.password) throw httpError(400, 'Password wajib diisi untuk pengguna baru');
   if (db.prepare('SELECT id FROM users WHERE email = ?').get(u.email)) {
@@ -157,11 +165,11 @@ router.post('/users', requireRole('admin'), ah((req, res) => {
 
   const info = db
     .prepare(
-      `INSERT INTO users (name, email, password_hash, role, position, phone, active, photo, ${KOLOM_TIM.join(', ')})
-       VALUES (?,?,?,?,?,?,?,?, ${KOLOM_TIM.map(() => '?').join(', ')})`
+      `INSERT INTO users (name, email, password_hash, role, role_id, position, phone, active, photo, ${KOLOM_TIM.join(', ')})
+       VALUES (?,?,?,?,?,?,?,?,?, ${KOLOM_TIM.map(() => '?').join(', ')})`
     )
     .run(
-      u.name, u.email, bcrypt.hashSync(u.password, 10), u.role,
+      u.name, u.email, bcrypt.hashSync(u.password, 10), u.role, u.role_id || null,
       u.position || null, u.phone || null, u.active ? 1 : 0, foto,
       ...KOLOM_TIM.map((k) => u[k] || null)
     );
@@ -172,7 +180,7 @@ router.post('/users', requireRole('admin'), ah((req, res) => {
   });
 }));
 
-router.put('/users/:id', requireRole('admin'), ah((req, res) => {
+router.put('/users/:id', butuhIzin('sistem.tim'), ah((req, res) => {
   const u = parse(userSchema, req.body);
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!existing) throw httpError(404, 'Pengguna tidak ditemukan');
@@ -189,11 +197,11 @@ router.put('/users/:id', requireRole('admin'), ah((req, res) => {
   const foto = simpanFoto(u.photo, existing.photo, `tim${existing.id}`);
 
   db.prepare(
-    `UPDATE users SET name=?, email=?, role=?, position=?, phone=?, active=?, photo=?,
+    `UPDATE users SET name=?, email=?, role=?, role_id=?, position=?, phone=?, active=?, photo=?,
             ${KOLOM_TIM.map((k) => `${k}=?`).join(', ')}
       WHERE id=?`
   ).run(
-    u.name, u.email, u.role, u.position || null, u.phone || null, u.active ? 1 : 0, foto,
+    u.name, u.email, u.role, u.role_id || null, u.position || null, u.phone || null, u.active ? 1 : 0, foto,
     ...KOLOM_TIM.map((k) => u[k] || null),
     existing.id
   );
@@ -208,7 +216,7 @@ router.put('/users/:id', requireRole('admin'), ah((req, res) => {
   });
 }));
 
-router.delete('/users/:id', requireRole('admin'), ah((req, res) => {
+router.delete('/users/:id', butuhIzin('sistem.tim'), ah((req, res) => {
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!target) throw httpError(404, 'Pengguna tidak ditemukan');
   if (target.id === req.user.id) throw httpError(422, 'Anda tidak dapat menghapus akun sendiri');
@@ -234,7 +242,7 @@ router.get('/offices', ah((req, res) => {
   res.json({ offices: db.prepare('SELECT * FROM offices ORDER BY name').all() });
 }));
 
-router.post('/offices', requireRole('admin', 'manager'), ah((req, res) => {
+router.post('/offices', butuhIzin('sistem.kantor'), ah((req, res) => {
   const o = parse(officeSchema, req.body);
   const info = db
     .prepare('INSERT INTO offices (name, address, lat, lng, radius_m, active) VALUES (?,?,?,?,?,?)')
@@ -242,7 +250,7 @@ router.post('/offices', requireRole('admin', 'manager'), ah((req, res) => {
   res.status(201).json({ ok: true, office: db.prepare('SELECT * FROM offices WHERE id = ?').get(info.lastInsertRowid) });
 }));
 
-router.put('/offices/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.put('/offices/:id', butuhIzin('sistem.kantor'), ah((req, res) => {
   const o = parse(officeSchema, req.body);
   const existing = db.prepare('SELECT * FROM offices WHERE id = ?').get(req.params.id);
   if (!existing) throw httpError(404, 'Titik kantor tidak ditemukan');
@@ -253,7 +261,7 @@ router.put('/offices/:id', requireRole('admin', 'manager'), ah((req, res) => {
   res.json({ ok: true, office: db.prepare('SELECT * FROM offices WHERE id = ?').get(existing.id) });
 }));
 
-router.delete('/offices/:id', requireRole('admin'), ah((req, res) => {
+router.delete('/offices/:id', butuhIzin('sistem.kantor'), ah((req, res) => {
   db.prepare('DELETE FROM offices WHERE id = ?').run(req.params.id);
   res.json({ ok: true, message: 'Titik kantor dihapus' });
 }));
@@ -275,7 +283,7 @@ router.get('/settings', ah((req, res) => {
   res.json({ settings });
 }));
 
-router.put('/settings', requireRole('admin'), ah((req, res) => {
+router.put('/settings', butuhIzin('sistem.pengaturan'), ah((req, res) => {
   const patch = req.body || {};
   const applied = {};
 

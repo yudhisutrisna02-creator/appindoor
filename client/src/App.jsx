@@ -38,57 +38,57 @@ const NAV = [
     key: 'ringkasan',
     // Satu-satunya pintasan ke halaman depan — tidak perlu dilipat.
     collapsible: false,
-    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }],
+    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true, izin: 'dashboard.lihat' }],
   },
   {
     section: 'Presensi',
     key: 'presensi',
     items: [
-      { to: '/presensi', label: 'Absen Sekarang', icon: Fingerprint },
-      { to: '/presensi/rekap', label: 'Rekap Absensi', icon: CalendarClock },
+      { to: '/presensi', label: 'Absen Sekarang', icon: Fingerprint, izin: 'presensi.absen' },
+      { to: '/presensi/rekap', label: 'Rekap Absensi', icon: CalendarClock, izin: 'presensi.lihat' },
     ],
   },
   {
     section: 'Gudang',
     key: 'gudang',
     items: [
-      { to: '/gudang/valuasi', label: 'Valuasi Stok', icon: Warehouse },
-      { to: '/gudang/produk', label: 'Master Produk', icon: Package },
-      { to: '/gudang/mutasi', label: 'Mutasi Stok', icon: ArrowLeftRight },
-      { to: '/gudang/opname', label: 'Stok Opname', icon: ClipboardCheck },
+      { to: '/gudang/valuasi', label: 'Valuasi Stok', icon: Warehouse, izin: 'gudang.lihat' },
+      { to: '/gudang/produk', label: 'Master Produk', icon: Package, izin: 'gudang.lihat' },
+      { to: '/gudang/mutasi', label: 'Mutasi Stok', icon: ArrowLeftRight, izin: 'gudang.lihat' },
+      { to: '/gudang/opname', label: 'Stok Opname', icon: ClipboardCheck, izin: 'gudang.opname' },
     ],
   },
   {
     section: 'Penjualan',
     key: 'penjualan',
     items: [
-      { to: '/penjualan', label: 'Order Penjualan', icon: ShoppingCart },
-      { to: '/penjualan/analisis', label: 'Analisis Margin', icon: TrendingUp },
-      { to: '/penjualan/retur', label: 'Retur Penjualan', icon: Undo2 },
-      { to: '/penjualan/toko', label: 'Toko / Marketplace', icon: Store },
-      { to: '/penjualan/iklan', label: 'Biaya Iklan', icon: Megaphone },
+      { to: '/penjualan', label: 'Order Penjualan', icon: ShoppingCart, izin: 'penjualan.lihat' },
+      { to: '/penjualan/analisis', label: 'Analisis Margin', icon: TrendingUp, izin: 'penjualan.margin' },
+      { to: '/penjualan/retur', label: 'Retur Penjualan', icon: Undo2, izin: 'penjualan.retur' },
+      { to: '/penjualan/toko', label: 'Toko / Marketplace', icon: Store, izin: 'penjualan.lihat' },
+      { to: '/penjualan/iklan', label: 'Biaya Iklan', icon: Megaphone, izin: 'iklan.lihat' },
     ],
   },
   {
     section: 'Keuangan',
     key: 'keuangan',
     items: [
-      { to: '/keuangan/kas', label: 'Kas Masuk & Keluar', icon: Wallet },
-      { to: '/keuangan/utang-piutang', label: 'Utang & Piutang', icon: HandCoins },
-      { to: '/keuangan/laporan', label: 'Laporan Keuangan', icon: FileBarChart2 },
-      { to: '/keuangan/jurnal', label: 'Buku Besar & Jurnal', icon: BookOpenCheck },
-      { to: '/keuangan/coa', label: 'Chart of Accounts', icon: ListTree },
+      { to: '/keuangan/kas', label: 'Kas Masuk & Keluar', icon: Wallet, izin: 'keuangan.kas' },
+      { to: '/keuangan/utang-piutang', label: 'Utang & Piutang', icon: HandCoins, izin: 'keuangan.lihat' },
+      { to: '/keuangan/laporan', label: 'Laporan Keuangan', icon: FileBarChart2, izin: 'keuangan.lihat' },
+      { to: '/keuangan/jurnal', label: 'Buku Besar & Jurnal', icon: BookOpenCheck, izin: 'keuangan.lihat' },
+      { to: '/keuangan/coa', label: 'Chart of Accounts', icon: ListTree, izin: 'keuangan.coa' },
     ],
   },
   {
     section: 'Mitra',
     key: 'mitra',
-    items: [{ to: '/mitra', label: 'Supplier & Pelanggan', icon: Contact }],
+    items: [{ to: '/mitra', label: 'Supplier & Pelanggan', icon: Contact, izin: 'mitra.lihat' }],
   },
   {
     section: 'Sistem',
     key: 'sistem',
-    items: [{ to: '/pengaturan', label: 'Pengaturan', icon: Settings }],
+    items: [{ to: '/pengaturan', label: 'Pengaturan', icon: Settings, izin: ['sistem.pengaturan', 'sistem.tim', 'sistem.peran', 'sistem.kantor'] }],
   },
 ];
 
@@ -117,8 +117,22 @@ function grupSedangAktif(group, pathname) {
   return group.items.some((i) => (i.end ? pathname === i.to : pathname.startsWith(i.to)));
 }
 
+/**
+ * Menu yang boleh dilihat pengguna ini.
+ *
+ * Grup yang seluruh isinya tersembunyi ikut hilang — menyisakan judul grup
+ * kosong hanya memberi tahu bahwa ada sesuatu di sana yang tidak boleh dibuka,
+ * tanpa memberi jalan apa pun untuk membukanya.
+ */
+function saringMenu(punya) {
+  return NAV
+    .map((g) => ({ ...g, items: g.items.filter((i) => !i.izin || punya(...[].concat(i.izin))) }))
+    .filter((g) => g.items.length > 0);
+}
+
 function Sidebar({ onNavigate }) {
-  const { user, logout } = useAuth();
+  const { user, logout, punya } = useAuth();
+  const menu = saringMenu(punya);
   const identitas = useBranding();
   const location = useLocation();
   const [terlipat, setTerlipat] = useState(bacaLipatan);
@@ -142,7 +156,7 @@ function Sidebar({ onNavigate }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4">
-        {NAV.map((group) => {
+        {menu.map((group) => {
           const bisaDilipat = group.collapsible !== false;
           const tertutup = bisaDilipat && terlipat.includes(group.key);
           const adaYangAktif = grupSedangAktif(group, location.pathname);
@@ -252,6 +266,34 @@ function Layout({ children }) {
   );
 }
 
+/**
+ * Halaman yang tidak boleh dibuka pengguna ini.
+ *
+ * Menyembunyikan menu saja tidak cukup — alamatnya masih bisa diketik langsung,
+ * dan halaman yang terbuka lalu penuh pesan galat dari peladen lebih
+ * membingungkan daripada penolakan yang jelas.
+ */
+function Terlarang({ izin }) {
+  return (
+    <div className="grid min-h-[60vh] place-items-center px-4">
+      <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
+        <h1 className="mb-1 text-lg font-bold text-slate-900">Halaman ini tidak terbuka untuk peran Anda</h1>
+        <p className="text-sm text-slate-600">
+          Diperlukan hak akses <span className="font-mono text-xs">{[].concat(izin).join(' atau ')}</span>.
+          Hubungi admin bila Anda memang membutuhkannya.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** Bungkus halaman dengan pemeriksaan izin. */
+function Dijaga({ izin, children }) {
+  const { punya } = useAuth();
+  if (izin && !punya(...[].concat(izin))) return <Terlarang izin={izin} />;
+  return children;
+}
+
 export default function App() {
   const { user, loading } = useAuth();
 
@@ -269,24 +311,24 @@ export default function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/presensi" element={<Presensi />} />
-        <Route path="/presensi/rekap" element={<RekapAbsensi />} />
-        <Route path="/gudang/valuasi" element={<ValuasiStok />} />
-        <Route path="/gudang/produk" element={<Produk />} />
-        <Route path="/gudang/mutasi" element={<MutasiStok />} />
-        <Route path="/gudang/opname" element={<StokOpname />} />
-        <Route path="/penjualan" element={<Penjualan />} />
-        <Route path="/penjualan/analisis" element={<AnalisisMargin />} />
-        <Route path="/penjualan/retur" element={<Retur />} />
-        <Route path="/penjualan/toko" element={<Toko />} />
-        <Route path="/penjualan/iklan" element={<Iklan />} />
-        <Route path="/keuangan/kas" element={<KasMasukKeluar />} />
-        <Route path="/keuangan/utang-piutang" element={<UtangPiutang />} />
-        <Route path="/keuangan/laporan" element={<LaporanKeuangan />} />
-        <Route path="/keuangan/jurnal" element={<Jurnal />} />
-        <Route path="/keuangan/coa" element={<ChartOfAccounts />} />
-        <Route path="/mitra" element={<Mitra />} />
-        <Route path="/pengaturan" element={<Pengaturan />} />
+        <Route path="/presensi" element={<Dijaga izin="presensi.absen"><Presensi /></Dijaga>} />
+        <Route path="/presensi/rekap" element={<Dijaga izin="presensi.lihat"><RekapAbsensi /></Dijaga>} />
+        <Route path="/gudang/valuasi" element={<Dijaga izin="gudang.lihat"><ValuasiStok /></Dijaga>} />
+        <Route path="/gudang/produk" element={<Dijaga izin="gudang.lihat"><Produk /></Dijaga>} />
+        <Route path="/gudang/mutasi" element={<Dijaga izin="gudang.lihat"><MutasiStok /></Dijaga>} />
+        <Route path="/gudang/opname" element={<Dijaga izin="gudang.opname"><StokOpname /></Dijaga>} />
+        <Route path="/penjualan" element={<Dijaga izin="penjualan.lihat"><Penjualan /></Dijaga>} />
+        <Route path="/penjualan/analisis" element={<Dijaga izin="penjualan.margin"><AnalisisMargin /></Dijaga>} />
+        <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
+        <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
+        <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/keuangan/kas" element={<Dijaga izin="keuangan.kas"><KasMasukKeluar /></Dijaga>} />
+        <Route path="/keuangan/utang-piutang" element={<Dijaga izin="keuangan.lihat"><UtangPiutang /></Dijaga>} />
+        <Route path="/keuangan/laporan" element={<Dijaga izin="keuangan.lihat"><LaporanKeuangan /></Dijaga>} />
+        <Route path="/keuangan/jurnal" element={<Dijaga izin="keuangan.lihat"><Jurnal /></Dijaga>} />
+        <Route path="/keuangan/coa" element={<Dijaga izin="keuangan.coa"><ChartOfAccounts /></Dijaga>} />
+        <Route path="/mitra" element={<Dijaga izin="mitra.lihat"><Mitra /></Dijaga>} />
+        <Route path="/pengaturan" element={<Dijaga izin={['sistem.pengaturan', 'sistem.tim', 'sistem.peran', 'sistem.kantor']}><Pengaturan /></Dijaga>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { runMigrations } = require('./migrate');
+const { seedPeran } = require('./seed-peran');
 
 /**
  * Menerjemahkan DATABASE_URL menjadi path file SQLite.
@@ -38,6 +39,8 @@ function migrate() {
   db.exec(sql);
 
   const applied = runMigrations(db);
+  // Peran disemai setelah migrasi karena ia butuh kolom users.role_id.
+  applied.push(...seedPeran(db));
   if (applied.length > 0) {
     console.log('Migrasi database diterapkan:', applied.join(', '));
   }

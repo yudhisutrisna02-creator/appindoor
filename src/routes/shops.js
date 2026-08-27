@@ -11,7 +11,7 @@ const { daftarkanEkspor } = require('../utils/ekspor');
 const express = require('express');
 const { z } = require('zod');
 const { db } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2 } = require('../utils/accounting');
 
@@ -92,7 +92,7 @@ daftarkanEkspor(router, {
   },
 });
 
-router.post('/', requireRole('admin', 'manager'), ah((req, res) => {
+router.post('/', butuhIzin('penjualan.toko'), ah((req, res) => {
   const s = parse(shopSchema, req.body);
   if (db.prepare('SELECT id FROM shops WHERE name = ?').get(s.name)) {
     throw httpError(409, `Toko "${s.name}" sudah terdaftar`);
@@ -104,7 +104,7 @@ router.post('/', requireRole('admin', 'manager'), ah((req, res) => {
   res.status(201).json({ ok: true, shop: db.prepare('SELECT * FROM shops WHERE id = ?').get(info.lastInsertRowid) });
 }));
 
-router.put('/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.put('/:id', butuhIzin('penjualan.toko'), ah((req, res) => {
   const s = parse(shopSchema, req.body);
   const existing = db.prepare('SELECT * FROM shops WHERE id = ?').get(req.params.id);
   if (!existing) throw httpError(404, 'Toko tidak ditemukan');
@@ -118,7 +118,7 @@ router.put('/:id', requireRole('admin', 'manager'), ah((req, res) => {
   res.json({ ok: true, shop: db.prepare('SELECT * FROM shops WHERE id = ?').get(existing.id) });
 }));
 
-router.delete('/:id', requireRole('admin'), ah((req, res) => {
+router.delete('/:id', butuhIzin('penjualan.toko'), ah((req, res) => {
   const shop = db.prepare('SELECT * FROM shops WHERE id = ?').get(req.params.id);
   if (!shop) throw httpError(404, 'Toko tidak ditemukan');
 

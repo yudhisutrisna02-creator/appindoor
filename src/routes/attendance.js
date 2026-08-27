@@ -2,7 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { db, getSetting } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { saveDataUrlImage } = require('../utils/upload');
 const { nearestOffice } = require('../utils/geo');
@@ -239,7 +239,7 @@ const leaveSchema = z.object({
   notes: z.string().max(500).optional().nullable(),
 });
 
-router.post('/leave', requireRole('admin', 'manager'), ah((req, res) => {
+router.post('/leave', butuhIzin('presensi.kelola'), ah((req, res) => {
   const body = parse(leaveSchema, req.body);
 
   const user = db.prepare('SELECT id, name FROM users WHERE id = ? AND active = 1').get(body.user_id);
@@ -280,7 +280,7 @@ const correctionSchema = z.object({
   notes: z.string().max(500).optional().nullable(),
 });
 
-router.patch('/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.patch('/:id', butuhIzin('presensi.kelola'), ah((req, res) => {
   const patch = parse(correctionSchema, req.body);
   const record = db.prepare('SELECT * FROM attendance WHERE id = ?').get(req.params.id);
   if (!record) throw httpError(404, 'Data presensi tidak ditemukan');

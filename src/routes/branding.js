@@ -11,7 +11,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { getSetting, setSetting } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, httpError } = require('../utils/http');
 const { UPLOAD_DIR, saveDataUrlImage, hapusBerkas } = require('../utils/upload');
 
@@ -42,7 +42,7 @@ router.get('/logo', ah((req, res) => {
 }));
 
 /** PUT /api/branding/logo — ganti logo. Dikirim sebagai data URL dari peramban. */
-router.put('/logo', requireAuth, requireRole('admin'), ah((req, res) => {
+router.put('/logo', requireAuth, butuhIzin('sistem.pengaturan'), ah((req, res) => {
   const { logo } = req.body || {};
   const lama = getSetting('company_logo', '');
 

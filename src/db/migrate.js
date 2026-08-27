@@ -172,12 +172,19 @@ function runMigrations(db) {
   addColumn(db, 'users', 'bank_account', 'TEXT', applied);
   addColumn(db, 'users', 'note', 'TEXT', applied);
 
+  // --- Peran & hak akses ---
+  // Kolom lama users.role dibiarkan utuh. Ia tetap dipakai sebagai cadangan
+  // selama role_id belum diisi, sehingga akun yang sudah ada tidak kehilangan
+  // akses hanya karena sistem perannya berganti.
+  addColumn(db, 'users', 'role_id', 'INTEGER REFERENCES roles(id)', applied);
+
   // --- Daftar kanal jualan tidak lagi dikunci di dalam tabel ---
   lepasCekKanal(db, 'sales_orders', applied);
   lepasCekKanal(db, 'shops', applied);
 
   // Indeks menyusul kolomnya
   db.exec('CREATE INDEX IF NOT EXISTS idx_ads_date ON ad_spends(spend_date)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_ads_shop ON ad_spends(shop_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_jl_partner ON journal_lines(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_partner ON sales_orders(partner_id)');

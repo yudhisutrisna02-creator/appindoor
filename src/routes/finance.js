@@ -2,7 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { db, getSetting } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { postJournal, r2 } = require('../utils/accounting');
 const { incomeStatement, balanceSheet, cashFlow, generalLedger, trialBalance, accountBalances } = require('../utils/reports');
@@ -67,7 +67,7 @@ daftarkanEkspor(router, {
   },
 });
 
-router.post('/accounts', requireRole('admin', 'manager'), ah((req, res) => {
+router.post('/accounts', butuhIzin('keuangan.coa'), ah((req, res) => {
   const a = parse(accountSchema, req.body);
   if (db.prepare('SELECT id FROM accounts WHERE code = ?').get(a.code)) {
     throw httpError(409, `Kode akun ${a.code} sudah dipakai`);
@@ -82,7 +82,7 @@ router.post('/accounts', requireRole('admin', 'manager'), ah((req, res) => {
   res.status(201).json({ ok: true, account: db.prepare('SELECT * FROM accounts WHERE id = ?').get(info.lastInsertRowid) });
 }));
 
-router.put('/accounts/:id', requireRole('admin', 'manager'), ah((req, res) => {
+router.put('/accounts/:id', butuhIzin('keuangan.coa'), ah((req, res) => {
   const a = parse(accountSchema, req.body);
   const existing = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
   if (!existing) throw httpError(404, 'Akun tidak ditemukan');
@@ -96,7 +96,7 @@ router.put('/accounts/:id', requireRole('admin', 'manager'), ah((req, res) => {
   res.json({ ok: true, account: db.prepare('SELECT * FROM accounts WHERE id = ?').get(existing.id) });
 }));
 
-router.delete('/accounts/:id', requireRole('admin'), ah((req, res) => {
+router.delete('/accounts/:id', butuhIzin('keuangan.coa'), ah((req, res) => {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
   if (!account) throw httpError(404, 'Akun tidak ditemukan');
   if (account.is_system) throw httpError(422, 'Akun sistem tidak dapat dihapus — nonaktifkan saja');
@@ -127,7 +127,7 @@ const journalSchema = z.object({
 });
 
 /** POST /api/finance/journals — jurnal manual (validasi Debit = Kredit). */
-router.post('/journals', requireRole('admin', 'manager'), ah((req, res) => {
+router.post('/journals', butuhIzin('keuangan.jurnal'), ah((req, res) => {
   const body = parse(journalSchema, req.body);
   const result = postJournal({
     date: body.entry_date,
@@ -204,7 +204,7 @@ router.get('/journals/:id', ah((req, res) => {
   res.json({ journal, lines });
 }));
 
-router.delete('/journals/:id', requireRole('admin'), ah((req, res) => {
+router.delete('/journals/:id', butuhIzin('keuangan.jurnal'), ah((req, res) => {
   const journal = db.prepare('SELECT * FROM journals WHERE id = ?').get(req.params.id);
   if (!journal) throw httpError(404, 'Jurnal tidak ditemukan');
   if (journal.source !== 'MANUAL') {

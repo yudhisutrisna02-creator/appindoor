@@ -547,6 +547,115 @@ async function main() {
       `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Peran & hak akses ----------
+  console.log('\n11. Peran & hak akses');
+
+  const daftarPeran = await call('GET', '/api/peran');
+  check('lima peran bawaan tersedia', daftarPeran.roles.length >= 5,
+    daftarPeran.roles.map((r) => r.slug).join(', '));
+  check('katalog izin dikelompokkan per modul', daftarPeran.katalog.length >= 8,
+    `${daftarPeran.katalog.length} modul`);
+
+  const izinSaya = await call('GET', '/api/peran/saya');
+  check('admin memegang seluruh izin',
+    izinSaya.permissions.length === daftarPeran.katalog.flatMap((k) => k.izin).length,
+    `${izinSaya.permissions.length} izin`);
+
+  const peranGudang = daftarPeran.roles.find((r) => r.slug === 'gudang');
+  const akunGudang = await call('POST', '/api/admin/users', {
+    name: 'Uji Gudang', email: `gudang-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
+    role: 'staff', role_id: peranGudang.id,
+  });
+  check('akun bisa ditautkan ke peran', akunGudang.user.role_id === peranGudang.id);
+
+  const masukGudang = await call('POST', '/api/auth/login', {
+    email: akunGudang.user.email, password: 'RahasiaKuat1',
+  });
+  const tokenAdmin = token;
+  token = masukGudang.token;
+
+  const cobaAkses = async (path) => {
+    try {
+      await call('GET', path);
+      return 200;
+    } catch (err) {
+      return err.status || 0;
+    }
+  };
+
+  check('tim gudang boleh membuka menu gudang', (await cobaAkses('/api/inventory/products')) === 200);
+  check('tim gudang boleh membuka dashboard', (await cobaAkses('/api/dashboard')) === 200);
+  check('tim gudang ditolak dari penjualan', (await cobaAkses('/api/sales')) === 403);
+  check('tim gudang ditolak dari keuangan', (await cobaAkses(`/api/finance/reports/balance-sheet?asOf=${today}`)) === 403);
+  check('tim gudang ditolak dari biaya iklan', (await cobaAkses('/api/iklan')) === 403);
+  check('tim gudang ditolak dari data tim', (await cobaAkses('/api/admin/users')) === 403);
+
+  // Batas akses harus berlaku pada aktivitas juga, bukan cuma pada halaman.
+  let tolakUbahProduk = 0;
+  try {
+    await call('POST', '/api/inventory/products', {
+      sku: `X-${Date.now()}`, name: 'Uji Izin', category: 'Uji', unit: 'PCS',
+    });
+    tolakUbahProduk = 200;
+  } catch (err) {
+    tolakUbahProduk = err.status;
+  }
+  check('tim gudang boleh menambah produk (punya gudang.produk)', tolakUbahProduk === 201 || tolakUbahProduk === 200,
+    `status ${tolakUbahProduk}`);
+
+  token = tokenAdmin;
+
+  // Peran khusus: dibuat, dipakai, lalu diuji batasnya.
+  const peranBaru = await call('POST', '/api/peran', {
+    name: `Peran Uji ${Date.now()}`,
+    description: 'Hanya boleh melihat dashboard',
+    permissions: ['dashboard.lihat'],
+  });
+  check('peran baru bisa dibuat', peranBaru.role.permissions.length === 1);
+
+  const akunSempit = await call('POST', '/api/admin/users', {
+    name: 'Uji Sempit', email: `sempit-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
+    role: 'staff', role_id: peranBaru.role.id,
+  });
+  const masukSempit = await call('POST', '/api/auth/login', {
+    email: akunSempit.user.email, password: 'RahasiaKuat1',
+  });
+  token = masukSempit.token;
+  check('peran sempit hanya boleh membuka dashboard',
+    (await cobaAkses('/api/dashboard')) === 200 &&
+    (await cobaAkses('/api/inventory/products')) === 403 &&
+    (await cobaAkses('/api/sales')) === 403);
+  token = tokenAdmin;
+
+  // Peran Admin tidak boleh dipersempit — kalau bisa, tidak ada lagi yang
+  // dapat memperbaiki peran lain dari dalam aplikasi.
+  let tolakUbahAdmin = false;
+  try {
+    const adminRole = daftarPeran.roles.find((r) => r.slug === 'admin');
+    await call('PUT', `/api/peran/${adminRole.id}`, {
+      name: 'Admin', permissions: ['dashboard.lihat'],
+    });
+  } catch {
+    tolakUbahAdmin = true;
+  }
+  check('peran Admin tidak dapat dibatasi', tolakUbahAdmin);
+
+  let tolakHapusBawaan = false;
+  try {
+    await call('DELETE', `/api/peran/${peranGudang.id}`);
+  } catch {
+    tolakHapusBawaan = true;
+  }
+  check('peran bawaan tidak dapat dihapus', tolakHapusBawaan);
+
+  let tolakHapusTerpakai = false;
+  try {
+    await call('DELETE', `/api/peran/${peranBaru.role.id}`);
+  } catch {
+    tolakHapusTerpakai = true;
+  }
+  check('peran yang masih dipakai akun tidak dapat dihapus', tolakHapusTerpakai);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -1,29 +1,42 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, MapPin, Save, Users, Building2, Settings as SettingsIcon, KeyRound, Crosshair } from 'lucide-react';
+import { Plus, Pencil, Trash2, MapPin, Save, Users, Building2, Settings as SettingsIcon, KeyRound, Crosshair, ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import UnggahGambar from '../components/UnggahGambar';
 import GambarTerlindungi from '../components/GambarTerlindungi';
+import PeranTab from './PeranTab';
 import { useBranding } from '../lib/branding';
 import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { useAuth } from '../lib/auth';
+
+/** Izin minimal untuk membuka tiap tab. */
+const IZIN_TAB = {
+  app: ['sistem.pengaturan'],
+  offices: ['sistem.kantor'],
+  users: ['sistem.tim'],
+  peran: ['sistem.peran', 'sistem.tim'],
+};
 
 const TABS = [
   { key: 'app', label: 'Aplikasi', icon: SettingsIcon },
   { key: 'offices', label: 'Titik Kantor', icon: Building2 },
   { key: 'users', label: 'Data Tim', icon: Users },
+  { key: 'peran', label: 'Peran & Hak Akses', icon: ShieldCheck },
   { key: 'account', label: 'Akun Saya', icon: KeyRound },
 ];
 
 export default function Pengaturan() {
-  const { isAdmin, canManage } = useAuth();
-  const [tab, setTab] = useState('app');
+  const { isAdmin, canManage, punya } = useAuth();
+  // Tab awal dipilih dari yang benar-benar boleh dibuka. Membuka tab yang
+  // ditolak peladen hanya menampilkan halaman kosong berisi pesan galat.
+  const tabTersedia = TABS.filter((t) => !IZIN_TAB[t.key] || punya(...IZIN_TAB[t.key]));
+  const [tab, setTab] = useState(tabTersedia[0]?.key || 'app');
 
   return (
     <div>
       <PageHeader title="Pengaturan" subtitle="Konfigurasi perusahaan, geofencing, dan pengguna" />
 
       <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">
-        {TABS.filter((t) => (t.key === 'users' ? canManage : true)).map((t) => (
+        {TABS.filter((t) => !IZIN_TAB[t.key] || punya(...IZIN_TAB[t.key])).map((t) => (
           <button
             key={t.key} onClick={() => setTab(t.key)}
             className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
@@ -38,6 +51,7 @@ export default function Pengaturan() {
       {tab === 'app' && <AppSettings isAdmin={isAdmin} />}
       {tab === 'offices' && <Offices canManage={canManage} isAdmin={isAdmin} />}
       {tab === 'users' && <UsersTab isAdmin={isAdmin} />}
+      {tab === 'peran' && <PeranTab />}
       {tab === 'account' && <MyAccount />}
     </div>
   );
@@ -348,6 +362,7 @@ const profilLengkap = (u) => KOLOM_WAJIB_LENGKAP.every((k) => u[k]);
 function UsersTab({ isAdmin }) {
   const toast = useToast();
   const [users, setUsers] = useState([]);
+  const [daftarPeran, setDaftarPeran] = useState([]);
   const [ringkas, setRingkas] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
@@ -367,6 +382,9 @@ function UsersTab({ isAdmin }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    api.get('/api/peran').then((d) => setDaftarPeran(d.roles)).catch(() => {});
+  }, []);
 
   async function save(e) {
     e.preventDefault();
@@ -450,7 +468,11 @@ function UsersTab({ isAdmin }) {
                   <p className="text-xs text-slate-500">{u.email}</p>
                 </td>
                 <td className="text-sm">{u.department || <span className="text-slate-400">belum diisi</span>}</td>
-                <td><span className={u.role === 'admin' ? 'badge-blue' : u.role === 'manager' ? 'badge-amber' : 'badge-slate'}>{u.role}</span></td>
+                <td>
+                  <span className={u.role_slug === 'admin' ? 'badge-blue' : u.role_slug === 'manager' ? 'badge-amber' : 'badge-slate'}>
+                    {u.role_name || u.role}
+                  </span>
+                </td>
                 <td className="text-sm">{u.position || '-'}</td>
                 <td className="text-sm">{u.phone || '-'}</td>
                 <td className="text-xs">{STATUS_KERJA[u.employment_status] || <span className="text-slate-400">-</span>}</td>
@@ -463,7 +485,7 @@ function UsersTab({ isAdmin }) {
                 {isAdmin && (
                   <td>
                     <div className="flex gap-1">
-                      <button className="btn-ghost !px-2 !py-1" onClick={() => setEditing({ ...u, password: '', active: !!u.active, photoPratinjau: undefined })} aria-label="Ubah">
+                      <button className="btn-ghost !px-2 !py-1" onClick={() => setEditing({ ...u, password: '', active: !!u.active, photoPratinjau: undefined, role_id: u.role_id || '' })} aria-label="Ubah">
                         <Pencil size={14} />
                       </button>
                       <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => deactivate(u)} aria-label="Nonaktifkan">
@@ -498,11 +520,23 @@ function UsersTab({ isAdmin }) {
                 value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })}
               />
             </Field>
-            <Field label="Peran *">
-              <select className="input" value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })}>
-                <option value="staff">Staff — presensi & input transaksi</option>
-                <option value="manager">Manager — kelola data & laporan</option>
-                <option value="admin">Admin — akses penuh</option>
+            <Field label="Peran *" hint="Menentukan menu dan aktivitas yang boleh diakses">
+              <select
+                className="input"
+                value={editing.role_id || ''}
+                onChange={(e) => {
+                  const id = e.target.value ? Number(e.target.value) : null;
+                  const p = daftarPeran.find((x) => x.id === id);
+                  // Kolom role lama ikut disesuaikan agar akun tetap masuk akal
+                  // bila suatu saat dibaca tanpa melalui tabel peran.
+                  const lama = p && p.slug === 'admin' ? 'admin' : p && p.slug === 'manager' ? 'manager' : 'staff';
+                  setEditing({ ...editing, role_id: id, role: lama });
+                }}
+              >
+                <option value="">— pilih peran —</option>
+                {daftarPeran.filter((p) => p.active).map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
               </select>
             </Field>
             <Field label="Jabatan">
