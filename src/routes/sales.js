@@ -393,7 +393,117 @@ const cancelOrder = db.transaction((orderId) => {
  */
 const ubahOrder = buatPengubah({ resolveItems, computeOrder, cancelOrder });
 
-router.put('/:id(\\d+)', butuhIzin('penjualan.buat'), ah((req, res) => {
+/**
+ * Ubah status banyak order sekaligus.
+ *
+ * Papan pengiriman menggerakkan puluhan pesanan setiap hari; membuka satu per
+ * satu untuk mengubah satu kolom bukan pekerjaan yang masuk akal.
+ *
+ * Perubahannya tetap melewati jalur pengubahan satu order, bukan UPDATE massal
+ * langsung ke tabel — supaya aturan jurnal, piutang, dan pembatalan tidak punya
+ * dua versi yang bisa berbeda.
+ */
+const statusMassalSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1, 'pilih minimal satu order').max(500),
+  // BATAL sengaja tidak diterima di sini. Membatalkan mengembalikan stok dan
+  // menghapus jurnal — terlalu berat untuk dijalankan lewat centang massal yang
+  // mudah tersenggol.
+  fulfillment_status: z.enum(['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR']),
+  payment_status: z.enum(['PAID', 'UNPAID']).optional(),
+  payout_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+});
+
+const ubahStatusMassal = db.transaction((badan, userId) => {
+  const hasil = { berhasil: 0, gagal: [] };
+
+  for (const id of badan.ids) {
+    try {
+      ubahOrder(id, {
+        fulfillment_status: badan.fulfillment_status,
+        ...(badan.payment_status ? { payment_status: badan.payment_status } : {}),
+        ...(badan.payout_date !== undefined ? { payout_date: badan.payout_date } : {}),
+      }, userId);
+      hasil.berhasil += 1;
+    } catch (e) {
+      const o = db.prepare('SELECT order_no FROM sales_orders WHERE id = ?').get(id);
+      hasil.gagal.push({ id, order_no: o ? o.order_no : String(id), pesan: e.message });
+    }
+  }
+
+  return hasil;
+});
+
+/**
+ * GET /api/sales/papan — order dikelompokkan per tahap pengiriman.
+ *
+ * Yang dibutuhkan di layar ini bukan seluruh kolom keuangan, melainkan apa yang
+ * perlu dikerjakan hari ini: nomor pesanan, toko, pembeli, ekspedisi, resi, dan
+ * sudah berapa lama tertahan di tahap itu.
+ */
+router.get('/papan', ah((req, res) => {
+  const { from, to } = dateRange(req.query);
+  const params = [from, to];
+  let where = "WHERE o.status = 'POSTED' AND o.order_date BETWEEN ? AND ?";
+  if (req.query.shop_id) {
+    where += ' AND o.shop_id = ?';
+    params.push(Number(req.query.shop_id));
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT o.id, o.order_no, o.order_date, o.channel, o.fulfillment_status, o.payment_status,
+              o.customer, o.buyer_city, o.courier, o.tracking_no, o.order_ref, o.payout_date,
+              o.net_revenue, o.total_fees, o.net_profit,
+              sh.name AS shop_name,
+              CAST(julianday('now') - julianday(o.order_date) AS INTEGER) AS umur_hari
+         FROM sales_orders o
+         LEFT JOIN shops sh ON sh.id = o.shop_id
+         ${where}
+        ORDER BY o.order_date ASC, o.id ASC`
+    )
+    .all(...params);
+
+  const TAHAP = ['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR'];
+  const kolom = TAHAP.map((tahap) => {
+    const isi = rows.filter((r) => r.fulfillment_status === tahap);
+    return {
+      status: tahap,
+      orders: isi.length,
+      nilai: r2(isi.reduce((s, r) => s + r.net_revenue - r.total_fees, 0)),
+      // Pesanan tertua di tahap ini — yang paling perlu ditengok lebih dulu.
+      tertua: isi.length ? Math.max(...isi.map((r) => r.umur_hari)) : 0,
+      rows: isi,
+    };
+  });
+
+  res.json({
+    from, to, kolom,
+    ringkas: {
+      total: rows.length,
+      belumSelesai: rows.filter((r) => !['CAIR', 'RETUR'].includes(r.fulfillment_status)).length,
+      nilaiBelumCair: r2(
+        rows
+          .filter((r) => r.fulfillment_status !== 'CAIR' && r.fulfillment_status !== 'RETUR')
+          .reduce((s, r) => s + r.net_revenue - r.total_fees, 0)
+      ),
+    },
+  });
+}));
+
+router.patch('/status-massal', butuhIzin('penjualan.ubah'), ah((req, res) => {
+  const badan = parse(statusMassalSchema, req.body);
+  const hasil = ubahStatusMassal(badan, req.user.id);
+
+  res.json({
+    ok: true,
+    message: hasil.gagal.length
+      ? `${hasil.berhasil} order diperbarui, ${hasil.gagal.length} gagal`
+      : `${hasil.berhasil} order diperbarui`,
+    ...hasil,
+  });
+}));
+
+router.put('/:id(\\d+)', butuhIzin('penjualan.ubah'), ah((req, res) => {
   const badan = parse(ubahSchema, req.body);
   const hasil = ubahOrder(Number(req.params.id), badan, req.user.id);
 

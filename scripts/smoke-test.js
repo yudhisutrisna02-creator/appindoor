@@ -739,6 +739,82 @@ async function main() {
   check('jurnal iklan tetap utuh setelah penolakan',
     near(kasSesudah.summary.net, kasSemua.summary.net, 1));
 
+  // ---------- Papan pengiriman ----------
+  console.log('\n13. Papan pengiriman');
+
+  const papanAwal = await call('GET', `/api/sales/papan?from=${today}&to=${today}`);
+  check('papan mengelompokkan pesanan per tahap',
+    papanAwal.kolom.length === 5 && papanAwal.kolom.every((k) => Array.isArray(k.rows)),
+    papanAwal.kolom.map((k) => `${k.status}=${k.orders}`).join(' '));
+
+  const skuPapan = `PAPAN-${Date.now()}`;
+  const prodPapan = (await call('POST', '/api/inventory/products', {
+    sku: skuPapan, name: 'Produk Uji Papan', cost: 10000, price: 30000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodPapan.id, move_date: today, move_type: 'IN',
+    qty: 50, unit_cost: 10000, payment: 'CASH',
+  });
+
+  const idPapan = [];
+  for (let i = 0; i < 3; i += 1) {
+    const o = await call('POST', '/api/sales', {
+      order_date: today, channel: 'SHOPEE', customer: `Papan ${i}`,
+      items: [{ product_id: prodPapan.id, qty: 2, price: 30000 }],
+      admin_fee: 5000, payment_status: 'UNPAID', fulfillment_status: 'DIPROSES',
+    });
+    idPapan.push(o.order.id);
+  }
+
+  const bsPapanA = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`)).assets.current;
+  const kirim = await call('PATCH', '/api/sales/status-massal', {
+    ids: idPapan, fulfillment_status: 'DIKIRIM',
+  });
+  check('status banyak pesanan bisa diubah sekaligus', kirim.berhasil === 3, kirim.message);
+
+  const bsPapanB = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`)).assets.current;
+  check('memindahkan tahap pengiriman tidak menggeser uang',
+    near(bsPapanA.totalReceivable, bsPapanB.totalReceivable, 1) &&
+    near(bsPapanA.totalCash, bsPapanB.totalCash, 1));
+
+  const papanKirim = await call('GET', `/api/sales/papan?from=${today}&to=${today}`);
+  const kolomKirim = papanKirim.kolom.find((k) => k.status === 'DIKIRIM');
+  check('pesanan berpindah kolom di papan', kolomKirim.orders >= 3, String(kolomKirim.orders));
+
+  // Menandai cair sekaligus lunas harus memindahkan piutang ke kas/bank.
+  const cair = await call('PATCH', '/api/sales/status-massal', {
+    ids: idPapan.slice(0, 2), fulfillment_status: 'CAIR',
+    payment_status: 'PAID', payout_date: today,
+  });
+  check('menandai cair sekaligus lunas berhasil', cair.berhasil === 2, cair.message);
+
+  const bsPapanC = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`)).assets.current;
+  const nilaiDuaOrder = 2 * (60000 - 5000);
+  check('menandai lunas memindahkan piutang ke kas/bank',
+    near(bsPapanB.totalReceivable - bsPapanC.totalReceivable, nilaiDuaOrder, 1),
+    `${bsPapanB.totalReceivable} -> ${bsPapanC.totalReceivable}`);
+
+  const bsPapanSeimbang = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah perubahan massal', bsPapanSeimbang.balanced);
+
+  // Membatalkan mengembalikan stok dan menghapus jurnal — terlalu berat untuk
+  // dijalankan lewat centang massal yang mudah tersenggol.
+  let tolakBatalMassal = false;
+  try {
+    await call('PATCH', '/api/sales/status-massal', { ids: idPapan, fulfillment_status: 'BATAL' });
+  } catch {
+    tolakBatalMassal = true;
+  }
+  check('pembatalan massal ditolak', tolakBatalMassal);
+
+  let tolakKosong = false;
+  try {
+    await call('PATCH', '/api/sales/status-massal', { ids: [], fulfillment_status: 'DIKIRIM' });
+  } catch {
+    tolakKosong = true;
+  }
+  check('perubahan massal tanpa pesanan terpilih ditolak', tolakKosong);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
