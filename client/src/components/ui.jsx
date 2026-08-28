@@ -1,5 +1,5 @@
 import { createContext, useContext, useCallback, useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle2, Info, X, Loader2, FileSpreadsheet, FileText } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, X, Loader2, FileSpreadsheet, FileText, Printer } from 'lucide-react';
 import { firstOfMonth, today } from '../lib/format';
 import { api } from '../lib/api';
 
@@ -200,14 +200,16 @@ export function Field({ label, children, hint, className = '' }) {
  * yang sedang aktif di layar ikut dikirim sebagai parameter, jadi berkas yang
  * turun berisi persis apa yang sedang dilihat pengguna, bukan seluruh tabel.
  */
-export function TombolEkspor({ path, params = {}, nama = 'laporan', kecil = false }) {
+const EKSTENSI = { excel: 'xlsx', pdf: 'pdf', csv: 'csv' };
+
+export function TombolEkspor({ path, params = {}, nama = 'laporan', kecil = false, csv = false }) {
   const toast = useToast();
   const [sibuk, setSibuk] = useState(null);
 
   async function unduh(bentuk) {
     setSibuk(bentuk);
     try {
-      await api.download(`${path}/export/${bentuk}`, params, `${nama}.${bentuk === 'excel' ? 'xlsx' : 'pdf'}`);
+      await api.download(`${path}/export/${bentuk}`, params, `${nama}.${EKSTENSI[bentuk]}`);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -223,10 +225,66 @@ export function TombolEkspor({ path, params = {}, nama = 'laporan', kecil = fals
         <FileSpreadsheet size={kecil ? 14 : 16} />
         {sibuk === 'excel' ? 'Menyiapkan...' : 'Excel'}
       </button>
+      {csv && (
+        <button className={kelas} onClick={() => unduh('csv')} disabled={sibuk !== null}>
+          <FileSpreadsheet size={kecil ? 14 : 16} />
+          {sibuk === 'csv' ? 'Menyiapkan...' : 'CSV'}
+        </button>
+      )}
       <button className={kelas} onClick={() => unduh('pdf')} disabled={sibuk !== null}>
         <FileText size={kecil ? 14 : 16} />
         {sibuk === 'pdf' ? 'Menyiapkan...' : 'PDF'}
       </button>
     </div>
+  );
+}
+
+/**
+ * Membuka berkas PDF dari peladen di jendela baru dan langsung memanggil dialog
+ * cetak.
+ *
+ * Tidak bisa sekadar menautkan alamatnya: unduhan membawa token lewat header,
+ * yang tidak ikut terbawa bila jendela baru membuka URL biasa. Jadi berkasnya
+ * diambil dulu sebagai blob, baru jendelanya menunjuk ke blob itu.
+ */
+export function TombolCetak({ path, params = {}, label = 'Cetak', kecil = false, icon: Icon }) {
+  const toast = useToast();
+  const [sibuk, setSibuk] = useState(false);
+
+  async function cetak() {
+    setSibuk(true);
+    try {
+      const url = await api.blobUrl(path, params);
+      const jendela = window.open(url, '_blank');
+      if (!jendela) {
+        // Pemblokir pop-up menahan jendelanya. Berkasnya tetap perlu sampai ke
+        // pengguna, jadi jatuhkan ke unduhan biasa daripada gagal diam-diam.
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'cetak.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        toast.info('Pop-up diblokir — berkasnya diunduh');
+      } else {
+        jendela.addEventListener('load', () => jendela.print(), { once: true });
+      }
+      // Blob dilepas setelah jendelanya sempat memuat isinya.
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSibuk(false);
+    }
+  }
+
+  return (
+    <button
+      className={`btn-secondary ${kecil ? '!px-2.5 !py-1.5 text-xs' : ''}`}
+      onClick={cetak} disabled={sibuk}
+    >
+      {Icon ? <Icon size={kecil ? 14 : 16} /> : <Printer size={kecil ? 14 : 16} />}
+      {sibuk ? 'Menyiapkan...' : label}
+    </button>
   );
 }

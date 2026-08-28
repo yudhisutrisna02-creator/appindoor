@@ -1501,6 +1501,143 @@ async function main() {
       `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Slip gaji & nota supplier ----------
+  console.log('\n20. Slip gaji & nota supplier');
+
+  const ambilBerkas = async (path) => {
+    const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { res, buf, teks: buf.toString('latin1') };
+  };
+
+  // --- Slip gaji ---
+  const periodeSlip = `${Number(today.slice(0, 4)) - 1}-${today.slice(5, 7)}`;
+  const pegawaiSlip = await call('POST', '/api/admin/users', {
+    name: 'Uji Slip', email: `slip-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
+    role: 'staff', position: 'Admin', base_salary: 4000000, allowance: 600000,
+    bank_name: 'BRI', bank_account: '9876543210',
+  });
+  const gajiSlip = await call('POST', '/api/penggajian', { period: periodeSlip, payment: 'BANK' });
+  const idSlip = gajiSlip.payroll.id;
+  const barisSlip = gajiSlip.payroll.rows.find((r) => r.employee_id === pegawaiSlip.user.id);
+  await call('PUT', `/api/penggajian/${idSlip}/baris/${barisSlip.id}`, {
+    bonus: 250000, deduction: 100000, note: 'Bonus lembaran',
+  });
+
+  const satuSlip = await ambilBerkas(`/api/penggajian/${idSlip}/slip/${barisSlip.id}/pdf`);
+  check('slip gaji satu orang terbentuk sebagai PDF',
+    satuSlip.res.ok && satuSlip.buf.slice(0, 4).toString() === '%PDF' && satuSlip.buf.length > 800,
+    `${satuSlip.res.status}, ${satuSlip.buf.length} byte`);
+  // inline supaya bisa langsung dibuka dan dicetak, bukan dipaksa turun dulu.
+  check('slip dikirim untuk dibuka di peramban, bukan sebagai unduhan paksa',
+    (satuSlip.res.headers.get('Content-Disposition') || '').startsWith('inline'),
+    satuSlip.res.headers.get('Content-Disposition'));
+
+  const semuaSlip = await ambilBerkas(`/api/penggajian/${idSlip}/slip/pdf`);
+  const halaman = (buf) => (buf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+  check('slip semua pegawai jadi satu berkas, satu halaman per orang',
+    semuaSlip.res.ok && halaman(semuaSlip.buf) === gajiSlip.payroll.rows.length,
+    `${halaman(semuaSlip.buf)} halaman untuk ${gajiSlip.payroll.rows.length} pegawai`);
+  check('berkas semua slip lebih besar daripada slip satu orang',
+    semuaSlip.buf.length > satuSlip.buf.length);
+
+  // Slip harus tetap berbunyi sama walau gaji di master sudah naik sejak itu —
+  // inti dari nilai gaji yang dibekukan pada daftarnya.
+  await call('PUT', `/api/admin/users/${pegawaiSlip.user.id}`, {
+    name: 'Uji Slip', email: pegawaiSlip.user.email, role: 'staff', base_salary: 99000000,
+  });
+  const slipUlang = await ambilBerkas(`/api/penggajian/${idSlip}/slip/${barisSlip.id}/pdf`);
+  check('mencetak ulang slip lama tidak memakai gaji yang sudah naik',
+    slipUlang.res.ok && Math.abs(slipUlang.buf.length - satuSlip.buf.length) < 400,
+    `${satuSlip.buf.length} lalu ${slipUlang.buf.length} byte`);
+
+  let slipHilang = 0;
+  try {
+    await ambilBerkas(`/api/penggajian/${idSlip}/slip/999999/pdf`).then((x) => {
+      slipHilang = x.res.status;
+    });
+  } catch {
+    slipHilang = 0;
+  }
+  check('slip untuk baris yang tidak ada ditolak', slipHilang === 404, `status ${slipHilang}`);
+
+  await call('DELETE', `/api/penggajian/${idSlip}`);
+
+  // --- Nota supplier ---
+  const supplierNota = await call('POST', '/api/partners', {
+    name: `Supplier Nota ${Date.now()}`, kind: 'SUPPLIER',
+    phone: '0812000111', address: 'Jl. Uji Nota 1',
+  });
+  const produkNota = await call('POST', '/api/inventory/products', {
+    sku: `NOTA-${Date.now()}`, name: 'Uji Nota', category: 'Uji', unit: 'PCS',
+    cost: 12000, price: 20000,
+  });
+  const faktur = `INV-${Date.now()}`;
+  const poNota = await call('POST', '/api/pembelian', {
+    order_date: today,
+    partner_id: (supplierNota.partner || supplierNota).id,
+    payment: 'CREDIT',
+    invoice_no: faktur,
+    due_date: today,
+    items: [{ product_id: produkNota.product.id, qty: 5, unit_cost: 12000 }],
+  });
+  check('nomor faktur supplier tersimpan saat pesanan dibuat',
+    poNota.po.invoice_no === faktur, String(poNota.po.invoice_no));
+
+  const notaPdf = await ambilBerkas(`/api/pembelian/${poNota.po.id}/nota/pdf`);
+  check('nota supplier terbentuk sebagai PDF',
+    notaPdf.res.ok && notaPdf.buf.slice(0, 4).toString() === '%PDF' && notaPdf.buf.length > 800,
+    `${notaPdf.res.status}, ${notaPdf.buf.length} byte`);
+  check('nota dikirim untuk dibuka di peramban',
+    (notaPdf.res.headers.get('Content-Disposition') || '').startsWith('inline'));
+
+  const notaCsv = await ambilBerkas(`/api/pembelian/${poNota.po.id}/nota/csv`);
+  const isiCsv = notaCsv.buf.toString('utf8');
+  check('nota supplier bisa diunduh sebagai CSV',
+    notaCsv.res.ok && isiCsv.includes(faktur) && isiCsv.includes(poNota.po.po_no),
+    `${notaCsv.res.status}, ${notaCsv.buf.length} byte`);
+  // Tanpa BOM, Excel berbahasa Indonesia membaca huruf beraksen jadi berantakan.
+  check('CSV diawali BOM dan berpemisah titik koma',
+    isiCsv.charCodeAt(0) === 0xfeff && isiCsv.split('\r\n')[0].includes(';'),
+    JSON.stringify(isiCsv.slice(0, 40)));
+  check('tiap baris CSV membawa nomor fakturnya sendiri',
+    isiCsv.trim().split('\r\n').slice(1).every((b) => b.startsWith(faktur)));
+
+  // Satu nomor faktur dipakai dua kali biasanya berarti pembayaran ganda.
+  const poKedua = await call('POST', '/api/pembelian', {
+    order_date: today,
+    partner_id: (supplierNota.partner || supplierNota).id,
+    payment: 'CREDIT',
+    items: [{ product_id: produkNota.product.id, qty: 1, unit_cost: 12000 }],
+  });
+  let tolakFakturKembar = 0;
+  try {
+    await call('PATCH', `/api/pembelian/${poKedua.po.id}/nota`, { invoice_no: faktur });
+  } catch (err) {
+    tolakFakturKembar = err.status;
+  }
+  check('nomor faktur yang sudah dipakai pesanan lain ditolak',
+    tolakFakturKembar === 409, `status ${tolakFakturKembar}`);
+
+  const tandaiBayar = await call('PATCH', `/api/pembelian/${poNota.po.id}/nota`, {
+    invoice_no: faktur, paid_date: today,
+  });
+  check('tanggal bayar tersimpan pada nota', tandaiBayar.po.paid_date === today);
+
+  // Mencatat keterangan nota tidak boleh membukukan apa pun: jurnal pembelian
+  // sudah terbentuk saat barang diterima.
+  const jurnalSetelah = await call('GET',
+    `/api/finance/reports/trial-balance?from=${today.slice(0, 8)}01&to=${today}`);
+  check('mencatat nota tidak mengubah keseimbangan pembukuan',
+    near(jurnalSetelah.totalDebit, jurnalSetelah.totalCredit, 1));
+
+  const listCsv = await ambilBerkas(
+    `/api/pembelian/export/csv?from=${today.slice(0, 8)}01&to=${today}`
+  );
+  check('daftar pesanan pembelian juga bisa diunduh sebagai CSV',
+    listCsv.res.ok && listCsv.buf.toString('utf8').charCodeAt(0) === 0xfeff,
+    `${listCsv.res.status}, ${listCsv.buf.length} byte`);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

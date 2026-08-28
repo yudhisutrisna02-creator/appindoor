@@ -7,7 +7,7 @@
  * ditambahkan ke Excel, lupa ditambahkan ke PDF, dan tidak ada yang tahu sampai
  * ada yang membandingkan. Di sini satu definisi kolom menghasilkan keduanya.
  */
-const { tableExcel, tablePdf } = require('./exporters');
+const { tableExcel, tablePdf, tableCsv } = require('./exporters');
 const { ah } = require('./http');
 const { getSetting } = require('../db');
 
@@ -51,6 +51,13 @@ function daftarkanEkspor(router, { path, judul, kolom, ambil }) {
         return res.send(Buffer.from(buffer));
       }
 
+      if (bentuk === 'csv') {
+        const buffer = tableCsv(kol, rows);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${namaBerkas(judul, 'csv')}"`);
+        return res.send(buffer);
+      }
+
       const buffer = await tablePdf(judul, subtitle, kol, rows, meta, perusahaan);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${namaBerkas(judul, 'pdf')}"`);
@@ -61,6 +68,9 @@ function daftarkanEkspor(router, { path, judul, kolom, ambil }) {
   // dan Express tidak mencocokkan alamat berisi garis miring ganda.
   const awalan = path === '/' ? '' : path;
   router.get(`${awalan}/export/excel`, kirim('excel'));
+  // CSV memakai definisi kolom yang sama; menu yang tidak memerlukannya cukup
+  // tidak menampilkan tombolnya.
+  router.get(`${awalan}/export/csv`, kirim('csv'));
   router.get(`${awalan}/export/pdf`, kirim('pdf'));
 }
 

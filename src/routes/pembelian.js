@@ -14,11 +14,12 @@
  */
 const express = require('express');
 const { z } = require('zod');
-const { db, nextNumber } = require('../db');
+const { db, nextNumber, getSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2 } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
+const { dokumenPdf, tableCsv } = require('../utils/exporters');
 const { todayLocal } = require('../utils/time');
 const { applyMove } = require('./inventory');
 
@@ -34,6 +35,11 @@ const poSchema = z.object({
   payment: z.enum(['CASH', 'BANK', 'CREDIT']).default('CREDIT'),
   // Rekening yang dipakai membayar; hanya berlaku bila bukan pembelian tempo.
   cash_code: z.string().trim().min(3).optional().nullable(),
+  // Nomor faktur dari supplier. Boleh dikosongkan saat memesan dan diisi
+  // belakangan ketika notanya datang — yang dikenali supplier saat ditanya
+  // adalah nomor mereka, bukan nomor pesanan yang kita buat sendiri.
+  invoice_no: z.string().trim().max(60).optional().nullable(),
+  due_date: tanggal.optional().nullable(),
   note: z.string().trim().max(300).optional().nullable(),
   items: z
     .array(
@@ -64,12 +70,15 @@ const buatPO = db.transaction((body, userId) => {
   const poNo = nextNumber('PO', body.order_date.slice(0, 7));
   const info = db
     .prepare(
-      `INSERT INTO purchase_orders (po_no, order_date, expected_date, partner_id, status, payment, cash_code, note, user_id)
-       VALUES (?,?,?,?, 'DIPESAN', ?,?,?,?)`
+      `INSERT INTO purchase_orders
+         (po_no, order_date, expected_date, partner_id, status, payment, cash_code,
+          invoice_no, due_date, note, user_id)
+       VALUES (?,?,?,?, 'DIPESAN', ?,?,?,?,?,?)`
     )
     .run(
       poNo, body.order_date, body.expected_date || null, body.partner_id,
-      body.payment, body.cash_code || null, body.note || null, userId
+      body.payment, body.cash_code || null, body.invoice_no || null,
+      body.due_date || null, body.note || null, userId
     );
 
   const poId = info.lastInsertRowid;
@@ -262,6 +271,191 @@ router.post('/:id(\\d+)/terima', butuhIzin('pembelian.kelola'), ah((req, res) =>
  * stok dan jurnalnya sudah terbentuk; membatalkan pesanannya akan menyisakan
  * mutasi stok tanpa dokumen yang menjelaskannya.
  */
+// ==================================================================
+// NOTA PEMBAYARAN KE SUPPLIER
+// ==================================================================
+const notaSchema = z.object({
+  invoice_no: z.string().trim().max(60).optional().nullable(),
+  due_date: tanggal.optional().nullable(),
+  paid_date: tanggal.optional().nullable(),
+});
+
+/**
+ * Mencatat nomor faktur supplier dan tanggal pembayarannya.
+ *
+ * Sengaja tidak menyentuh jurnal. Pembukuan pembelian sudah terbentuk saat
+ * barang diterima; yang dicatat di sini hanya keterangan administratif supaya
+ * notanya bisa dicetak dan ditelusuri. Membuat jurnal kedua dari sini akan
+ * membukukan pembelian yang sama dua kali.
+ */
+router.patch('/:id(\\d+)/nota', butuhIzin('pembelian.kelola'), ah((req, res) => {
+  const id = Number(req.params.id);
+  const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id);
+  if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');
+
+  const body = parse(notaSchema, req.body);
+
+  if (body.invoice_no) {
+    const kembar = db
+      .prepare('SELECT po_no FROM purchase_orders WHERE invoice_no = ? AND id <> ?')
+      .get(body.invoice_no, id);
+    // Satu nomor faktur dipakai dua kali biasanya berarti pembayaran ganda —
+    // persis kesalahan yang paling mahal dan paling sulit ditemukan kembali.
+    if (kembar) {
+      throw httpError(409, `Nomor faktur ${body.invoice_no} sudah dipakai pesanan ${kembar.po_no}`);
+    }
+  }
+
+  db.prepare(
+    'UPDATE purchase_orders SET invoice_no = ?, due_date = ?, paid_date = ? WHERE id = ?'
+  ).run(
+    body.invoice_no === undefined ? po.invoice_no : body.invoice_no || null,
+    body.due_date === undefined ? po.due_date : body.due_date || null,
+    body.paid_date === undefined ? po.paid_date : body.paid_date || null,
+    id
+  );
+
+  res.json({ ok: true, po: ambilPO(id), message: 'Keterangan nota disimpan' });
+}));
+
+const BAYAR = {
+  CASH: 'Tunai',
+  BANK: 'Transfer bank',
+  CREDIT: 'Tempo (belum dibayar saat pemesanan)',
+};
+
+/** Kolom nota — dipakai bersama oleh PDF dan CSV supaya isinya tidak berbeda. */
+const KOLOM_NOTA = [
+  { header: 'SKU', key: 'sku', width: 16 },
+  { header: 'Barang', key: 'product_name', width: 40 },
+  { header: 'Jumlah', key: 'qty', width: 10 },
+  { header: 'Satuan', key: 'unit', width: 10 },
+  { header: 'Harga Satuan', key: 'unit_cost', width: 16, money: true },
+  { header: 'Subtotal', key: 'subtotal', width: 16, money: true },
+];
+
+/** Nota satu pesanan pembelian, siap dicetak. */
+function notaDari(po) {
+  const sudahDibayar = !!po.paid_date;
+  const supplier = po.partner_id
+    ? db.prepare('SELECT * FROM partners WHERE id = ?').get(po.partner_id)
+    : null;
+
+  return {
+    judul: 'NOTA PEMBAYARAN SUPPLIER',
+    // Status pesanannya sudah muncul di blok penerimaan barang; yang berguna di
+    // kepala lembar justru kapan lembar itu dicetak.
+    subjudul: `Dicetak ${todayLocal()}`,
+    nomor: po.invoice_no ? `Faktur No. ${po.invoice_no}` : 'Faktur supplier belum dicatat',
+    meta: [
+      ['No. pesanan', po.po_no],
+      ['Tanggal pesan', po.order_date],
+      ['Jatuh tempo', po.due_date || '-'],
+      ['Cara bayar', BAYAR[po.payment] || po.payment],
+      ['Dibayar', po.paid_date || 'belum'],
+    ],
+    pihak: [
+      {
+        judul: 'KEPADA (SUPPLIER)',
+        nama: po.supplier_name || 'Supplier belum dipilih',
+        baris: supplier
+          ? [supplier.phone, supplier.email, supplier.address].filter(Boolean)
+          : [],
+      },
+      {
+        judul: 'PENERIMAAN BARANG',
+        nama: po.status_label,
+        baris: [
+          `Dipesan ${po.items.reduce((s, i) => s + i.qty, 0)} unit`,
+          `Diterima ${po.items.reduce((s, i) => s + i.qty_received, 0)} unit`,
+          po.expected_date ? `Perkiraan datang ${po.expected_date}` : null,
+        ].filter(Boolean),
+      },
+    ],
+    kolom: KOLOM_NOTA,
+    rows: po.items.map((i) => ({
+      sku: i.sku,
+      product_name: i.product_name,
+      qty: i.qty,
+      unit: i.unit,
+      unit_cost: r2(i.unit_cost),
+      subtotal: r2(i.qty * i.unit_cost),
+    })),
+    ringkas: [
+      ['Nilai pesanan', po.total],
+      ['Sudah diterima', po.total_diterima],
+      ...(po.total_diterima < po.total ? [['Belum diterima', r2(po.total - po.total_diterima)]] : []),
+      [sudahDibayar ? 'TOTAL DIBAYAR' : 'TOTAL TAGIHAN', po.total, true],
+    ],
+    catatan: [
+      po.note || null,
+      sudahDibayar
+        ? `Dibayar pada ${po.paid_date} secara ${(BAYAR[po.payment] || po.payment).toLowerCase()}.`
+        : 'Nota ini belum ditandai lunas. Simpan bukti transfer sebagai lampiran.',
+      'Nilai pada nota mengikuti harga pesanan; pembukuan persediaan mengikuti barang yang benar-benar diterima.',
+    ].filter(Boolean).join('\n'),
+    tandaTangan: [
+      { label: 'Disetujui oleh', nama: '' },
+      { label: 'Diterima supplier', nama: po.supplier_name || '' },
+    ],
+  };
+}
+
+const namaNota = (po) =>
+  `nota-${String(po.invoice_no || po.po_no).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+router.get('/:id(\\d+)/nota/pdf', butuhIzin('pembelian.lihat'), ah(async (req, res) => {
+  const po = ambilPO(Number(req.params.id));
+  const buffer = await dokumenPdf(notaDari(po), {
+    perusahaan: getSetting('company_name', 'Perusahaan'),
+  });
+  res.setHeader('Content-Type', 'application/pdf');
+  // inline supaya bisa langsung dibuka dan dicetak dari peramban.
+  res.setHeader('Content-Disposition', `inline; filename="${namaNota(po)}.pdf"`);
+  res.send(buffer);
+}));
+
+router.get('/:id(\\d+)/nota/csv', butuhIzin('pembelian.lihat'), ah((req, res) => {
+  const po = ambilPO(Number(req.params.id));
+  const nota = notaDari(po);
+
+  // Keterangan nota ikut sebagai kolom pada tiap baris. Berkas CSV sering
+  // digabung dengan berkas lain di pembukuan, dan baris yang kehilangan nomor
+  // fakturnya tidak bisa ditelusuri kembali ke mana pun.
+  const kolom = [
+    { header: 'No. Faktur', key: 'invoice_no', width: 20 },
+    { header: 'No. Pesanan', key: 'po_no', width: 20 },
+    { header: 'Tanggal', key: 'order_date', width: 12 },
+    { header: 'Jatuh Tempo', key: 'due_date', width: 12 },
+    { header: 'Supplier', key: 'supplier', width: 24 },
+    { header: 'Status', key: 'status', width: 14 },
+    { header: 'Dibayar', key: 'paid_date', width: 12 },
+    ...KOLOM_NOTA,
+    { header: 'Diterima', key: 'qty_received', width: 10 },
+  ];
+
+  const rows = po.items.map((i) => ({
+    invoice_no: po.invoice_no || '',
+    po_no: po.po_no,
+    order_date: po.order_date,
+    due_date: po.due_date || '',
+    supplier: po.supplier_name || '',
+    status: po.status_label,
+    paid_date: po.paid_date || '',
+    sku: i.sku,
+    product_name: i.product_name,
+    qty: i.qty,
+    unit: i.unit,
+    unit_cost: r2(i.unit_cost),
+    subtotal: r2(i.qty * i.unit_cost),
+    qty_received: i.qty_received,
+  }));
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${namaNota(po)}.csv"`);
+  res.send(tableCsv(kolom, rows));
+}));
+
 router.patch('/:id(\\d+)/batal', butuhIzin('pembelian.kelola'), ah((req, res) => {
   const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(req.params.id);
   if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');

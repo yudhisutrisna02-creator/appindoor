@@ -48,7 +48,26 @@ export const api = {
   patch: (path, body) => request('PATCH', path, { body }),
   del: (path) => request('DELETE', path),
 
-  /** Mengunduh file (Excel/PDF) dengan header Authorization. */
+  /**
+   * Mengambil berkas sebagai blob URL, untuk dibuka di jendela baru dan dicetak.
+   *
+   * Menautkan alamatnya langsung tidak bisa: token dikirim lewat header, dan
+   * jendela baru yang membuka URL biasa tidak membawanya.
+   */
+  async blobUrl(path, params) {
+    const res = await fetch(buildUrl(path, params), {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = `Gagal menyiapkan berkas (${res.status})`;
+      try { message = JSON.parse(text).error || message; } catch { /* respons bukan JSON */ }
+      throw new Error(message);
+    }
+    return URL.createObjectURL(await res.blob());
+  },
+
+  /** Mengunduh file (Excel/PDF/CSV) dengan header Authorization. */
   async download(path, params, fallbackName = 'laporan') {
     const res = await fetch(buildUrl(path, params), {
       headers: { Authorization: `Bearer ${getToken()}` },

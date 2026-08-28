@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, PackageCheck, Truck, XCircle, Trash2, Clock } from 'lucide-react';
+import { Plus, PackageCheck, Truck, XCircle, Trash2, Clock, Receipt, Printer, FileText, FileSpreadsheet } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor,
+  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, TombolCetak,
 } from '../components/ui';
 import { rupiah, rupiahShort, dateID, today } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -13,6 +13,8 @@ const KOSONG = () => ({
   expected_date: '',
   partner_id: '',
   payment: 'CREDIT',
+  invoice_no: '',
+  due_date: '',
   note: '',
   items: [{ product_id: '', qty: 1, unit_cost: '' }],
 });
@@ -44,6 +46,7 @@ export default function Pembelian() {
   const [products, setProducts] = useState([]);
   const [form, setForm] = useState(null);
   const [terima, setTerima] = useState(null);
+  const [nota, setNota] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -85,6 +88,8 @@ export default function Pembelian() {
         expected_date: form.expected_date || null,
         partner_id: Number(form.partner_id),
         payment: form.payment,
+        invoice_no: form.invoice_no || null,
+        due_date: form.due_date || null,
         note: form.note || null,
         items: form.items
           .filter((i) => i.product_id && Number(i.qty) > 0)
@@ -146,6 +151,47 @@ export default function Pembelian() {
     }
   }
 
+  function bukaNota(po) {
+    setNota({
+      id: po.id,
+      po_no: po.po_no,
+      supplier_name: po.supplier_name,
+      total: po.total,
+      status_label: po.status_label,
+      order_date: po.order_date,
+      invoice_no: po.invoice_no || '',
+      due_date: po.due_date || '',
+      paid_date: po.paid_date || '',
+    });
+  }
+
+  async function simpanNota(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await api.patch(`/api/pembelian/${nota.id}/nota`, {
+        invoice_no: nota.invoice_no || null,
+        due_date: nota.due_date || null,
+        paid_date: nota.paid_date || null,
+      });
+      toast.success(res.message);
+      setNota({ ...nota, ...res.po, id: res.po.id });
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function unduhNota(bentuk) {
+    try {
+      await api.download(`/api/pembelian/${nota.id}/nota/${bentuk}`, {}, `nota.${bentuk}`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
   async function batal(po) {
     if (!window.confirm(`Batalkan pesanan ${po.po_no}?`)) return;
     try {
@@ -172,7 +218,7 @@ export default function Pembelian() {
             <Plus size={16} /> Pesanan Baru
           </button>
         )}
-        <TombolEkspor path="/api/pembelian" params={{ ...range, status }} nama="pesanan-pembelian" />
+        <TombolEkspor path="/api/pembelian" params={{ ...range, status }} nama="pesanan-pembelian" csv />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange}>
@@ -220,13 +266,18 @@ export default function Pembelian() {
                 <tr>
                   <th>No. PO</th><th>Tanggal</th><th>Supplier</th><th>Status</th>
                   <th>Barang</th><th>Nilai</th><th>Diterima</th><th>Sisa</th><th>Umur</th>
-                  {bolehKelola && <th></th>}
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.map((po) => (
                   <tr key={po.id}>
-                    <td className="font-mono text-xs">{po.po_no}</td>
+                    <td className="font-mono text-xs">
+                      {po.po_no}
+                      {po.invoice_no && (
+                        <p className="text-[11px] text-slate-500">faktur {po.invoice_no}</p>
+                      )}
+                    </td>
                     <td className="tabular">
                       {dateID(po.order_date)}
                       {po.expected_date && (
@@ -250,22 +301,26 @@ export default function Pembelian() {
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    {bolehKelola && (
-                      <td>
-                        <div className="flex gap-1">
-                          {(po.status === 'DIPESAN' || po.status === 'SEBAGIAN') && (
-                            <button className="btn-ghost !px-2 !py-1 text-emerald-600" onClick={() => bukaTerima(po)} aria-label="Terima barang">
-                              <PackageCheck size={15} />
-                            </button>
-                          )}
-                          {po.status === 'DIPESAN' && (
-                            <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => batal(po)} aria-label="Batalkan">
-                              <XCircle size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    )}
+                    <td>
+                      <div className="flex gap-1">
+                        <button
+                          className="btn-ghost !px-2 !py-1 text-xs"
+                          onClick={() => bukaNota(po)}
+                        >
+                          <Receipt size={15} /> Nota
+                        </button>
+                        {bolehKelola && (po.status === 'DIPESAN' || po.status === 'SEBAGIAN') && (
+                          <button className="btn-ghost !px-2 !py-1 text-emerald-600" onClick={() => bukaTerima(po)} aria-label="Terima barang">
+                            <PackageCheck size={15} />
+                          </button>
+                        )}
+                        {bolehKelola && po.status === 'DIPESAN' && (
+                          <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => batal(po)} aria-label="Batalkan">
+                            <XCircle size={15} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -289,6 +344,12 @@ export default function Pembelian() {
             </Field>
             <Field label="Perkiraan Tiba" hint="Dipakai menghitung keterlambatan">
               <input type="date" className="input" value={form.expected_date} onChange={(e) => setForm({ ...form, expected_date: e.target.value })} />
+            </Field>
+            <Field label="No. Faktur Supplier" hint="Boleh dikosongkan dan diisi saat notanya datang">
+              <input className="input" maxLength={60} value={form.invoice_no} onChange={(e) => setForm({ ...form, invoice_no: e.target.value })} />
+            </Field>
+            <Field label="Jatuh Tempo" hint="Untuk pembelian tempo">
+              <input type="date" className="input" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
             </Field>
             <Field label="Cara Bayar *" hint="Menentukan akun lawan saat barang diterima">
               <select className="input" value={form.payment} onChange={(e) => setForm({ ...form, payment: e.target.value })}>
@@ -358,6 +419,67 @@ export default function Pembelian() {
       </Modal>
 
       {/* ---------- TERIMA BARANG ---------- */}
+      <Modal open={!!nota} onClose={() => setNota(null)} title={`Nota Pembayaran — ${nota?.po_no || ''}`}>
+        {nota && (
+          <div className="grid gap-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <p className="font-semibold text-slate-900">{nota.supplier_name || 'Supplier belum dipilih'}</p>
+              <p className="text-xs text-slate-500">
+                {dateID(nota.order_date)} • {nota.status_label} • {rupiah(nota.total)}
+              </p>
+            </div>
+
+            <form onSubmit={simpanNota} className="grid gap-3">
+              <Field
+                label="No. Faktur Supplier"
+                hint="Nomor yang dikeluarkan supplier — itu yang mereka kenali saat ditanya"
+              >
+                <input
+                  className="input" maxLength={60} value={nota.invoice_no}
+                  disabled={!bolehKelola}
+                  onChange={(e) => setNota({ ...nota, invoice_no: e.target.value })}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Jatuh Tempo">
+                  <input
+                    type="date" className="input" value={nota.due_date} disabled={!bolehKelola}
+                    onChange={(e) => setNota({ ...nota, due_date: e.target.value })}
+                  />
+                </Field>
+                <Field label="Tanggal Dibayar" hint="Kosongkan bila belum dibayar">
+                  <input
+                    type="date" className="input" value={nota.paid_date} disabled={!bolehKelola}
+                    onChange={(e) => setNota({ ...nota, paid_date: e.target.value })}
+                  />
+                </Field>
+              </div>
+              {bolehKelola && (
+                <button type="submit" className="btn-secondary" disabled={saving}>
+                  {saving ? 'Menyimpan...' : 'Simpan Keterangan Nota'}
+                </button>
+              )}
+            </form>
+
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+              Keterangan di atas tidak menyentuh pembukuan — jurnal pembelian sudah terbentuk saat
+              barang diterima. Yang dicatat di sini hanya penanda supaya notanya bisa ditelusuri.
+              Satu nomor faktur tidak boleh dipakai dua pesanan; itu biasanya berarti pembayaran ganda.
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              <TombolCetak path={`/api/pembelian/${nota.id}/nota/pdf`} label="Cetak Nota" icon={Printer} />
+              <button className="btn-secondary" onClick={() => unduhNota('pdf')} disabled={saving}>
+                <FileText size={16} /> PDF
+              </button>
+              <button className="btn-secondary" onClick={() => unduhNota('csv')} disabled={saving}>
+                <FileSpreadsheet size={16} /> CSV
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!terima} onClose={() => setTerima(null)} title={`Terima Barang — ${terima?.po_no || ''}`} wide>
         {terima && (
           <form onSubmit={simpanTerima} className="grid gap-3">

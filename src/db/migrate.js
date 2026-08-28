@@ -191,6 +191,14 @@ function runMigrations(db) {
   addColumn(db, 'users', 'base_salary', 'REAL NOT NULL DEFAULT 0', applied);
   addColumn(db, 'users', 'allowance', 'REAL NOT NULL DEFAULT 0', applied);
 
+  // --- Nota pembayaran ke supplier ---
+  // Nomor faktur yang dikeluarkan supplier. Berbeda dari po_no yang kita buat
+  // sendiri: saat menanyakan sebuah pembayaran, yang dikenali supplier adalah
+  // nomor mereka, bukan nomor kita.
+  addColumn(db, 'purchase_orders', 'invoice_no', 'TEXT', applied);
+  addColumn(db, 'purchase_orders', 'due_date', 'TEXT', applied);
+  addColumn(db, 'purchase_orders', 'paid_date', 'TEXT', applied);
+
   // Rekening kas/bank yang dipakai. Kosong berarti memakai akun bawaan, seperti
   // perilaku sebelum kolom ini ada.
   addColumn(db, 'ad_spends', 'cash_code', 'TEXT', applied);

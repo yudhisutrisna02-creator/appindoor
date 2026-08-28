@@ -364,6 +364,9 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   status        TEXT    NOT NULL DEFAULT 'DIPESAN',
   payment       TEXT    NOT NULL DEFAULT 'CREDIT',
   cash_code     TEXT,   -- rekening kas/bank yang dipakai saat barang diterima
+  invoice_no    TEXT,   -- nomor faktur dari supplier; yang mereka kenali
+  due_date      TEXT,   -- jatuh tempo pembayaran
+  paid_date     TEXT,   -- tanggal dibayar
   note          TEXT,
   user_id       INTEGER REFERENCES users(id),
   created_at    TEXT    NOT NULL DEFAULT (datetime('now'))

@@ -20,13 +20,14 @@
  */
 const express = require('express');
 const { z } = require('zod');
-const { db } = require('../db');
+const { db, getSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError } = require('../utils/http');
 const {
   r2, ACC, postJournal, deleteJournalsBySource, accountByCode,
 } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
+const { dokumenPdf } = require('../utils/exporters');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -412,6 +413,130 @@ router.delete('/:id(\\d+)', butuhIzin('penggajian.kelola'), ah((req, res) => {
   db.prepare('DELETE FROM payrolls WHERE id = ?').run(id);
   res.json({ ok: true, message: `Daftar gaji ${p.period} dihapus` });
 }));
+
+// ==================================================================
+// SLIP GAJI
+// ==================================================================
+const NAMA_BULAN = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+];
+const labelPeriode = (p) => {
+  const [th, bl] = String(p).split('-');
+  return `${NAMA_BULAN[Number(bl) - 1] || bl} ${th}`;
+};
+
+const SUMBER_DANA = {
+  CASH: 'Tunai',
+  BANK: 'Transfer bank',
+  CREDIT: 'Belum dibayarkan',
+};
+
+/**
+ * Satu lembar slip gaji.
+ *
+ * Yang dicetak adalah angka pada daftar periode itu, bukan angka di master
+ * pegawai — slip yang diberikan bulan lalu harus tetap berbunyi sama bila
+ * dicetak ulang hari ini, walaupun gajinya sudah dinaikkan sejak itu.
+ *
+ * Rekap kehadiran ikut dicantumkan supaya potongan atau bonusnya bisa
+ * dipertanggungjawabkan tanpa perlu membuka menu lain.
+ */
+function slipDari(p, r) {
+  const penerimaan = [
+    ['Gaji Pokok', r.base],
+    ['Tunjangan', r.allowance],
+    ['Lembur', r.overtime],
+    ['Bonus', r.bonus],
+  ].filter(([, n]) => n > 0);
+
+  const bruto = r2(penerimaan.reduce((s, [, n]) => s + n, 0));
+
+  return {
+    judul: 'SLIP GAJI',
+    subjudul: `Periode ${labelPeriode(p.period)}`,
+    nomor: `No. SLIP/${p.period}/${String(r.employee_id).padStart(4, '0')}`,
+    meta: [
+      ['Tanggal bayar', p.pay_date],
+      ['Cara bayar', SUMBER_DANA[p.payment] || p.payment],
+      ['Status', p.status === 'POSTED' ? 'Sudah dibukukan' : 'Draft'],
+    ],
+    pihak: [
+      {
+        judul: 'DITERIMA OLEH',
+        nama: r.name,
+        baris: [
+          r.position || null,
+          r.department ? `Bagian ${r.department}` : null,
+          r.employment_status || null,
+          r.bank_name ? `${r.bank_name} — ${r.bank_account || 'nomor rekening belum diisi'}` : null,
+        ],
+      },
+      {
+        judul: 'REKAP KEHADIRAN',
+        nama: `Hadir ${r.hadir} hari`,
+        baris: [
+          `Terlambat ${r.telat} kali`,
+          `Izin / cuti ${r.izin} hari`,
+          `Tanpa keterangan ${r.alpa} hari`,
+          `Hari kerja bulan ini ${r.hari_kerja}`,
+        ],
+      },
+    ],
+    kolom: [
+      { header: 'Keterangan', key: 'ket', width: 40 },
+      { header: 'Jumlah', key: 'nilai', width: 20, money: true },
+    ],
+    rows: [
+      ...penerimaan.map(([ket, nilai]) => ({ ket, nilai })),
+      ...(r.deduction > 0 ? [{ ket: 'Potongan', nilai: -r.deduction }] : []),
+    ],
+    ringkas: [
+      ['Total penerimaan', bruto],
+      ...(r.deduction > 0 ? [['Potongan', -r.deduction]] : []),
+      ['GAJI BERSIH', r.net, true],
+    ],
+    catatan: [
+      r.note || null,
+      p.note || null,
+      'Slip ini dicetak dari sistem dan sah tanpa tanda tangan basah bila disertai bukti transfer.',
+    ].filter(Boolean).join('\n'),
+    tandaTangan: [
+      { label: 'Yang menyerahkan', nama: '' },
+      { label: 'Yang menerima', nama: r.name },
+    ],
+  };
+}
+
+/** Nama berkas yang aman dan mudah dikenali. */
+const bersihkan = (s) =>
+  String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+function kirimSlip(req, res, itemId) {
+  const id = Number(req.params.id);
+  const p = detail(id);
+
+  const dipilih = itemId
+    ? p.rows.filter((r) => r.id === Number(itemId))
+    : p.rows;
+  if (dipilih.length === 0) throw httpError(404, 'Baris gaji tidak ditemukan');
+
+  const perusahaan = getSetting('company_name', 'Perusahaan');
+  const nama = itemId
+    ? `slip-gaji-${p.period}-${bersihkan(dipilih[0].name)}.pdf`
+    : `slip-gaji-${p.period}-semua.pdf`;
+
+  return dokumenPdf(dipilih.map((r) => slipDari(p, r)), { perusahaan }).then((buffer) => {
+    res.setHeader('Content-Type', 'application/pdf');
+    // inline supaya bisa langsung dibuka dan dicetak dari peramban, bukan
+    // dipaksa turun sebagai unduhan lebih dulu.
+    res.setHeader('Content-Disposition', `inline; filename="${nama}"`);
+    res.send(buffer);
+  });
+}
+
+router.get('/:id(\\d+)/slip/pdf', ah((req, res) => kirimSlip(req, res, null)));
+router.get('/:id(\\d+)/slip/:itemId(\\d+)/pdf', ah((req, res) => kirimSlip(req, res, req.params.itemId)));
 
 daftarkanEkspor(router, {
   path: '/:id(\\d+)',

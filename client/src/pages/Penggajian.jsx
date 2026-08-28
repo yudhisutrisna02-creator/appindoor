@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Wallet, Plus, ArrowLeft, BookCheck, Undo2, Trash2, Pencil, AlertTriangle, Lock,
+  Wallet, Plus, ArrowLeft, BookCheck, Undo2, Trash2, Pencil, AlertTriangle, Lock, Printer, FileText,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  useToast, Field, TombolEkspor,
+  useToast, Field, TombolEkspor, TombolCetak,
 } from '../components/ui';
 import { rupiah, rupiahShort, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -181,7 +181,11 @@ export default function Penggajian() {
                 <BookCheck size={16} /> Posting ke Pembukuan
               </button>
             )}
-          <TombolEkspor path={`/api/penggajian/${buka.id}`} nama={`gaji-${buka.period}`} />
+          <TombolCetak
+            path={`/api/penggajian/${buka.id}/slip/pdf`}
+            label="Cetak Semua Slip" icon={Printer}
+          />
+          <TombolEkspor path={`/api/penggajian/${buka.id}`} nama={`gaji-${buka.period}`} csv />
         </PageHeader>
 
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -243,7 +247,7 @@ export default function Penggajian() {
                   <th className="text-right">Lembur+Bonus</th>
                   <th className="text-right">Potongan</th>
                   <th className="text-right">Gaji Bersih</th>
-                  {!buka.terkunci && bolehKelola && <th></th>}
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -272,13 +276,19 @@ export default function Penggajian() {
                     <td className={`tabular text-right font-semibold ${r.net <= 0 ? 'text-rose-600' : 'text-slate-900'}`}>
                       {rupiah(r.net)}
                     </td>
-                    {!buka.terkunci && bolehKelola && (
-                      <td className="text-right">
-                        <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setBaris({ ...r })}>
-                          <Pencil size={13} />
-                        </button>
-                      </td>
-                    )}
+                    <td className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <TombolCetak
+                          path={`/api/penggajian/${buka.id}/slip/${r.id}/pdf`}
+                          label="Slip" icon={FileText} kecil
+                        />
+                        {!buka.terkunci && bolehKelola && (
+                          <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setBaris({ ...r })}>
+                            <Pencil size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
