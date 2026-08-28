@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -34,6 +34,7 @@ import Retur from './pages/Retur';
 import Toko from './pages/Toko';
 import Iklan from './pages/Iklan';
 import Pengiriman from './pages/Pengiriman';
+import Pembelian from './pages/Pembelian';
 
 const NAV = [
   {
@@ -59,6 +60,13 @@ const NAV = [
       { to: '/gudang/produk', label: 'Master Produk', icon: Package, izin: 'gudang.lihat' },
       { to: '/gudang/mutasi', label: 'Mutasi Stok', icon: ArrowLeftRight, izin: 'gudang.lihat' },
       { to: '/gudang/opname', label: 'Stok Opname', icon: ClipboardCheck, izin: 'gudang.opname' },
+    ],
+  },
+  {
+    section: 'Pembelian',
+    key: 'pembelian',
+    items: [
+      { to: '/pembelian', label: 'Pesanan Pembelian', icon: PackageCheck, izin: 'pembelian.lihat' },
     ],
   },
   {
@@ -362,6 +370,7 @@ export default function App() {
         <Route path="/gudang/produk" element={<Dijaga izin="gudang.lihat"><Produk /></Dijaga>} />
         <Route path="/gudang/mutasi" element={<Dijaga izin="gudang.lihat"><MutasiStok /></Dijaga>} />
         <Route path="/gudang/opname" element={<Dijaga izin="gudang.opname"><StokOpname /></Dijaga>} />
+        <Route path="/pembelian" element={<Dijaga izin="pembelian.lihat"><Pembelian /></Dijaga>} />
         <Route path="/penjualan" element={<Dijaga izin="penjualan.lihat"><Penjualan /></Dijaga>} />
         <Route path="/penjualan/pengiriman" element={<Dijaga izin="penjualan.lihat"><Pengiriman /></Dijaga>} />
         <Route path="/penjualan/analisis" element={<Dijaga izin="penjualan.margin"><AnalisisMargin /></Dijaga>} />

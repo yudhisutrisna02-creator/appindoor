@@ -344,3 +344,35 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   permission TEXT    NOT NULL,
   PRIMARY KEY (role_id, permission)
 );
+
+-- ---------- PEMBELIAN KE SUPPLIER ----------
+-- Barang masuk sudah bisa dicatat lewat mutasi stok, tetapi mutasi hanya tahu
+-- apa yang SUDAH datang. Pesanan pembelian mencatat apa yang sudah dipesan dan
+-- belum datang — pertanyaan yang tidak bisa dijawab catatan mutasi.
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  po_no         TEXT    NOT NULL UNIQUE,
+  order_date    TEXT    NOT NULL,
+  expected_date TEXT,
+  partner_id    INTEGER REFERENCES partners(id),
+  -- DIPESAN: menunggu barang. SEBAGIAN: sudah datang sebagian.
+  -- SELESAI: seluruhnya diterima. BATAL: dibatalkan sebelum diterima.
+  status        TEXT    NOT NULL DEFAULT 'DIPESAN',
+  payment       TEXT    NOT NULL DEFAULT 'CREDIT',
+  note          TEXT,
+  user_id       INTEGER REFERENCES users(id),
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS purchase_items (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  po_id        INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  product_id   INTEGER NOT NULL REFERENCES products(id),
+  qty          REAL    NOT NULL,
+  unit_cost    REAL    NOT NULL DEFAULT 0,
+  qty_received REAL    NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status);
+CREATE INDEX IF NOT EXISTS idx_po_partner ON purchase_orders(partner_id);
+CREATE INDEX IF NOT EXISTS idx_poi_po ON purchase_items(po_id);

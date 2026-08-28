@@ -815,6 +815,98 @@ async function main() {
   }
   check('perubahan massal tanpa pesanan terpilih ditolak', tolakKosong);
 
+  // ---------- Pesanan pembelian ----------
+  console.log('\n14. Pesanan pembelian');
+
+  const supplierPO = (await call('POST', '/api/partners', {
+    name: `PT Uji Pasok ${Date.now()}`, type: 'SUPPLIER',
+  }));
+  const idSupplier = (supplierPO.partner || supplierPO).id;
+
+  const prodPO = (await call('POST', '/api/inventory/products', {
+    sku: `PO-${Date.now()}`, name: 'Barang Uji Pembelian', cost: 0, price: 50000,
+  })).product;
+
+  const po = (await call('POST', '/api/pembelian', {
+    order_date: today, expected_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ product_id: prodPO.id, qty: 100, unit_cost: 20000 }],
+  })).po;
+  check('pesanan pembelian dibuat', po.total === 2_000_000 && po.status === 'DIPESAN',
+    `${po.po_no} ${po.total}`);
+
+  const daftarPO = await call('GET', `/api/pembelian?from=${today}&to=${today}`);
+  check('nilai barang yang masih ditunggu dihitung',
+    near(daftarPO.ringkas.nilaiMenunggu, 2_000_000, 1), String(daftarPO.ringkas.nilaiMenunggu));
+
+  const utangSblm = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`)).liabilities.total;
+
+  // Penerimaan sebagian: stok bertambah sebagian, pesanan belum selesai.
+  const idItem = po.items[0].id;
+  const terima1 = await call('POST', `/api/pembelian/${po.id}/terima`, {
+    receive_date: today, lines: [{ item_id: idItem, qty: 40 }],
+  });
+  check('penerimaan sebagian menandai pesanan belum selesai',
+    terima1.po.status === 'SEBAGIAN', terima1.po.status);
+
+  const stokPO1 = (await call('GET', `/api/inventory/products?q=${prodPO.sku}`)).products[0];
+  check('barang diterima menambah stok', stokPO1.stock === 40, String(stokPO1.stock));
+  check('HPP rata-rata mengikuti harga beli', near(stokPO1.cost, 20000), String(stokPO1.cost));
+
+  const utangSesudah = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`)).liabilities.total;
+  check('pembelian tempo menambah utang supplier',
+    near(utangSesudah - utangSblm, 40 * 20000, 1), `${utangSblm} -> ${utangSesudah}`);
+
+  // Menerima lebih dari sisa pesanan harus ditolak — kelebihan kiriman lebih
+  // baik ketahuan daripada diam-diam menambah pesanan yang sudah disepakati.
+  let tolakLebih = false;
+  try {
+    await call('POST', `/api/pembelian/${po.id}/terima`, {
+      receive_date: today, lines: [{ item_id: idItem, qty: 999 }],
+    });
+  } catch {
+    tolakLebih = true;
+  }
+  check('penerimaan melebihi sisa pesanan ditolak', tolakLebih);
+
+  // Membatalkan setelah barang masuk akan menyisakan mutasi stok tanpa dokumen.
+  let tolakBatalPO = false;
+  try {
+    await call('PATCH', `/api/pembelian/${po.id}/batal`);
+  } catch {
+    tolakBatalPO = true;
+  }
+  check('pesanan yang sudah diterima sebagian tidak bisa dibatalkan', tolakBatalPO);
+
+  const terima2 = await call('POST', `/api/pembelian/${po.id}/terima`, {
+    receive_date: today, lines: [{ item_id: idItem, qty: 60 }],
+  });
+  check('penerimaan sisanya menutup pesanan', terima2.po.status === 'SELESAI', terima2.po.status);
+
+  const stokPO2 = (await call('GET', `/api/inventory/products?q=${prodPO.sku}`)).products[0];
+  check('seluruh barang pesanan masuk ke stok', stokPO2.stock === 100, String(stokPO2.stock));
+
+  const bsPO = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah pembelian', bsPO.balanced);
+
+  // Pesanan yang belum diterima sama sekali masih boleh dibatalkan.
+  const poBatal = (await call('POST', '/api/pembelian', {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ product_id: prodPO.id, qty: 5, unit_cost: 20000 }],
+  })).po;
+  const hasilBatal = await call('PATCH', `/api/pembelian/${poBatal.id}/batal`);
+  check('pesanan yang belum diterima bisa dibatalkan', hasilBatal.ok === true);
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/pembelian/export/${bentuk}?from=${today}&to=${today}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`pesanan pembelian bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
+      `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

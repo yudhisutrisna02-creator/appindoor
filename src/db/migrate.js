@@ -185,6 +185,9 @@ function runMigrations(db) {
   // Indeks menyusul kolomnya
   db.exec('CREATE INDEX IF NOT EXISTS idx_ads_date ON ad_spends(spend_date)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_po_partner ON purchase_orders(partner_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_poi_po ON purchase_items(po_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_ads_shop ON ad_spends(shop_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_jl_partner ON journal_lines(partner_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_partner ON sales_orders(partner_id)');

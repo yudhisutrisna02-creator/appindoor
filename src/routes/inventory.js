@@ -585,4 +585,7 @@ router.get('/opname/:id', ah((req, res) => {
   res.json({ header, lines });
 }));
 
+// applyMove diekspor agar modul pembelian memakai jalur yang sama saat barang
+// diterima — stok, HPP rata-rata, dan jurnalnya tidak boleh punya versi kedua.
 module.exports = router;
+module.exports.applyMove = applyMove;

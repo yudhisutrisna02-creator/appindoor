@@ -55,6 +55,14 @@ const KATALOG = [
     ],
   },
   {
+    modul: 'pembelian',
+    label: 'Pembelian',
+    izin: [
+      { kunci: 'pembelian.lihat', label: 'Melihat pesanan pembelian' },
+      { kunci: 'pembelian.kelola', label: 'Membuat pesanan & menerima barang' },
+    ],
+  },
+  {
     modul: 'iklan',
     label: 'Biaya Iklan',
     izin: [
@@ -130,6 +138,7 @@ const PERAN_BAWAAN = [
       'dashboard.lihat',
       'presensi.absen',
       'gudang.lihat',
+      'pembelian.lihat',
       'penjualan.lihat', 'penjualan.buat', 'penjualan.ubah', 'penjualan.retur', 'penjualan.margin',
       'mitra.lihat', 'mitra.kelola',
     ],
@@ -157,6 +166,7 @@ const PERAN_BAWAAN = [
       'dashboard.lihat',
       'presensi.absen',
       'gudang.lihat', 'gudang.produk', 'gudang.mutasi', 'gudang.opname',
+      'pembelian.lihat', 'pembelian.kelola',
       'mitra.lihat',
     ],
   },
