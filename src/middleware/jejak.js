@@ -62,8 +62,18 @@ function saring(nilai, dalam = 0) {
 
 const MENGUBAH = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-/** Bagian pertama alamat, dipakai mengelompokkan riwayat per modul. */
-const modulDari = (path) => (path.split('/').filter(Boolean)[0] || '-').toLowerCase();
+/**
+ * Nama modul dari alamatnya.
+ *
+ * Awalan "api" dibuang: seluruh alamat dimulai dengannya, sehingga memakainya
+ * apa adanya membuat setiap baris riwayat bermodul "api" dan penyaring per
+ * modul tidak menyaring apa pun.
+ */
+function modulDari(path) {
+  const bagian = String(path).split('/').filter(Boolean);
+  if (bagian[0] === 'api') bagian.shift();
+  return (bagian[0] || '-').toLowerCase();
+}
 
 const simpan = db.prepare(
   `INSERT INTO audit_log (user_id, user_name, method, path, modul, status, berhasil, ringkas, isi, ip)

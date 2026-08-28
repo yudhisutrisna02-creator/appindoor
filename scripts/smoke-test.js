@@ -1997,6 +1997,10 @@ async function main() {
     !!jejakToko && jejakToko.aksi === 'Tambah', jejakToko && jejakToko.path);
   check('riwayat menyebut siapa pelakunya',
     !!jejakToko && !!jejakToko.user_name && !!jejakToko.user_id);
+  // Awalan "api" ada di semua alamat; kalau ikut dipakai, tiap baris bermodul
+  // "api" dan penyaring per modul tidak menyaring apa pun.
+  check('modul diambil dari nama modulnya, bukan awalan api',
+    !!jejakToko && jejakToko.modul === 'shops', jejakToko && jejakToko.modul);
   check('membaca laporan tidak ikut dicatat',
     !riwayat.rows.some((r) => r.method === 'GET'));
 
