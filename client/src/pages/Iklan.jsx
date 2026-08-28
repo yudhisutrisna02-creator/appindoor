@@ -18,6 +18,7 @@ const KOSONG = {
   platform: '',
   amount: '',
   payment: 'BANK',
+  cash_code: '',
   note: '',
 };
 
@@ -38,6 +39,7 @@ export default function Iklan() {
   const [range, setRange] = useState(defaultRange);
   const [data, setData] = useState(null);
   const [shops, setShops] = useState([]);
+  const [rekening, setRekening] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -57,6 +59,7 @@ export default function Iklan() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     api.get('/api/shops').then((d) => setShops(d.shops)).catch(() => {});
+    api.get('/api/cashflow/options').then((d) => setRekening(d.cashAccounts)).catch(() => {});
   }, []);
 
   async function simpan(e) {
@@ -70,6 +73,9 @@ export default function Iklan() {
         platform: form.platform || null,
         amount: Number(form.amount) || 0,
         payment: form.payment,
+        // Rekening hanya dikirim untuk pembayaran yang benar-benar memindahkan
+        // uang; utang dan potongan saldo punya akunnya sendiri.
+        cash_code: ['CASH', 'BANK'].includes(form.payment) ? form.cash_code || null : null,
         note: form.note || null,
       };
       const res = form.id
@@ -265,7 +271,7 @@ export default function Iklan() {
                             <div className="flex gap-1">
                               <button
                                 className="btn-ghost !px-2 !py-1"
-                                onClick={() => setForm({ ...b, shop_id: b.shop_id || '', platform: b.platform || '', note: b.note || '' })}
+                                onClick={() => setForm({ ...b, shop_id: b.shop_id || '', platform: b.platform || '', cash_code: b.cash_code || '', note: b.note || '' })}
                                 aria-label="Ubah"
                               >
                                 <Pencil size={14} />
@@ -323,6 +329,14 @@ export default function Iklan() {
                 <option value="CREDIT">Belum dibayar (utang)</option>
               </select>
             </Field>
+            {['CASH', 'BANK'].includes(form.payment) && (
+              <Field label="Rekening" hint="Kosongkan untuk memakai rekening bawaan">
+                <select className="input" value={form.cash_code} onChange={(e) => setForm({ ...form, cash_code: e.target.value })}>
+                  <option value="">— rekening bawaan —</option>
+                  {rekening.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
+                </select>
+              </Field>
+            )}
             <Field label="Catatan" className="sm:col-span-2">
               <input className="input" placeholder="mis. kampanye flash sale 8.8" value={form.note}
                 onChange={(e) => setForm({ ...form, note: e.target.value })} />

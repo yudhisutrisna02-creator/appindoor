@@ -183,6 +183,11 @@ function runMigrations(db) {
   // lihat src/db/seed-peran.js.
   addColumn(db, 'roles', 'seeded_json', 'TEXT', applied);
 
+  // Rekening kas/bank yang dipakai. Kosong berarti memakai akun bawaan, seperti
+  // perilaku sebelum kolom ini ada.
+  addColumn(db, 'ad_spends', 'cash_code', 'TEXT', applied);
+  addColumn(db, 'purchase_orders', 'cash_code', 'TEXT', applied);
+
   // --- Daftar kanal jualan tidak lagi dikunci di dalam tabel ---
   lepasCekKanal(db, 'sales_orders', applied);
   lepasCekKanal(db, 'shops', applied);

@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { db, nextNumber } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, ACC, postJournal } = require('../utils/accounting');
+const { r2, ACC, postJournal, accountByCode } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 
@@ -129,6 +129,8 @@ const moveSchema = z.object({
   // OPENING = saldo awal persediaan saat mulai memakai sistem; lawannya
   // Modal Pemilik, bukan kas, karena barangnya memang sudah ada sebelum ini.
   payment: z.enum(['CASH', 'BANK', 'CREDIT', 'OPENING']).default('CASH'),
+  // Rekening kas/bank tertentu; kosong berarti akun bawaan sesuai cara bayar.
+  cash_code: z.string().trim().min(3).optional().nullable(),
   partner_id: z.number().int().positive().optional().nullable(),
   due_date: z.string().optional().nullable(),
   ref: z.string().max(60).optional().nullable(),
@@ -181,11 +183,16 @@ const applyMove = db.transaction((body, userId) => {
   // Jurnal otomatis
   const value = r2(qty * unitCost);
   if (value > 0) {
-    const counterAccount =
-      body.payment === 'OPENING' ? ACC.CAPITAL
-        : body.payment === 'CREDIT' ? ACC.AP
-        : body.payment === 'BANK' ? ACC.BANK
-        : ACC.CASH;
+    // Rekening yang dipilih hanya berlaku untuk pembayaran yang benar-benar
+    // memindahkan uang; saldo awal dan pembelian tempo punya akunnya sendiri.
+    let counterAccount;
+    if (body.payment === 'OPENING') counterAccount = ACC.CAPITAL;
+    else if (body.payment === 'CREDIT') counterAccount = ACC.AP;
+    else if (body.cash_code) {
+      const akunKas = accountByCode(body.cash_code);
+      if (!akunKas.is_cash) throw httpError(422, `${akunKas.code} bukan akun kas atau bank`);
+      counterAccount = akunKas.code;
+    } else counterAccount = body.payment === 'BANK' ? ACC.BANK : ACC.CASH;
 
     const lines =
       body.move_type === 'IN'

@@ -134,6 +134,99 @@ const LABEL_SUMBER = {
 };
 
 /**
+ * Saldo tiap rekening kas & bank, berikut asal pergerakannya.
+ *
+ * Satu usaha bisa memakai banyak rekening — sheet iklan saja menyebut sepuluh
+ * nama rekening berbeda. Selama semuanya menumpuk di satu akun, tidak ada cara
+ * mencocokkan aplikasi dengan mutasi bank yang sebenarnya; yang cocok hanya
+ * jumlah keseluruhannya, dan itu tidak menolong siapa pun yang sedang mencari
+ * selisih.
+ */
+function rekeningKas(req) {
+  const asOf = req.query.asOf || todayLocal();
+
+  const akun = db
+    .prepare("SELECT id, code, name FROM accounts WHERE is_cash = 1 AND active = 1 ORDER BY code")
+    .all();
+
+  const rows = akun.map((a) => {
+    const saldo = db
+      .prepare(
+        `SELECT COALESCE(SUM(l.debit) - SUM(l.credit), 0) AS saldo,
+                COUNT(*) AS mutasi,
+                MAX(j.entry_date) AS terakhir
+           FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+          WHERE l.account_id = ? AND j.entry_date <= ?`
+      )
+      .get(a.id, asOf);
+
+    const perSumber = db
+      .prepare(
+        `SELECT j.source,
+                COALESCE(SUM(l.debit), 0)  AS masuk,
+                COALESCE(SUM(l.credit), 0) AS keluar
+           FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+          WHERE l.account_id = ? AND j.entry_date <= ?
+          GROUP BY j.source ORDER BY (SUM(l.debit) + SUM(l.credit)) DESC`
+      )
+      .all(a.id, asOf)
+      .map((x) => ({
+        sumber: LABEL_SUMBER[x.source] || x.source,
+        masuk: r2(x.masuk),
+        keluar: r2(x.keluar),
+      }));
+
+    return {
+      ...a,
+      saldo: r2(saldo.saldo),
+      mutasi: saldo.mutasi,
+      terakhir: saldo.terakhir,
+      perSumber,
+      // Kas atau bank yang minus tidak mungkin secara fisik. Umumnya karena ada
+      // pengeluaran tercatat sementara pemasukannya belum, atau beberapa
+      // rekening yang sebenarnya berbeda digabung ke satu akun.
+      minus: saldo.saldo < -0.004,
+    };
+  });
+
+  return {
+    asOf,
+    rows,
+    ringkas: {
+      total: r2(rows.reduce((s2, x) => s2 + x.saldo, 0)),
+      jumlahRekening: rows.length,
+      minus: rows.filter((x) => x.minus).length,
+    },
+  };
+}
+
+router.get('/rekening', ah((req, res) => res.json(rekeningKas(req))));
+
+daftarkanEkspor(router, {
+  path: '/rekening',
+  judul: 'Rekening Kas & Bank',
+  kolom: [
+    { header: 'Kode', key: 'code', width: 10 },
+    { header: 'Nama Rekening', key: 'name', width: 34 },
+    { header: 'Saldo', key: 'saldo', width: 20, money: true },
+    { header: 'Jumlah Mutasi', key: 'mutasi', width: 14 },
+    { header: 'Mutasi Terakhir', key: 'terakhir', width: 16 },
+  ],
+  ambil: (req) => {
+    const d = rekeningKas(req);
+    return {
+      rows: d.rows,
+      subtitle: `Saldo per ${d.asOf}`,
+      meta: [
+        ['Jumlah rekening', d.ringkas.jumlahRekening],
+        ['Total saldo', d.ringkas.total],
+        ['Rekening bersaldo minus', d.ringkas.minus],
+      ],
+    };
+  },
+});
+
+/**
  * Riwayat kas masuk & keluar.
  *
  * Menampilkan SEMUA jurnal yang menyentuh akun kas atau bank, bukan hanya yang

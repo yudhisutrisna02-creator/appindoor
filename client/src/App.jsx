@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -35,6 +35,7 @@ import Toko from './pages/Toko';
 import Iklan from './pages/Iklan';
 import Pengiriman from './pages/Pengiriman';
 import Pembelian from './pages/Pembelian';
+import Rekening from './pages/Rekening';
 
 const NAV = [
   {
@@ -85,6 +86,7 @@ const NAV = [
     section: 'Keuangan',
     key: 'keuangan',
     items: [
+      { to: '/keuangan/rekening', label: 'Rekening Kas & Bank', icon: Landmark, izin: 'keuangan.lihat' },
       { to: '/keuangan/kas', label: 'Kas Masuk & Keluar', icon: Wallet, izin: 'keuangan.kas' },
       { to: '/keuangan/utang-piutang', label: 'Utang & Piutang', icon: HandCoins, izin: 'keuangan.lihat' },
       { to: '/keuangan/laporan', label: 'Laporan Keuangan', icon: FileBarChart2, izin: 'keuangan.lihat' },
@@ -377,6 +379,7 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/keuangan/rekening" element={<Dijaga izin="keuangan.lihat"><Rekening /></Dijaga>} />
         <Route path="/keuangan/kas" element={<Dijaga izin="keuangan.kas"><KasMasukKeluar /></Dijaga>} />
         <Route path="/keuangan/utang-piutang" element={<Dijaga izin="keuangan.lihat"><UtangPiutang /></Dijaga>} />
         <Route path="/keuangan/laporan" element={<Dijaga izin="keuangan.lihat"><LaporanKeuangan /></Dijaga>} />

@@ -16,7 +16,7 @@ const { z } = require('zod');
 const { db } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, ACC, postJournal, deleteJournalsBySource } = require('../utils/accounting');
+const { r2, ACC, postJournal, deleteJournalsBySource, accountByCode } = require('../utils/accounting');
 const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
@@ -34,6 +34,9 @@ const spendSchema = z.object({
   // tidak pernah keluar dari bank; yang berkurang adalah jumlah yang akan
   // ditransfer marketplace kepada kita.
   payment: z.enum(['CASH', 'BANK', 'CREDIT', 'SALDO']).default('BANK'),
+  // Rekening mana yang dipakai. Selama semuanya menumpuk di satu akun, catatan
+  // aplikasi tidak bisa dicocokkan dengan mutasi bank yang sebenarnya.
+  cash_code: z.string().trim().min(3).optional().nullable(),
   note: z.string().trim().max(300).optional().nullable(),
 });
 
@@ -45,11 +48,19 @@ const spendSchema = z.object({
  * pembayaran bank akan mengurangi saldo bank yang sebenarnya tidak berkurang,
  * sekaligus membiarkan piutang tampak lebih besar daripada yang akan diterima.
  */
-const akunLawan = (payment) =>
-  payment === 'CASH' ? ACC.CASH
-    : payment === 'CREDIT' ? ACC.AP
-      : payment === 'SALDO' ? ACC.AR_MARKETPLACE
-        : ACC.BANK;
+function akunLawan(payment, cashCode) {
+  if (payment === 'CREDIT') return ACC.AP;
+  if (payment === 'SALDO') return ACC.AR_MARKETPLACE;
+
+  // Rekening yang dipilih hanya berlaku untuk pembayaran yang benar-benar
+  // memindahkan uang; utang dan potongan saldo punya akunnya sendiri.
+  if (cashCode) {
+    const akun = accountByCode(cashCode);
+    if (!akun.is_cash) throw httpError(422, `${akun.code} bukan akun kas atau bank`);
+    return akun.code;
+  }
+  return payment === 'CASH' ? ACC.CASH : ACC.BANK;
+}
 
 const MEMO_LAWAN = {
   CASH: 'Pembayaran iklan tunai',
@@ -66,12 +77,13 @@ const simpanBelanja = db.transaction((body, userId) => {
 
   const info = db
     .prepare(
-      `INSERT INTO ad_spends (spend_date, shop_id, channel, platform, amount, payment, note, user_id)
-       VALUES (?,?,?,?,?,?,?,?)`
+      `INSERT INTO ad_spends (spend_date, shop_id, channel, platform, amount, payment, cash_code, note, user_id)
+       VALUES (?,?,?,?,?,?,?,?,?)`
     )
     .run(
       body.spend_date, body.shop_id || null, body.channel,
-      body.platform || null, r2(body.amount), body.payment, body.note || null, userId
+      body.platform || null, r2(body.amount), body.payment, body.cash_code || null,
+      body.note || null, userId
     );
 
   const id = info.lastInsertRowid;
@@ -80,7 +92,7 @@ const simpanBelanja = db.transaction((body, userId) => {
     description: `Biaya iklan ${CHANNEL_LABEL[body.channel] || body.channel}${body.platform ? ` — ${body.platform}` : ''}`,
     lines: [
       { code: ACC.FEE_ADS, debit: r2(body.amount), credit: 0, memo: body.note || 'Belanja iklan' },
-      { code: akunLawan(body.payment), debit: 0, credit: r2(body.amount), memo: MEMO_LAWAN[body.payment] || 'Pembayaran iklan' },
+      { code: akunLawan(body.payment, body.cash_code), debit: 0, credit: r2(body.amount), memo: MEMO_LAWAN[body.payment] || 'Pembayaran iklan' },
     ],
     source: 'ADS',
     sourceId: id,
@@ -105,11 +117,13 @@ const ubahBelanja = db.transaction((id, body, userId) => {
   if (!lama) throw httpError(404, 'Catatan iklan tidak ditemukan');
 
   db.prepare(
-    `UPDATE ad_spends SET spend_date=?, shop_id=?, channel=?, platform=?, amount=?, payment=?, note=?
+    `UPDATE ad_spends SET spend_date=?, shop_id=?, channel=?, platform=?, amount=?, payment=?,
+            cash_code=?, note=?
       WHERE id=?`
   ).run(
     body.spend_date, body.shop_id || null, body.channel,
-    body.platform || null, r2(body.amount), body.payment, body.note || null, id
+    body.platform || null, r2(body.amount), body.payment, body.cash_code || null,
+    body.note || null, id
   );
 
   // Jurnal ditulis ulang seluruhnya: nilai dan akun lawannya sama-sama bisa
@@ -120,7 +134,7 @@ const ubahBelanja = db.transaction((id, body, userId) => {
     description: `Biaya iklan ${CHANNEL_LABEL[body.channel] || body.channel}${body.platform ? ` — ${body.platform}` : ''}`,
     lines: [
       { code: ACC.FEE_ADS, debit: r2(body.amount), credit: 0, memo: body.note || 'Belanja iklan' },
-      { code: akunLawan(body.payment), debit: 0, credit: r2(body.amount), memo: MEMO_LAWAN[body.payment] || 'Pembayaran iklan' },
+      { code: akunLawan(body.payment, body.cash_code), debit: 0, credit: r2(body.amount), memo: MEMO_LAWAN[body.payment] || 'Pembayaran iklan' },
     ],
     source: 'ADS',
     sourceId: id,

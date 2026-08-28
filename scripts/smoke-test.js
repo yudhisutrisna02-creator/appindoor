@@ -916,6 +916,69 @@ async function main() {
       `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Rekening kas & bank ----------
+  console.log('\n15. Rekening kas & bank');
+
+  const rekAwal = await call('GET', `/api/cashflow/rekening?asOf=${today}`);
+  check('saldo dihitung per rekening',
+    rekAwal.rows.length >= 3 && rekAwal.rows.every((x) => 'saldo' in x && 'perSumber' in x),
+    rekAwal.rows.map((x) => x.code).join(','));
+
+  const kodeBaru = '1099';
+  let adaRek = rekAwal.rows.some((x) => x.code === kodeBaru);
+  if (!adaRek) {
+    await call('POST', '/api/finance/accounts', {
+      code: kodeBaru, name: 'Rekening Uji', type: 'ASSET', subtype: 'CASH',
+      normal: 'D', cashflow: 'OCF', is_cash: true,
+    });
+    adaRek = true;
+  }
+  check('rekening baru bisa ditambahkan', adaRek);
+
+  const tokoRek = await call('POST', '/api/shops', { name: `Toko Rek ${Date.now()}`, channel: 'SHOPEE' });
+  await call('POST', '/api/iklan', {
+    spend_date: today, shop_id: (tokoRek.shop || tokoRek).id, channel: 'SHOPEE',
+    amount: 250000, payment: 'BANK', cash_code: kodeBaru, note: 'Uji rekening',
+  });
+
+  const rekIsi = await call('GET', `/api/cashflow/rekening?asOf=${today}`);
+  const rekUji = rekIsi.rows.find((x) => x.code === kodeBaru);
+  check('biaya iklan membebani rekening yang dipilih',
+    near(rekUji.saldo, -250000, 1), String(rekUji.saldo));
+  check('asal pergerakan rekening ikut dirinci',
+    rekUji.perSumber.some((s2) => s2.sumber === 'Biaya Iklan' && near(s2.keluar, 250000, 1)),
+    JSON.stringify(rekUji.perSumber));
+  check('rekening bersaldo minus ditandai', rekUji.minus === true);
+
+  // Rekening yang bukan kas harus ditolak — kalau tidak, biaya iklan bisa
+  // mendarat di akun mana saja tanpa ada yang menghalangi.
+  let tolakBukanKas = false;
+  try {
+    await call('POST', '/api/iklan', {
+      spend_date: today, channel: 'SHOPEE', amount: 1000, payment: 'BANK', cash_code: '4000',
+    });
+  } catch {
+    tolakBukanKas = true;
+  }
+  check('akun bukan kas ditolak sebagai sumber dana', tolakBukanKas);
+
+  const totalRek = rekIsi.rows.reduce((s2, x) => s2 + x.saldo, 0);
+  const bsRek = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('jumlah saldo seluruh rekening = kas di neraca',
+    near(totalRek, bsRek.assets.current.totalCash, 1),
+    `${totalRek} vs ${bsRek.assets.current.totalCash}`);
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/cashflow/rekening/export/${bentuk}?asOf=${today}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`rekening bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
+      `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

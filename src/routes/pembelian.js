@@ -32,6 +32,8 @@ const poSchema = z.object({
   expected_date: tanggal.optional().nullable(),
   partner_id: z.number().int().positive({ message: 'supplier wajib dipilih' }),
   payment: z.enum(['CASH', 'BANK', 'CREDIT']).default('CREDIT'),
+  // Rekening yang dipakai membayar; hanya berlaku bila bukan pembelian tempo.
+  cash_code: z.string().trim().min(3).optional().nullable(),
   note: z.string().trim().max(300).optional().nullable(),
   items: z
     .array(
@@ -62,10 +64,13 @@ const buatPO = db.transaction((body, userId) => {
   const poNo = nextNumber('PO', body.order_date.slice(0, 7));
   const info = db
     .prepare(
-      `INSERT INTO purchase_orders (po_no, order_date, expected_date, partner_id, status, payment, note, user_id)
-       VALUES (?,?,?,?, 'DIPESAN', ?,?,?)`
+      `INSERT INTO purchase_orders (po_no, order_date, expected_date, partner_id, status, payment, cash_code, note, user_id)
+       VALUES (?,?,?,?, 'DIPESAN', ?,?,?,?)`
     )
-    .run(poNo, body.order_date, body.expected_date || null, body.partner_id, body.payment, body.note || null, userId);
+    .run(
+      poNo, body.order_date, body.expected_date || null, body.partner_id,
+      body.payment, body.cash_code || null, body.note || null, userId
+    );
 
   const poId = info.lastInsertRowid;
   const tambah = db.prepare(
@@ -220,6 +225,7 @@ const terimaBarang = db.transaction((poId, body, userId) => {
         qty: r2(l.qty),
         unit_cost: r2(item.unit_cost),
         payment: po.payment,
+        cash_code: po.cash_code || null,
         partner_id: po.partner_id,
         ref: po.po_no,
         note: `Penerimaan pesanan pembelian ${po.po_no}`,

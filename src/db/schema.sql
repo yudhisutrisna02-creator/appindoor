@@ -316,7 +316,8 @@ CREATE TABLE IF NOT EXISTS ad_spends (
   channel     TEXT    NOT NULL,
   platform    TEXT,                       -- Shopee Ads, TikTok Ads, Meta Ads, Google Ads
   amount      REAL    NOT NULL,
-  payment     TEXT    NOT NULL DEFAULT 'BANK',  -- CASH, BANK, CREDIT
+  payment     TEXT    NOT NULL DEFAULT 'BANK',  -- CASH, BANK, CREDIT, SALDO
+  cash_code   TEXT,   -- rekening kas/bank yang dipakai; kosong = akun bawaan
   note        TEXT,
   user_id     INTEGER REFERENCES users(id),
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -362,6 +363,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   -- SELESAI: seluruhnya diterima. BATAL: dibatalkan sebelum diterima.
   status        TEXT    NOT NULL DEFAULT 'DIPESAN',
   payment       TEXT    NOT NULL DEFAULT 'CREDIT',
+  cash_code     TEXT,   -- rekening kas/bank yang dipakai saat barang diterima
   note          TEXT,
   user_id       INTEGER REFERENCES users(id),
   created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
