@@ -1766,6 +1766,105 @@ async function main() {
       res.ok && buf.length > 200, `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Pencadangan ----------
+  console.log('\n22. Pencadangan basis data');
+
+  const kosong = await call('GET', '/api/cadangan');
+  check('keadaan basis data ikut dilaporkan',
+    kosong.info.ukuran > 0 && kosong.info.isi.order !== null,
+    `${kosong.info.ukuranTeks}, ${kosong.info.isi.order} order`);
+  check('langkah pemulihan ikut dikirim, tidak perlu dicari saat panik',
+    Array.isArray(kosong.langkahPulih) && kosong.langkahPulih.length >= 4);
+
+  const dibuat = await call('POST', '/api/cadangan');
+  check('cadangan bisa dibuat', dibuat.ok && dibuat.cadangan.ukuran > 0,
+    `${dibuat.cadangan.nama} ${dibuat.cadangan.ukuranTeks}`);
+
+  const daftarCad = await call('GET', '/api/cadangan');
+  check('cadangan baru muncul di daftar',
+    daftarCad.rows.some((c) => c.nama === dibuat.cadangan.nama));
+
+  // Inti fiturnya: berkasnya harus benar-benar basis data SQLite yang utuh, dan
+  // isinya sama dengan yang sedang berjalan. Menyalin berkas yang sedang dipakai
+  // bisa menghasilkan berkas yang terbuka tanpa keluhan tetapi kehilangan
+  // transaksi terakhir — kerusakan yang baru ketahuan saat dibutuhkan.
+  const unduhan = await fetch(`${BASE}/api/cadangan/${dibuat.cadangan.nama}/unduh`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const isiCad = Buffer.from(await unduhan.arrayBuffer());
+  check('cadangan bisa diunduh', unduhan.ok && isiCad.length === dibuat.cadangan.ukuran,
+    `${unduhan.status}, ${isiCad.length} byte`);
+  check('berkas yang turun benar-benar basis data SQLite',
+    isiCad.slice(0, 15).toString() === 'SQLite format 3');
+
+  const berkasUji = require('path').join(require('os').tmpdir(), `uji-cadangan-${Date.now()}.db`);
+  require('fs').writeFileSync(berkasUji, isiCad);
+  const Database = require('better-sqlite3');
+  const salinan = new Database(berkasUji, { readonly: true });
+  const integritas = salinan.pragma('integrity_check')[0].integrity_check;
+  const orderSalinan = salinan.prepare('SELECT COUNT(*) c FROM sales_orders').get().c;
+  const jurnalSalinan = salinan.prepare('SELECT COUNT(*) c FROM journals').get().c;
+  salinan.close();
+  require('fs').unlinkSync(berkasUji);
+
+  check('cadangan lolos pemeriksaan integritas', integritas === 'ok', integritas);
+  check('isi cadangan sama dengan basis data yang berjalan',
+    orderSalinan === kosong.info.isi.order && jurnalSalinan === kosong.info.isi.jurnal,
+    `${orderSalinan} order / ${jurnalSalinan} jurnal vs ${kosong.info.isi.order} / ${kosong.info.isi.jurnal}`);
+
+  // Nama berkas tidak boleh dipakai mengambil berkas lain dari server.
+  for (const jahat of ['..%2F..%2F.env', 'erp-2020-01-01.txt', 'sembarang.db']) {
+    const res = await fetch(`${BASE}/api/cadangan/${jahat}/unduh`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    check(`nama berkas "${decodeURIComponent(jahat)}" ditolak`, res.status === 404, `status ${res.status}`);
+  }
+
+  // Berkas cadangan berisi seluruh data termasuk akun; izinnya harus berdiri
+  // sendiri, bukan menumpang "sudah login".
+  const masukGudangLagi = await call('POST', '/api/auth/login', {
+    email: akunGudang.user.email, password: 'RahasiaKuat1',
+  });
+  const simpanAdmin = token;
+  token = masukGudangLagi.token;
+  const ditolak = await fetch(`${BASE}/api/cadangan`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  check('akun tanpa izin ditolak dari pencadangan', ditolak.status === 403, `status ${ditolak.status}`);
+  token = simpanAdmin;
+
+  // Dua cadangan berturut-turut jatuh pada detik yang sama. Kalau namanya sama,
+  // yang kedua menimpa yang pertama — kehilangan diam-diam pada fitur yang
+  // justru gunanya menjaga agar tidak ada yang hilang.
+  const buatLagi = await call('POST', '/api/cadangan');
+  check('cadangan kedua bisa dibuat', buatLagi.ok);
+  check('cadangan pada detik yang sama tidak menimpa yang sebelumnya',
+    buatLagi.cadangan.nama !== dibuat.cadangan.nama,
+    `${dibuat.cadangan.nama} vs ${buatLagi.cadangan.nama}`);
+  const duaAda = await call('GET', '/api/cadangan');
+  check('keduanya tersimpan sebagai berkas terpisah',
+    duaAda.rows.some((c) => c.nama === dibuat.cadangan.nama) &&
+    duaAda.rows.some((c) => c.nama === buatLagi.cadangan.nama),
+    `${duaAda.rows.length} berkas`);
+
+  const hapusCad = await call('DELETE', `/api/cadangan/${dibuat.cadangan.nama}`);
+  check('cadangan bisa dihapus', hapusCad.ok);
+
+  // Cadangan terakhir tidak boleh hilang lewat layar.
+  const sisa = await call('GET', '/api/cadangan');
+  let tolakHapusTerakhir = 0;
+  if (sisa.rows.length === 1) {
+    try {
+      await call('DELETE', `/api/cadangan/${sisa.rows[0].nama}`);
+    } catch (err) {
+      tolakHapusTerakhir = err.status;
+    }
+    check('cadangan terakhir tidak boleh dihapus', tolakHapusTerakhir === 422,
+      `status ${tolakHapusTerakhir}`);
+  } else {
+    check('cadangan terakhir tidak boleh dihapus', true, `${sisa.rows.length} tersisa — dilewati`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

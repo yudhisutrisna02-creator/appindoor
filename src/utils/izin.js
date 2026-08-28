@@ -117,6 +117,9 @@ const KATALOG = [
       { kunci: 'sistem.peran', label: 'Mengelola peran & hak akses' },
       { kunci: 'sistem.kantor', label: 'Mengatur titik kantor / geofence' },
       { kunci: 'sistem.dokumen', label: 'Melihat & mencabut tautan dokumen terbit' },
+      // Berkas cadangan berisi seluruh data termasuk hash kata sandi. Izinnya
+      // sengaja berdiri sendiri, tidak menumpang izin pengaturan.
+      { kunci: 'sistem.cadangan', label: 'Membuat & mengunduh cadangan basis data' },
     ],
   },
 ];
@@ -144,9 +147,10 @@ const PERAN_BAWAAN = [
     name: 'Manajer',
     description:
       'Menjalankan operasional harian dan membaca seluruh laporan. Tidak mengubah bagan akun, ' +
-      'pengaturan sistem, maupun hak akses — tiga hal yang salah ubahnya berdampak ke semua orang.',
+      'pengaturan sistem, maupun hak akses — tiga hal yang salah ubahnya berdampak ke semua orang. ' +
+      'Juga tidak mengunduh cadangan, karena satu berkas cadangan berisi seluruh data perusahaan.',
     izin: SEMUA_IZIN.filter(
-      (k) => !['keuangan.coa', 'sistem.peran', 'sistem.pengaturan'].includes(k)
+      (k) => !['keuangan.coa', 'sistem.peran', 'sistem.pengaturan', 'sistem.cadangan'].includes(k)
     ),
   },
   {

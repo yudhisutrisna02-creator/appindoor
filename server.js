@@ -163,6 +163,7 @@ app.use('/api/branding', require('./src/routes/branding'));
 // nota supplier justru pihak yang tidak punya akun di sini.
 app.use('/api/verifikasi', require('./src/routes/verifikasi'));
 app.use('/api/dokumen', halaman('sistem.dokumen'), require('./src/routes/dokumen'));
+app.use('/api/cadangan', require('./src/routes/cadangan'));
 
 // Foto selfie presensi hanya boleh diakses pengguna yang sudah login.
 app.use('/api/uploads', requireAuth, express.static(UPLOAD_DIR, { maxAge: '7d' }));
@@ -212,6 +213,11 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
   console.log(`ERP System Indoor berjalan di port ${PORT} (${process.env.NODE_ENV || 'development'})`);
   console.log(`Frontend: ${hasBuild ? 'tersedia' : 'BELUM di-build — jalankan npm run build'}`);
+
+  // Pencadangan harian. Dinyalakan setelah server siap melayani, bukan sebelum:
+  // menyalin basis data saat proses baru bangun hanya memperlambat permintaan
+  // pertama, sementara cadangannya sendiri tidak jadi lebih baik.
+  require('./src/utils/cadangan').mulaiJadwal();
 });
 
 // Hostinger mengirim SIGTERM saat restart/redeploy.

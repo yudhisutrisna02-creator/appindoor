@@ -23,3 +23,11 @@ PRODUCTION-ENV.txt
 ENV-HOSTINGER.txt
 AKSES-PRODUKSI.txt
 AKUN-KARYAWAN.txt
+
+# Berkas cadangan berisi SELURUH data termasuk hash kata sandi.
+# data/ sudah diabaikan, tetapi BACKUP_DIR bisa diarahkan ke tempat lain —
+# jaring pengaman ini yang mencegahnya ikut ter-commit tanpa ada yang sadar.
+backups/
+*.db
+*.db-wal
+*.db-shm
