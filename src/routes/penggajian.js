@@ -28,6 +28,8 @@ const {
 } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { dokumenPdf } = require('../utils/exporters');
+const { blokTtd, KIND } = require('../utils/ttd');
+const { isiDokumen } = require('../utils/dokumen');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -442,7 +444,11 @@ const SUMBER_DANA = {
  * Rekap kehadiran ikut dicantumkan supaya potongan atau bonusnya bisa
  * dipertanggungjawabkan tanpa perlu membuka menu lain.
  */
-function slipDari(p, r) {
+function nomorSlip(p, r) {
+  return `SLIP/${p.period}/${String(r.employee_id).padStart(4, '0')}`;
+}
+
+function slipDari(p, r, ttd) {
   const penerimaan = [
     ['Gaji Pokok', r.base],
     ['Tunjangan', r.allowance],
@@ -455,7 +461,7 @@ function slipDari(p, r) {
   return {
     judul: 'SLIP GAJI',
     subjudul: `Periode ${labelPeriode(p.period)}`,
-    nomor: `No. SLIP/${p.period}/${String(r.employee_id).padStart(4, '0')}`,
+    nomor: `No. ${nomorSlip(p, r)}`,
     meta: [
       ['Tanggal bayar', p.pay_date],
       ['Cara bayar', SUMBER_DANA[p.payment] || p.payment],
@@ -501,8 +507,11 @@ function slipDari(p, r) {
       p.note || null,
       'Slip ini dicetak dari sistem dan sah tanpa tanda tangan basah bila disertai bukti transfer.',
     ].filter(Boolean).join('\n'),
+    // Yang menyerahkan adalah sistemnya sendiri: lembar ini tidak diketik
+    // seseorang, ia dikeluarkan aplikasi dari angka yang sudah tercatat. Yang
+    // menerima tetap orang, jadi sisi itu tetap garis kosong.
     tandaTangan: [
-      { label: 'Yang menyerahkan', nama: '' },
+      ttd || { label: 'Yang menyerahkan', nama: '' },
       { label: 'Yang menerima', nama: r.name },
     ],
   };
@@ -526,13 +535,29 @@ function kirimSlip(req, res, itemId) {
     ? `slip-gaji-${p.period}-${bersihkan(dipilih[0].name)}.pdf`
     : `slip-gaji-${p.period}-semua.pdf`;
 
-  return dokumenPdf(dipilih.map((r) => slipDari(p, r)), { perusahaan }).then((buffer) => {
-    res.setHeader('Content-Type', 'application/pdf');
-    // inline supaya bisa langsung dibuka dan dicetak dari peramban, bukan
-    // dipaksa turun sebagai unduhan lebih dulu.
-    res.setHeader('Content-Disposition', `inline; filename="${nama}"`);
-    res.send(buffer);
-  });
+  // Tiap pegawai mendapat tanda tangan dan tautannya sendiri, bukan satu untuk
+  // seluruh berkas. Kalau satu tautan mewakili seluruh daftar, satu orang yang
+  // memindai QR di lembarnya akan melihat gaji semua rekannya.
+  return Promise.all(
+    dipilih.map((r) =>
+      blokTtd({
+        req,
+        kind: KIND.SLIP_GAJI,
+        refId: r.id,
+        docNo: nomorSlip(p, r),
+        isi: isiDokumen({ kind: KIND.SLIP_GAJI, ref_id: r.id }).kanonik,
+        userId: req.user && req.user.id,
+        label: 'Yang menyerahkan',
+      }).then((ttd) => slipDari(p, r, ttd))
+    )
+  ).then((dokumen) => dokumenPdf(dokumen, { perusahaan }))
+    .then((buffer) => {
+      res.setHeader('Content-Type', 'application/pdf');
+      // inline supaya bisa langsung dibuka dan dicetak dari peramban, bukan
+      // dipaksa turun sebagai unduhan lebih dulu.
+      res.setHeader('Content-Disposition', `inline; filename="${nama}"`);
+      res.send(buffer);
+    });
 }
 
 router.get('/:id(\\d+)/slip/pdf', ah((req, res) => kirimSlip(req, res, null)));

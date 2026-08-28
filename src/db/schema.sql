@@ -454,3 +454,30 @@ CREATE TABLE IF NOT EXISTS payroll_items (
 CREATE INDEX IF NOT EXISTS idx_payroll_period ON payrolls(period);
 CREATE INDEX IF NOT EXISTS idx_payitem_payroll ON payroll_items(payroll_id);
 CREATE INDEX IF NOT EXISTS idx_payitem_emp ON payroll_items(employee_id);
+
+-- ---------- TANDA TANGAN DIGITAL DOKUMEN ----------
+-- Slip gaji dan nota supplier yang dicetak membawa QR menuju halaman
+-- pemeriksaan keaslian. Tautannya memakai token acak, bukan id berurutan:
+-- id berurutan berarti siapa pun yang punya satu tautan bisa menebak tautan
+-- dokumen orang lain hanya dengan menambah satu.
+--
+-- Sidik isi disimpan supaya kertas yang sudah tercetak bisa dibandingkan dengan
+-- keadaan sekarang. Kertas yang sidiknya berbeda berarti dokumennya sudah
+-- diterbitkan ulang dengan angka yang lain.
+CREATE TABLE IF NOT EXISTS document_signatures (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT    NOT NULL,           -- SLIP_GAJI, NOTA_SUPPLIER
+  ref_id     INTEGER NOT NULL,           -- payroll_items.id / purchase_orders.id
+  doc_no     TEXT    NOT NULL,
+  token      TEXT    NOT NULL UNIQUE,
+  hash       TEXT    NOT NULL,
+  version    INTEGER NOT NULL DEFAULT 1, -- bertambah bila isinya berubah lalu dicetak lagi
+  cetak      INTEGER NOT NULL DEFAULT 0, -- berapa kali dokumennya dikeluarkan
+  issued_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  issued_by  INTEGER REFERENCES users(id),
+  revoked_at TEXT,
+  UNIQUE (kind, ref_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ttd_token ON document_signatures(token);
+CREATE INDEX IF NOT EXISTS idx_ttd_kind ON document_signatures(kind, ref_id);

@@ -1638,6 +1638,134 @@ async function main() {
     listCsv.res.ok && listCsv.buf.toString('utf8').charCodeAt(0) === 0xfeff,
     `${listCsv.res.status}, ${listCsv.buf.length} byte`);
 
+  // ---------- Tanda tangan digital & verifikasi ----------
+  console.log('\n21. Tanda tangan digital dokumen');
+
+  const periodeTtd = `${Number(today.slice(0, 4)) - 2}-${today.slice(5, 7)}`;
+  const pegawaiTtd = await call('POST', '/api/admin/users', {
+    name: 'Uji Tanda Tangan', email: `ttd-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
+    role: 'staff', position: 'Kurir', base_salary: 2500000,
+  });
+  const gajiTtd = await call('POST', '/api/penggajian', { period: periodeTtd, payment: 'BANK' });
+  const idTtd = gajiTtd.payroll.id;
+  const barisTtd = gajiTtd.payroll.rows.find((r) => r.employee_id === pegawaiTtd.user.id);
+
+  const sebelumTerbit = await call('GET', '/api/dokumen');
+  await ambilBerkas(`/api/penggajian/${idTtd}/slip/${barisTtd.id}/pdf`);
+  const sesudahTerbit = await call('GET', '/api/dokumen');
+  check('mencetak slip menerbitkan tanda tangan digitalnya',
+    sesudahTerbit.rows.length === sebelumTerbit.rows.length + 1,
+    `${sebelumTerbit.rows.length} lalu ${sesudahTerbit.rows.length}`);
+
+  const dokSlip = sesudahTerbit.rows.find((d) => d.kind === 'SLIP_GAJI' && d.ref_id === barisTtd.id);
+  check('tanda tangan membawa nomor, kode, dan tautannya',
+    !!dokSlip && /^SLIP\//.test(dokSlip.nomor) && !!dokSlip.kode && /\/verifikasi\/[0-9a-f]{48}$/.test(dokSlip.tautan || ''),
+    `${dokSlip && dokSlip.nomor} | ${dokSlip && dokSlip.tautan}`);
+
+  const tokenSlip = dokSlip.tautan.split('/').pop();
+
+  // Inti fiturnya: halaman pemeriksaan harus terbuka TANPA login. Yang memegang
+  // slip gaji justru pihak yang tidak punya akun di sini.
+  const publik = await fetch(`${BASE}/api/verifikasi/${tokenSlip}`);
+  const isiPublik = await publik.json();
+  check('halaman pemeriksaan terbuka tanpa login',
+    publik.ok && isiPublik.status === 'sah', `${publik.status} ${isiPublik.status}`);
+  check('pemeriksaan menyebut penerbitnya sistem ERP',
+    /^Sistem ERP /.test(isiPublik.penerbit || ''), isiPublik.penerbit);
+  check('pemeriksaan menampilkan angka dokumennya',
+    isiPublik.dokumen && near(isiPublik.dokumen.total[1], barisTtd.net, 1),
+    `${isiPublik.dokumen && isiPublik.dokumen.total[1]} vs ${barisTtd.net}`);
+
+  // Token acak, tidak berurutan: satu tautan tidak boleh menuntun ke tautan lain.
+  const tebakanToken = await fetch(`${BASE}/api/verifikasi/${'0'.repeat(48)}`);
+  check('token yang ditebak-tebak ditolak', tebakanToken.status === 404);
+  const bentukSalah = await fetch(`${BASE}/api/verifikasi/1`);
+  check('token yang bentuknya salah ditolak sebelum menyentuh basis data',
+    bentukSalah.status === 404);
+
+  // Mencetak ulang tanpa mengubah apa pun tidak boleh menaikkan versi — kalau
+  // naik, setiap cetakan akan membuat kertas sebelumnya tampak kedaluwarsa.
+  await ambilBerkas(`/api/penggajian/${idTtd}/slip/${barisTtd.id}/pdf`);
+  const setelahCetakUlang = await call('GET', '/api/dokumen');
+  const dokUlang = setelahCetakUlang.rows.find((d) => d.id === dokSlip.id);
+  check('mencetak ulang tanpa perubahan tidak menaikkan versi',
+    dokUlang.versi === dokSlip.versi && dokUlang.cetak === dokSlip.cetak + 1,
+    `versi ${dokUlang.versi}, cetak ${dokUlang.cetak}`);
+
+  // Mengubah angkanya harus terlihat oleh yang memegang kertas lama.
+  await call('PUT', `/api/penggajian/${idTtd}/baris/${barisTtd.id}`, { bonus: 175000 });
+  const ttdSetelahUbah = await fetch(`${BASE}/api/verifikasi/${tokenSlip}`).then((r) => r.json());
+  check('dokumen yang datanya berubah dilaporkan berubah, bukan sah',
+    ttdSetelahUbah.status === 'berubah' && ttdSetelahUbah.kode !== ttdSetelahUbah.kodeSekarang,
+    `${ttdSetelahUbah.status}`);
+  check('kode lama dan kode terbaru sama-sama ditampilkan',
+    !!ttdSetelahUbah.kode && !!ttdSetelahUbah.kodeSekarang);
+
+  await ambilBerkas(`/api/penggajian/${idTtd}/slip/${barisTtd.id}/pdf`);
+  const setelahCetakLagi = await call('GET', '/api/dokumen');
+  const dokNaik = setelahCetakLagi.rows.find((d) => d.id === dokSlip.id);
+  check('mencetak setelah data berubah menaikkan versinya',
+    dokNaik.versi === dokSlip.versi + 1 && dokNaik.status === 'sah',
+    `versi ${dokNaik.versi}, status ${dokNaik.status}`);
+  check('token tetap sama walau versinya naik',
+    (await fetch(`${BASE}/api/verifikasi/${tokenSlip}`)).ok);
+
+  // Setiap pegawai punya tautannya sendiri — satu orang tidak boleh melihat
+  // gaji rekannya hanya karena memindai QR di lembarnya.
+  await ambilBerkas(`/api/penggajian/${idTtd}/slip/pdf`);
+  const semuaDok = await call('GET', '/api/dokumen');
+  const dokPeriode = semuaDok.rows.filter(
+    (d) => d.kind === 'SLIP_GAJI' && gajiTtd.payroll.rows.some((r) => r.id === d.ref_id)
+  );
+  check('tiap pegawai punya tautan sendiri, bukan satu untuk seluruh berkas',
+    dokPeriode.length === gajiTtd.payroll.rows.length &&
+    new Set(dokPeriode.map((d) => d.tautan)).size === dokPeriode.length,
+    `${dokPeriode.length} tautan untuk ${gajiTtd.payroll.rows.length} pegawai`);
+
+  // Tautan yang tersebar ke tangan yang salah harus bisa dimatikan.
+  const cabutTtd = await call('PATCH', `/api/dokumen/${dokSlip.id}/cabut`);
+  check('tautan dokumen bisa dicabut', cabutTtd.ok);
+  const setelahCabut = await fetch(`${BASE}/api/verifikasi/${tokenSlip}`);
+  const isiCabut = await setelahCabut.json();
+  check('tautan yang dicabut tidak lagi menampilkan isi dokumen',
+    setelahCabut.status === 410 && isiCabut.status === 'dicabut' && !isiCabut.dokumen,
+    `${setelahCabut.status} ${isiCabut.status}`);
+
+  const aktifkanTtd = await call('PATCH', `/api/dokumen/${dokSlip.id}/aktifkan`);
+  check('tautan bisa diaktifkan kembali dengan token yang sama', aktifkanTtd.ok);
+  check('QR yang sudah tercetak berlaku lagi setelah diaktifkan',
+    (await fetch(`${BASE}/api/verifikasi/${tokenSlip}`)).ok);
+
+  // Nota supplier memakai jalur yang sama.
+  const notaTtd = await ambilBerkas(`/api/pembelian/${poNota.po.id}/nota/pdf`);
+  check('nota supplier ikut membawa tanda tangan digital', notaTtd.res.ok);
+  const dokNota = (await call('GET', '/api/dokumen')).rows
+    .find((d) => d.kind === 'NOTA_SUPPLIER' && d.ref_id === poNota.po.id);
+  check('nota supplier tercatat di daftar dokumen terbit',
+    !!dokNota && dokNota.nomor === faktur, dokNota && dokNota.nomor);
+  const periksaNota = await fetch(`${BASE}/api/verifikasi/${dokNota.tautan.split('/').pop()}`)
+    .then((r) => r.json());
+  check('pemeriksaan nota menampilkan supplier dan nilainya',
+    periksaNota.status === 'sah' && periksaNota.dokumen.untuk.startsWith('Supplier Nota'),
+    `${periksaNota.status}`);
+
+  // Dokumen yang sumbernya hilang tidak boleh menampilkan sisa data lama.
+  await call('DELETE', `/api/penggajian/${idTtd}`);
+  const setelahHapus = await fetch(`${BASE}/api/verifikasi/${tokenSlip}`);
+  const isiHapus = await setelahHapus.json();
+  check('dokumen yang sumbernya sudah dihapus dilaporkan hilang',
+    setelahHapus.status === 410 && isiHapus.status === 'hilang' && !isiHapus.dokumen,
+    `${setelahHapus.status} ${isiHapus.status}`);
+
+  for (const bentuk of ['excel', 'csv', 'pdf']) {
+    const res = await fetch(`${BASE}/api/dokumen/export/${bentuk}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`dokumen terbit bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 200, `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

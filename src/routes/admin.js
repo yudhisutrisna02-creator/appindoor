@@ -299,6 +299,10 @@ const EDITABLE_SETTINGS = [
   // Identitas perusahaan untuk kop laporan dan berkas yang diunduh.
   'company_tagline', 'company_address', 'company_phone', 'company_email',
   'company_tax_id', 'company_website',
+  // Alamat tetap aplikasi. Dipakai membuat QR pada slip gaji dan nota supplier;
+  // tanpa ini alamatnya ditebak dari permintaan yang sedang berjalan, dan
+  // dokumen yang dicetak dari alamat berbeda akan membawa QR yang berbeda pula.
+  'app_url',
 ];
 
 router.get('/settings', ah((req, res) => {

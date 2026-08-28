@@ -152,6 +152,15 @@ function AppSettings({ isAdmin }) {
       <Field label="Mata Uang">
         <input className="input" value={settings.currency || ''} onChange={set('currency')} disabled={!isAdmin} />
       </Field>
+      <Field
+        label="Alamat Aplikasi"
+        hint="Dipakai membuat QR pada slip gaji & nota — mis. https://erp.indonesiaorganik.id"
+      >
+        <input
+          className="input" placeholder="https://..." value={settings.app_url || ''}
+          onChange={set('app_url')} disabled={!isAdmin}
+        />
+      </Field>
 
       {isAdmin && (
         <div className="sm:col-span-2">

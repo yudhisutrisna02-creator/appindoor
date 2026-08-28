@@ -478,20 +478,54 @@ function dokumenPdf(dokumen, { perusahaan } = {}) {
 
       // Ruang tanda tangan. Ditempatkan di bawah halaman bila masih muat,
       // supaya lembarnya terlihat seperti dokumen dan bukan potongan laporan.
+      //
+      // Satu sisi bisa berupa tanda tangan digital: QR menuju halaman pemeriksaan
+      // beserta keterangan siapa yang menerbitkannya. Sisi lainnya tetap garis
+      // kosong untuk tanda tangan tangan — yang menerima tetap orang.
       if (d.tandaTangan && d.tandaTangan.length) {
-        const perlu = 90;
+        const adaQr = d.tandaTangan.some((t) => t.qr);
+        // Tinggi yang disediakan harus cukup untuk QR beserta seluruh baris
+        // keterangannya. Kurang sedikit saja, baris terakhirnya melewati batas
+        // bawah dan PDFKit menambah halaman baru sendiri — hasilnya tiap slip
+        // menjadi dua lembar, yang satu hampir kosong.
+        const perlu = adaQr ? 150 : 90;
         if (doc.y > doc.page.height - perlu - 30) doc.addPage();
         const y = Math.max(doc.y + 16, doc.page.height - perlu - 20);
         const lebar = ruang / d.tandaTangan.length;
+
         d.tandaTangan.forEach((t, k) => {
           const x = kiri + k * lebar;
+          const isi = lebar - 20;
+
           doc.font('Helvetica').fontSize(8).fillColor('#475569')
-            .text(t.label, x, y, { width: lebar - 20, align: 'center' });
-          doc.moveTo(x + 20, y + 52).lineTo(x + lebar - 40, y + 52)
-            .strokeColor('#94A3B8').lineWidth(0.7).stroke();
-          doc.font('Helvetica-Bold').fontSize(9).fillColor('#0F172A')
-            .text(t.nama || '(...................)', x, y + 56, { width: lebar - 20, align: 'center' });
+            .text(t.label, x, y, { width: isi, align: 'center' });
+
+          if (t.qr) {
+            const sisi = 58;
+            doc.image(t.qr, x + (isi - sisi) / 2 + 10, y + 12, { fit: [sisi, sisi] });
+
+            let baris = y + 12 + sisi + 4;
+            const tulis = (teks, font, ukuran, warna) => {
+              doc.font(font).fontSize(ukuran).fillColor(warna)
+                .text(teks, x + 10, baris, { width: isi - 20, align: 'center' });
+              baris = doc.y;
+            };
+            tulis('Ditandatangani secara digital oleh', 'Helvetica', 6.5, '#64748B');
+            tulis(t.digital.oleh, 'Helvetica-Bold', 7.5, '#0F172A');
+            tulis(
+              `${t.digital.nomor} • v${t.digital.versi} • ${t.digital.waktu}`,
+              'Helvetica', 6, '#475569'
+            );
+            tulis(`Kode ${t.digital.kode}`, 'Helvetica-Bold', 6.5, '#0F172A');
+            tulis('Pindai QR untuk memeriksa keaslian', 'Helvetica', 6, '#64748B');
+          } else {
+            doc.moveTo(x + 20, y + 52).lineTo(x + lebar - 40, y + 52)
+              .strokeColor('#94A3B8').lineWidth(0.7).stroke();
+            doc.font('Helvetica-Bold').fontSize(9).fillColor('#0F172A')
+              .text(t.nama || '(...................)', x, y + 56, { width: isi, align: 'center' });
+          }
         });
+        doc.fillColor('#0F172A');
       }
     });
   });

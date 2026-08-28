@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -39,6 +39,8 @@ import Rekening from './pages/Rekening';
 import TargetPencapaian from './pages/Target';
 import Penggajian from './pages/Penggajian';
 import Pencairan from './pages/Pencairan';
+import DokumenTerbit from './pages/DokumenTerbit';
+import Verifikasi from './pages/Verifikasi';
 import KinerjaProduk from './pages/KinerjaProduk';
 
 const NAV = [
@@ -110,7 +112,10 @@ const NAV = [
   {
     section: 'Sistem',
     key: 'sistem',
-    items: [{ to: '/pengaturan', label: 'Pengaturan', icon: Settings, izin: ['sistem.pengaturan', 'sistem.tim', 'sistem.peran', 'sistem.kantor'] }],
+    items: [
+      { to: '/pengaturan', label: 'Pengaturan', icon: Settings, izin: ['sistem.pengaturan', 'sistem.tim', 'sistem.peran', 'sistem.kantor'] },
+      { to: '/sistem/dokumen', label: 'Dokumen Terbit', icon: ShieldCheck, izin: 'sistem.dokumen' },
+    ],
   },
 ];
 
@@ -359,6 +364,19 @@ function Dijaga({ izin, children }) {
 
 export default function App() {
   const { user, loading } = useAuth();
+  const lokasi = useLocation();
+
+  // Halaman pemeriksaan dokumen berada di luar gerbang login, dan diperiksa
+  // sebelum apa pun yang lain. Yang memindai QR di slip gaji atau nota supplier
+  // justru pihak yang tidak punya akun di sini — layar login akan menghentikan
+  // mereka pada langkah pertama.
+  if (lokasi.pathname.startsWith('/verifikasi/')) {
+    return (
+      <Routes>
+        <Route path="/verifikasi/:token" element={<Verifikasi />} />
+      </Routes>
+    );
+  }
 
   if (loading) {
     return (
@@ -387,6 +405,7 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/sistem/dokumen" element={<Dijaga izin="sistem.dokumen"><DokumenTerbit /></Dijaga>} />
         <Route path="/penjualan/pencairan" element={<Dijaga izin="penjualan.lihat"><Pencairan /></Dijaga>} />
         <Route path="/presensi/penggajian" element={<Dijaga izin="penggajian.lihat"><Penggajian /></Dijaga>} />
         <Route path="/penjualan/target" element={<Dijaga izin="target.lihat"><TargetPencapaian /></Dijaga>} />

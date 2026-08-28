@@ -159,6 +159,10 @@ app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/peran', require('./src/routes/peran'));
 // Identitas perusahaan boleh dibaca sebelum masuk — halaman login perlu logonya.
 app.use('/api/branding', require('./src/routes/branding'));
+// Pemeriksaan keaslian dokumen sengaja terbuka: yang memegang slip gaji dan
+// nota supplier justru pihak yang tidak punya akun di sini.
+app.use('/api/verifikasi', require('./src/routes/verifikasi'));
+app.use('/api/dokumen', halaman('sistem.dokumen'), require('./src/routes/dokumen'));
 
 // Foto selfie presensi hanya boleh diakses pengguna yang sudah login.
 app.use('/api/uploads', requireAuth, express.static(UPLOAD_DIR, { maxAge: '7d' }));

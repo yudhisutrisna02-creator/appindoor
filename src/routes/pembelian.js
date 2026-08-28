@@ -20,6 +20,8 @@ const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2 } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { dokumenPdf, tableCsv } = require('../utils/exporters');
+const { blokTtd, KIND } = require('../utils/ttd');
+const { isiDokumen } = require('../utils/dokumen');
 const { todayLocal } = require('../utils/time');
 const { applyMove } = require('./inventory');
 
@@ -335,7 +337,7 @@ const KOLOM_NOTA = [
 ];
 
 /** Nota satu pesanan pembelian, siap dicetak. */
-function notaDari(po) {
+function notaDari(po, ttd) {
   const sudahDibayar = !!po.paid_date;
   const supplier = po.partner_id
     ? db.prepare('SELECT * FROM partners WHERE id = ?').get(po.partner_id)
@@ -394,8 +396,10 @@ function notaDari(po) {
         : 'Nota ini belum ditandai lunas. Simpan bukti transfer sebagai lampiran.',
       'Nilai pada nota mengikuti harga pesanan; pembukuan persediaan mengikuti barang yang benar-benar diterima.',
     ].filter(Boolean).join('\n'),
+    // Yang menyetujui adalah sistemnya: nota ini disusun dari pesanan yang sudah
+    // tercatat, bukan diketik ulang. Sisi supplier tetap garis kosong.
     tandaTangan: [
-      { label: 'Disetujui oleh', nama: '' },
+      ttd || { label: 'Disetujui oleh', nama: '' },
       { label: 'Diterima supplier', nama: po.supplier_name || '' },
     ],
   };
@@ -406,7 +410,16 @@ const namaNota = (po) =>
 
 router.get('/:id(\\d+)/nota/pdf', butuhIzin('pembelian.lihat'), ah(async (req, res) => {
   const po = ambilPO(Number(req.params.id));
-  const buffer = await dokumenPdf(notaDari(po), {
+  const ttd = await blokTtd({
+    req,
+    kind: KIND.NOTA_SUPPLIER,
+    refId: po.id,
+    docNo: po.invoice_no || po.po_no,
+    isi: isiDokumen({ kind: KIND.NOTA_SUPPLIER, ref_id: po.id }).kanonik,
+    userId: req.user && req.user.id,
+    label: 'Disetujui oleh',
+  });
+  const buffer = await dokumenPdf(notaDari(po, ttd), {
     perusahaan: getSetting('company_name', 'Perusahaan'),
   });
   res.setHeader('Content-Type', 'application/pdf');

@@ -116,6 +116,7 @@ const KATALOG = [
       { kunci: 'sistem.tim', label: 'Mengelola data tim & akun pengguna' },
       { kunci: 'sistem.peran', label: 'Mengelola peran & hak akses' },
       { kunci: 'sistem.kantor', label: 'Mengatur titik kantor / geofence' },
+      { kunci: 'sistem.dokumen', label: 'Melihat & mencabut tautan dokumen terbit' },
     ],
   },
 ];
