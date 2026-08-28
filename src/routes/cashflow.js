@@ -488,3 +488,6 @@ router.post('/settlements', butuhIzin('keuangan.kas'), ah((req, res) => {
 }));
 
 module.exports = router;
+// Dipakai ulang oleh Pusat Perhatian supaya angka peringatannya tidak pernah
+// berbeda dari angka yang tampil di menu ini sendiri.
+module.exports.rekeningKas = rekeningKas;

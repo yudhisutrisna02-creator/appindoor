@@ -164,6 +164,9 @@ app.use('/api/branding', require('./src/routes/branding'));
 app.use('/api/verifikasi', require('./src/routes/verifikasi'));
 app.use('/api/dokumen', halaman('sistem.dokumen'), require('./src/routes/dokumen'));
 app.use('/api/cadangan', require('./src/routes/cadangan'));
+// Pusat Perhatian menyaring isinya sendiri menurut izin pembacanya, jadi cukup
+// menuntut sudah login di sini.
+app.use('/api/perhatian', require('./src/routes/perhatian'));
 
 // Foto selfie presensi hanya boleh diakses pengguna yang sudah login.
 app.use('/api/uploads', requireAuth, express.static(UPLOAD_DIR, { maxAge: '7d' }));

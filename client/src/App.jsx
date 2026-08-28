@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -41,6 +41,7 @@ import Penggajian from './pages/Penggajian';
 import Pencairan from './pages/Pencairan';
 import DokumenTerbit from './pages/DokumenTerbit';
 import Cadangan from './pages/Cadangan';
+import Perhatian from './pages/Perhatian';
 import Verifikasi from './pages/Verifikasi';
 import KinerjaProduk from './pages/KinerjaProduk';
 
@@ -50,7 +51,10 @@ const NAV = [
     key: 'ringkasan',
     // Satu-satunya pintasan ke halaman depan — tidak perlu dilipat.
     collapsible: false,
-    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true, izin: 'dashboard.lihat' }],
+    items: [
+      { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true, izin: 'dashboard.lihat' },
+      { to: '/perhatian', label: 'Pusat Perhatian', icon: BellRing },
+    ],
   },
   {
     section: 'Presensi',
@@ -407,6 +411,7 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/perhatian" element={<Perhatian />} />
         <Route path="/sistem/cadangan" element={<Dijaga izin="sistem.cadangan"><Cadangan /></Dijaga>} />
         <Route path="/sistem/dokumen" element={<Dijaga izin="sistem.dokumen"><DokumenTerbit /></Dijaga>} />
         <Route path="/penjualan/pencairan" element={<Dijaga izin="penjualan.lihat"><Pencairan /></Dijaga>} />

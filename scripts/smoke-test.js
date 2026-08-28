@@ -1865,6 +1865,59 @@ async function main() {
     check('cadangan terakhir tidak boleh dihapus', true, `${sisa.rows.length} tersisa — dilewati`);
   }
 
+  // ---------- Pusat Perhatian ----------
+  console.log('\n23. Pusat Perhatian');
+
+  const perhatian = await call('GET', '/api/perhatian');
+  check('pusat perhatian bisa dibuka', Array.isArray(perhatian.rows));
+  check('tidak ada sumber yang gagal dibaca',
+    perhatian.gagal.length === 0, JSON.stringify(perhatian.gagal));
+  check('jumlah per tingkat = jumlah seluruh butir',
+    perhatian.ringkas.genting + perhatian.ringkas.perhatian + perhatian.ringkas.kabar
+      === perhatian.rows.length);
+  check('yang genting berada di urutan atas',
+    perhatian.rows.every((b, i) =>
+      i === 0 || ['genting', 'perhatian', 'kabar'].indexOf(perhatian.rows[i - 1].tingkat)
+        <= ['genting', 'perhatian', 'kabar'].indexOf(b.tingkat)));
+  check('tiap butir membawa tautan ke menu yang bersangkutan',
+    perhatian.rows.every((b) => typeof b.tautan === 'string' && b.tautan.startsWith('/')));
+
+  // Angkanya harus sama persis dengan menunya. Kalau peringatan menghitung
+  // sendiri, cepat atau lambat ia akan menyebut angka yang berbeda dan tidak
+  // ada yang tahu mana yang benar.
+  const kinerjaBanding = await call('GET', '/api/kinerja/produk');
+  const butirHabis = perhatian.rows.find((b) => b.kunci === 'stok-habis');
+  const habisMenu = kinerjaBanding.rows.filter((r) => r.golongan === 'habis').length;
+  check('jumlah produk habis sama dengan yang tampil di Kinerja Produk',
+    (butirHabis ? butirHabis.jumlah : 0) === habisMenu,
+    `${butirHabis ? butirHabis.jumlah : 0} vs ${habisMenu}`);
+
+  const rekBanding = await call('GET', `/api/cashflow/rekening?asOf=${today}`);
+  const minusMenu = rekBanding.rows.filter((a) => a.minus).length;
+  const minusButir = perhatian.rows.filter((b) => b.kunci.startsWith('rekening-minus-')).length;
+  check('rekening minus sama banyak dengan yang tampil di Rekening Kas & Bank',
+    minusButir === minusMenu, `${minusButir} vs ${minusMenu}`);
+
+  // Inti pembatasan: peringatan tidak boleh membocorkan apa yang sudah
+  // disembunyikan di menunya. Tim gudang tidak melihat keuangan.
+  const masukGudang3 = await call('POST', '/api/auth/login', {
+    email: akunGudang.user.email, password: 'RahasiaKuat1',
+  });
+  const adminLagi = token;
+  token = masukGudang3.token;
+  const perhatianGudang = await call('GET', '/api/perhatian');
+  check('tim gudang tetap boleh membuka pusat perhatian',
+    Array.isArray(perhatianGudang.rows));
+  check('butir keuangan tidak bocor ke tim gudang',
+    !perhatianGudang.rows.some((b) => b.kunci.startsWith('rekening-minus-')
+      || b.kunci === 'pencairan-selisih' || b.kunci === 'dana-tertahan'),
+    perhatianGudang.rows.map((b) => b.kunci).join(', '));
+  check('butir gudang tetap sampai ke tim gudang',
+    perhatianGudang.rows.every((b) => !b.izin || [].concat(b.izin).some((k) => k.startsWith('gudang.')
+      || k.startsWith('pembelian.') || k.startsWith('presensi.') || k === 'dashboard.lihat')),
+    perhatianGudang.rows.map((b) => b.izin).join(' | '));
+  token = adminLagi;
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

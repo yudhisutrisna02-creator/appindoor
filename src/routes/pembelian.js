@@ -520,3 +520,6 @@ daftarkanEkspor(router, {
 });
 
 module.exports = router;
+// Dipakai ulang oleh Pusat Perhatian supaya angka peringatannya tidak pernah
+// berbeda dari angka yang tampil di menu ini sendiri.
+module.exports.daftar = daftar;
