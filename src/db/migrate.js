@@ -178,6 +178,11 @@ function runMigrations(db) {
   // akses hanya karena sistem perannya berganti.
   addColumn(db, 'users', 'role_id', 'INTEGER REFERENCES roles(id)', applied);
 
+  // Rekaman izin bawaan saat peran pertama kali disemai. Dipakai membedakan
+  // peran yang masih apa adanya dari peran yang sudah disesuaikan pemiliknya —
+  // lihat src/db/seed-peran.js.
+  addColumn(db, 'roles', 'seeded_json', 'TEXT', applied);
+
   // --- Daftar kanal jualan tidak lagi dikunci di dalam tabel ---
   lepasCekKanal(db, 'sales_orders', applied);
   lepasCekKanal(db, 'shops', applied);

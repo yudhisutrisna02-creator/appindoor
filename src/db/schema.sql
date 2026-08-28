@@ -335,6 +335,9 @@ CREATE TABLE IF NOT EXISTS roles (
   description TEXT,
   -- Peran bawaan tidak boleh dihapus; izinnya tetap boleh diubah kecuali admin.
   is_system   INTEGER NOT NULL DEFAULT 0,
+  -- Izin bawaan saat peran disemai, untuk membedakan yang masih apa adanya
+  -- dari yang sudah disesuaikan pemiliknya.
+  seeded_json TEXT,
   active      INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );

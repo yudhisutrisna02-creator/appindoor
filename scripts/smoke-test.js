@@ -577,6 +577,15 @@ async function main() {
     izinSaya.permissions.length === daftarPeran.katalog.flatMap((k) => k.izin).length,
     `${izinSaya.permissions.length} izin`);
 
+  // Menu baru harus sampai ke peran yang memang mengerjakannya. Kalau tidak,
+  // memasang modul baru berarti diam-diam menyembunyikannya dari semua orang
+  // kecuali admin, tanpa tanda apa pun bahwa ada yang perlu dinyalakan.
+  const peranAdmin = daftarPeran.roles.find((r) => r.slug === 'admin');
+  check('peran Tim Gudang menerima izin modul pembelian',
+    daftarPeran.roles.find((r) => r.slug === 'gudang').permissions.includes('pembelian.kelola'));
+  check('peran Admin memegang izin modul terbaru',
+    peranAdmin.permissions.includes('pembelian.kelola') && peranAdmin.permissions.includes('iklan.kelola'));
+
   const peranGudang = daftarPeran.roles.find((r) => r.slug === 'gudang');
   const akunGudang = await call('POST', '/api/admin/users', {
     name: 'Uji Gudang', email: `gudang-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
