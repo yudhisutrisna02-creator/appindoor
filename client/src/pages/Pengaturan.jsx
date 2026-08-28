@@ -339,6 +339,7 @@ const EMPTY_USER = {
   photo: null, nik: '', department: '', employment_status: '', join_date: '', birth_date: '',
   gender: '', address: '', emergency_name: '', emergency_phone: '',
   bank_name: '', bank_account: '', note: '',
+  base_salary: 0, allowance: 0,
 };
 
 const STATUS_KERJA = {
@@ -393,6 +394,10 @@ function UsersTab({ isAdmin }) {
     // Hanya dipakai untuk menampilkan gambar di layar, bukan kolom di peladen.
     delete payload.photoPratinjau;
     delete payload.created_at;
+    // Kolom angka datang sebagai teks dari <input type="number">; peladen
+    // menolaknya kalau tidak diubah dulu.
+    payload.base_salary = Number(payload.base_salary) || 0;
+    payload.allowance = Number(payload.allowance) || 0;
     try {
       if (editing.id) {
         await api.put(`/api/admin/users/${editing.id}`, payload);
@@ -609,6 +614,12 @@ function UsersTab({ isAdmin }) {
             </Field>
             <Field label="Nomor Rekening">
               <input className="input" value={editing.bank_account || ''} onChange={(e) => setEditing({ ...editing, bank_account: e.target.value })} />
+            </Field>
+            <Field label="Gaji Pokok" hint="Dipakai menu Penggajian sebagai nilai awal tiap bulan">
+              <input type="number" min="0" step="1000" className="input" value={editing.base_salary ?? 0} onChange={(e) => setEditing({ ...editing, base_salary: e.target.value })} />
+            </Field>
+            <Field label="Tunjangan Tetap" hint="Tunjangan bulanan yang jumlahnya sama tiap bulan">
+              <input type="number" min="0" step="1000" className="input" value={editing.allowance ?? 0} onChange={(e) => setEditing({ ...editing, allowance: e.target.value })} />
             </Field>
             <Field label="Catatan" className="sm:col-span-2">
               <input className="input" value={editing.note || ''} onChange={(e) => setEditing({ ...editing, note: e.target.value })} />

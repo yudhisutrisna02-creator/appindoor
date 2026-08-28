@@ -26,6 +26,7 @@ const COA = [
   // ---------- KEWAJIBAN ----------
   ['2000', 'Utang Usaha (Supplier)',         'LIABILITY', 'PAYABLE', 'K', 'OCF', 0],
   ['2100', 'Utang Biaya Operasional',        'LIABILITY', 'ACCRUED', 'K', 'OCF', 0],
+  ['2110', 'Utang Gaji',                     'LIABILITY', 'ACCRUED', 'K', 'OCF', 0],
   ['2200', 'Utang Pajak',                    'LIABILITY', 'TAX',     'K', 'OCF', 0],
   ['2500', 'Utang Bank / Pinjaman',          'LIABILITY', 'LOAN',    'K', 'FCF', 0],
 
@@ -73,6 +74,7 @@ const ACC = {
   AR_MARKETPLACE: '1110',
   INVENTORY: '1200',
   AP: '2000',
+  SALARY_PAYABLE: '2110',
   TAX_PAYABLE: '2200',
   CAPITAL: '3000',
   RETAINED: '3900',
@@ -87,6 +89,7 @@ const ACC = {
   FEE_PACKING: '6040',
   FEE_ADS: '6050',
   TAX_EXPENSE: '7000',
+  SALARY: '6100',
   OTHER_EXPENSE: '6190',
   STOCK_VARIANCE: '8000',
 };

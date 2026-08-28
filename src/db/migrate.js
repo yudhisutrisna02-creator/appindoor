@@ -183,6 +183,14 @@ function runMigrations(db) {
   // lihat src/db/seed-peran.js.
   addColumn(db, 'roles', 'seeded_json', 'TEXT', applied);
 
+  // --- Penggajian ---
+  // Gaji pokok dan tunjangan tetap disimpan pada akun orangnya, bukan pada tiap
+  // periode gaji, supaya tidak perlu diketik ulang setiap bulan. Nilainya tetap
+  // boleh diubah per periode saat menyusun daftar gaji — yang dipakai untuk
+  // membayar adalah angka pada periode itu, bukan angka di master.
+  addColumn(db, 'users', 'base_salary', 'REAL NOT NULL DEFAULT 0', applied);
+  addColumn(db, 'users', 'allowance', 'REAL NOT NULL DEFAULT 0', applied);
+
   // Rekening kas/bank yang dipakai. Kosong berarti memakai akun bawaan, seperti
   // perilaku sebelum kolom ini ada.
   addColumn(db, 'ad_spends', 'cash_code', 'TEXT', applied);

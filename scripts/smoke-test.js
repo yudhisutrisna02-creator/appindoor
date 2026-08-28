@@ -1228,6 +1228,146 @@ async function main() {
       `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Penggajian ----------
+  console.log('\n18. Penggajian');
+
+  const periodeGaji = today.slice(0, 7);
+  const pegawai = await call('POST', '/api/admin/users', {
+    name: 'Uji Gaji', email: `gaji-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
+    role: 'staff', position: 'Packing', base_salary: 3000000, allowance: 500000,
+    bank_name: 'BCA', bank_account: '1234567890',
+  });
+  check('gaji pokok tersimpan pada data tim',
+    pegawai.user.base_salary === 3000000 && pegawai.user.allowance === 500000,
+    `${pegawai.user.base_salary} / ${pegawai.user.allowance}`);
+
+  // Menyimpan ulang tanpa mengirim kolom gaji tidak boleh mengosongkannya —
+  // form lama yang belum mengenal kolom ini akan menghapus gaji orang.
+  await call('PUT', `/api/admin/users/${pegawai.user.id}`, {
+    name: 'Uji Gaji', email: pegawai.user.email, role: 'staff', position: 'Packing Senior',
+  });
+  const setelahUbah = (await call('GET', '/api/admin/users')).users
+    .find((u) => u.id === pegawai.user.id);
+  check('gaji tidak hilang saat data tim disimpan tanpa kolom gaji',
+    setelahUbah.base_salary === 3000000, String(setelahUbah.base_salary));
+
+  const gaji = await call('POST', '/api/penggajian', {
+    period: periodeGaji, payment: 'BANK', note: 'Uji penggajian',
+  });
+  check('daftar gaji tersusun sebagai draft',
+    gaji.payroll.status === 'DRAFT' && gaji.payroll.rows.length >= 1);
+
+  const idGaji = gaji.payroll.id;
+  const barisSaya = gaji.payroll.rows.find((r) => r.employee_id === pegawai.user.id);
+  check('gaji pokok disalin dari data tim',
+    barisSaya.base === 3000000 && barisSaya.allowance === 500000 && barisSaya.net === 3500000,
+    `net ${barisSaya.net}`);
+  check('rekap presensi ikut dibekukan pada slipnya',
+    typeof barisSaya.hadir === 'number' && typeof barisSaya.alpa === 'number');
+
+  // Nilai gaji harus BEKU. Menaikkan gaji seseorang hari ini tidak boleh
+  // mengubah slip bulan yang daftarnya sudah disusun.
+  await call('PUT', `/api/admin/users/${pegawai.user.id}`, {
+    name: 'Uji Gaji', email: pegawai.user.email, role: 'staff',
+    base_salary: 9000000, allowance: 500000,
+  });
+  const gajiLagi = await call('GET', `/api/penggajian/${idGaji}`);
+  const barisLagi = gajiLagi.rows.find((r) => r.employee_id === pegawai.user.id);
+  check('menaikkan gaji di master tidak mengubah daftar yang sudah disusun',
+    barisLagi.base === 3000000, String(barisLagi.base));
+
+  const ubahBaris = await call('PUT', `/api/penggajian/${idGaji}/baris/${barisSaya.id}`, {
+    overtime: 200000, bonus: 100000, deduction: 50000,
+  });
+  const barisUbah = ubahBaris.payroll.rows.find((r) => r.id === barisSaya.id);
+  check('gaji bersih = pokok + tunjangan + lembur + bonus − potongan',
+    barisUbah.net === 3000000 + 500000 + 200000 + 100000 - 50000, String(barisUbah.net));
+
+  let tolakMinus = 0;
+  try {
+    await call('PUT', `/api/penggajian/${idGaji}/baris/${barisSaya.id}`, { deduction: 99000000 });
+  } catch (err) {
+    tolakMinus = err.status;
+  }
+  check('potongan yang melebihi gaji ditolak', tolakMinus === 422, `status ${tolakMinus}`);
+
+  // Draft belum boleh menyentuh pembukuan sama sekali.
+  const sebelumPosting = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  const cariAkun = (tb, kode) => {
+    const baris = (tb.rows || []).find((x) => x.code === kode);
+    return baris ? (baris.debit || 0) - (baris.credit || 0) : 0;
+  };
+  const gajiSebelum = cariAkun(sebelumPosting, '6100');
+  check('draft belum menambah beban gaji di pembukuan', gajiSebelum === 0, String(gajiSebelum));
+
+  const totalGaji = ubahBaris.payroll.total.net;
+  const posting = await call('POST', `/api/penggajian/${idGaji}/posting`);
+  check('daftar gaji bisa diposting', posting.payroll.status === 'POSTED');
+  check('posting membuat jurnal', posting.payroll.jurnal.length === 1);
+
+  const sesudahPosting = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  check('beban gaji di pembukuan = total gaji bersih',
+    near(cariAkun(sesudahPosting, '6100'), totalGaji, 1),
+    `${cariAkun(sesudahPosting, '6100')} vs ${totalGaji}`);
+  check('neraca saldo tetap seimbang setelah gaji diposting',
+    near(sesudahPosting.totalDebit, sesudahPosting.totalCredit, 1));
+
+  // Daftar yang sudah diposting tidak boleh diubah diam-diam — jurnalnya sudah
+  // terbentuk dan angkanya akan berbeda dari pembukuan.
+  let tolakUbahTerkunci = 0;
+  try {
+    await call('PUT', `/api/penggajian/${idGaji}/baris/${barisSaya.id}`, { bonus: 1 });
+  } catch (err) {
+    tolakUbahTerkunci = err.status;
+  }
+  check('daftar yang sudah diposting tidak bisa diubah', tolakUbahTerkunci === 422);
+
+  let tolakHapusTerkunci = 0;
+  try {
+    await call('DELETE', `/api/penggajian/${idGaji}`);
+  } catch (err) {
+    tolakHapusTerkunci = err.status;
+  }
+  check('daftar yang sudah diposting tidak bisa dihapus', tolakHapusTerkunci === 422);
+
+  const batal = await call('POST', `/api/penggajian/${idGaji}/batal-posting`);
+  check('posting bisa dibatalkan', batal.payroll.status === 'DRAFT' && batal.payroll.jurnal.length === 0);
+  const setelahBatal = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  check('membatalkan posting mengembalikan beban gaji ke nol',
+    cariAkun(setelahBatal, '6100') === 0, String(cariAkun(setelahBatal, '6100')));
+  check('angka gajinya tidak ikut hilang saat posting dibatalkan',
+    batal.payroll.total.net === totalGaji, `${batal.payroll.total.net} vs ${totalGaji}`);
+
+  // Gaji yang belum dibayarkan mendarat di Utang Gaji, bukan mengurangi bank.
+  await call('PUT', `/api/penggajian/${idGaji}`, { payment: 'CREDIT' });
+  await call('POST', `/api/penggajian/${idGaji}/posting`);
+  const tbUtang = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  check('gaji belum dibayar menjadi Utang Gaji, bukan kas keluar',
+    near(-cariAkun(tbUtang, '2110'), totalGaji, 1),
+    String(cariAkun(tbUtang, '2110')));
+  await call('POST', `/api/penggajian/${idGaji}/batal-posting`);
+
+  let tolakGanda = 0;
+  try {
+    await call('POST', '/api/penggajian', { period: periodeGaji });
+  } catch (err) {
+    tolakGanda = err.status;
+  }
+  check('satu bulan hanya boleh punya satu daftar gaji', tolakGanda === 409, `status ${tolakGanda}`);
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/penggajian/${idGaji}/export/${bentuk}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`daftar gaji bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
+      `${res.status}, ${buf.length} byte`);
+  }
+
+  await call('DELETE', `/api/penggajian/${idGaji}`);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

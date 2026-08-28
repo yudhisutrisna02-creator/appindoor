@@ -37,6 +37,7 @@ import Pengiriman from './pages/Pengiriman';
 import Pembelian from './pages/Pembelian';
 import Rekening from './pages/Rekening';
 import TargetPencapaian from './pages/Target';
+import Penggajian from './pages/Penggajian';
 import KinerjaProduk from './pages/KinerjaProduk';
 
 const NAV = [
@@ -53,6 +54,7 @@ const NAV = [
     items: [
       { to: '/presensi', label: 'Absen Sekarang', icon: Fingerprint, izin: 'presensi.absen' },
       { to: '/presensi/rekap', label: 'Rekap Absensi', icon: CalendarClock, izin: 'presensi.lihat' },
+      { to: '/presensi/penggajian', label: 'Penggajian', icon: Wallet, izin: 'penggajian.lihat' },
     ],
   },
   {
@@ -383,6 +385,7 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/presensi/penggajian" element={<Dijaga izin="penggajian.lihat"><Penggajian /></Dijaga>} />
         <Route path="/penjualan/target" element={<Dijaga izin="target.lihat"><TargetPencapaian /></Dijaga>} />
         <Route path="/gudang/kinerja" element={<Dijaga izin="gudang.kinerja"><KinerjaProduk /></Dijaga>} />
         <Route path="/keuangan/rekening" element={<Dijaga izin="keuangan.lihat"><Rekening /></Dijaga>} />

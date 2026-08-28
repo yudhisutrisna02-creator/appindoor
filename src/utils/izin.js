@@ -80,6 +80,17 @@ const KATALOG = [
     ],
   },
   {
+    modul: 'penggajian',
+    label: 'Penggajian',
+    izin: [
+      { kunci: 'penggajian.lihat', label: 'Melihat daftar gaji' },
+      { kunci: 'penggajian.kelola', label: 'Menyusun & mengubah daftar gaji' },
+      // Sengaja dipisah dari kelola: menyusun daftar boleh salah dan diperbaiki,
+      // sedangkan memposting membuat jurnal yang mengurangi kas.
+      { kunci: 'penggajian.posting', label: 'Memposting gaji ke pembukuan' },
+    ],
+  },
+  {
     modul: 'keuangan',
     label: 'Keuangan',
     izin: [

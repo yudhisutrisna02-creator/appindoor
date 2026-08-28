@@ -44,16 +44,40 @@ const userSchema = z.object({
   bank_name: z.string().trim().max(60).optional().nullable(),
   bank_account: z.string().trim().max(50).optional().nullable(),
   note: z.string().trim().max(300).optional().nullable(),
+
+  // Dipakai menu Penggajian sebagai nilai awal tiap bulan. Yang dibayarkan
+  // tetap angka pada daftar gaji periode itu, bukan angka di sini.
+  base_salary: z.number().min(0).optional(),
+  allowance: z.number().min(0).optional(),
 });
 
 /** Kolom kepegawaian yang ditulis apa adanya ke basis data. */
 const KOLOM_TIM = [
   'nik', 'department', 'employment_status', 'join_date', 'birth_date', 'gender',
   'address', 'emergency_name', 'emergency_phone', 'bank_name', 'bank_account', 'note',
+  'base_salary', 'allowance',
 ];
 
 /** Semua kolom pengguna yang boleh dibaca — password_hash tidak pernah ikut. */
 const KOLOM_TAMPIL = `id, name, email, role, role_id, position, phone, active, created_at, photo, ${KOLOM_TIM.join(', ')}`;
+
+/** Kolom kepegawaian yang berupa angka, bukan teks. */
+const KOLOM_ANGKA = new Set(['base_salary', 'allowance']);
+
+/**
+ * Nilai satu kolom kepegawaian untuk disimpan.
+ *
+ * Kolom angka tidak boleh menjadi NULL, dan yang tidak dikirim sama sekali harus
+ * mempertahankan isinya yang lama — form yang belum mengenal sebuah kolom baru
+ * tidak boleh diam-diam mengosongkan gaji orang hanya karena tidak mengirimnya.
+ */
+function nilaiTim(u, k, lama) {
+  if (KOLOM_ANGKA.has(k)) {
+    if (u[k] === undefined) return lama ? lama[k] || 0 : 0;
+    return Number(u[k]) || 0;
+  }
+  return u[k] || null;
+}
 
 /**
  * Simpan foto bila yang dikirim berupa data URL baru.
@@ -171,7 +195,7 @@ router.post('/users', butuhIzin('sistem.tim'), ah((req, res) => {
     .run(
       u.name, u.email, bcrypt.hashSync(u.password, 10), u.role, u.role_id || null,
       u.position || null, u.phone || null, u.active ? 1 : 0, foto,
-      ...KOLOM_TIM.map((k) => u[k] || null)
+      ...KOLOM_TIM.map((k) => nilaiTim(u, k, null))
     );
 
   res.status(201).json({
@@ -202,7 +226,7 @@ router.put('/users/:id', butuhIzin('sistem.tim'), ah((req, res) => {
       WHERE id=?`
   ).run(
     u.name, u.email, u.role, u.role_id || null, u.position || null, u.phone || null, u.active ? 1 : 0, foto,
-    ...KOLOM_TIM.map((k) => u[k] || null),
+    ...KOLOM_TIM.map((k) => nilaiTim(u, k, existing)),
     existing.id
   );
 

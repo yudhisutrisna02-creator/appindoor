@@ -406,3 +406,48 @@ CREATE TABLE IF NOT EXISTS targets (
 -- sama. IFNULL menyamakannya ke satu nilai supaya benar-benar tunggal.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_target_unik ON targets(period, IFNULL(shop_id, 0));
 CREATE INDEX IF NOT EXISTS idx_target_period ON targets(period);
+
+-- ---------- PENGGAJIAN ----------
+-- Satu daftar gaji per bulan. Selama masih DRAFT ia belum menyentuh pembukuan
+-- sama sekali; jurnalnya baru dibuat saat diposting, dan dihapus kembali bila
+-- postingnya dibatalkan. Ini mengikuti cara order penjualan diperlakukan.
+CREATE TABLE IF NOT EXISTS payrolls (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  period     TEXT    NOT NULL UNIQUE,        -- YYYY-MM
+  pay_date   TEXT    NOT NULL,
+  status     TEXT    NOT NULL DEFAULT 'DRAFT',  -- DRAFT, POSTED
+  -- CREDIT berarti gaji sudah menjadi beban bulan ini tetapi uangnya belum
+  -- keluar; lawannya Utang Gaji, bukan kas.
+  payment    TEXT    NOT NULL DEFAULT 'BANK',   -- CASH, BANK, CREDIT
+  cash_code  TEXT,
+  note       TEXT,
+  user_id    INTEGER REFERENCES users(id),
+  posted_at  TEXT,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Nilai gaji disalin ke sini saat daftar disusun, tidak dibaca ulang dari master
+-- pengguna. Kalau dibaca ulang, menaikkan gaji seseorang hari ini akan diam-diam
+-- mengubah slip gaji bulan-bulan yang sudah dibayar.
+CREATE TABLE IF NOT EXISTS payroll_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  payroll_id  INTEGER NOT NULL REFERENCES payrolls(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES users(id),
+  base        REAL    NOT NULL DEFAULT 0,   -- gaji pokok
+  allowance   REAL    NOT NULL DEFAULT 0,   -- tunjangan tetap
+  overtime    REAL    NOT NULL DEFAULT 0,   -- lembur
+  bonus       REAL    NOT NULL DEFAULT 0,
+  deduction   REAL    NOT NULL DEFAULT 0,   -- potongan
+  net         REAL    NOT NULL DEFAULT 0,
+  -- Rekap presensi periode itu, dibekukan bersama slipnya.
+  hadir       INTEGER NOT NULL DEFAULT 0,
+  telat       INTEGER NOT NULL DEFAULT 0,
+  izin        INTEGER NOT NULL DEFAULT 0,
+  alpa        INTEGER NOT NULL DEFAULT 0,
+  note        TEXT,
+  UNIQUE (payroll_id, employee_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_period ON payrolls(period);
+CREATE INDEX IF NOT EXISTS idx_payitem_payroll ON payroll_items(payroll_id);
+CREATE INDEX IF NOT EXISTS idx_payitem_emp ON payroll_items(employee_id);
