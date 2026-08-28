@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -38,6 +38,7 @@ import Pembelian from './pages/Pembelian';
 import Rekening from './pages/Rekening';
 import TargetPencapaian from './pages/Target';
 import Penggajian from './pages/Penggajian';
+import Pencairan from './pages/Pencairan';
 import KinerjaProduk from './pages/KinerjaProduk';
 
 const NAV = [
@@ -81,6 +82,7 @@ const NAV = [
     items: [
       { to: '/penjualan', label: 'Order Penjualan', icon: ShoppingCart, izin: 'penjualan.lihat' },
       { to: '/penjualan/pengiriman', label: 'Papan Pengiriman', icon: Truck, izin: 'penjualan.lihat' },
+      { to: '/penjualan/pencairan', label: 'Pencairan Dana', icon: Hourglass, izin: 'penjualan.lihat' },
       { to: '/penjualan/analisis', label: 'Analisis Margin', icon: TrendingUp, izin: 'penjualan.margin' },
       { to: '/penjualan/retur', label: 'Retur Penjualan', icon: Undo2, izin: 'penjualan.retur' },
       { to: '/penjualan/toko', label: 'Toko / Marketplace', icon: Store, izin: 'penjualan.lihat' },
@@ -385,6 +387,7 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/penjualan/pencairan" element={<Dijaga izin="penjualan.lihat"><Pencairan /></Dijaga>} />
         <Route path="/presensi/penggajian" element={<Dijaga izin="penggajian.lihat"><Penggajian /></Dijaga>} />
         <Route path="/penjualan/target" element={<Dijaga izin="target.lihat"><TargetPencapaian /></Dijaga>} />
         <Route path="/gudang/kinerja" element={<Dijaga izin="gudang.kinerja"><KinerjaProduk /></Dijaga>} />

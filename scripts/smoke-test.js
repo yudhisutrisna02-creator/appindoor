@@ -1368,6 +1368,139 @@ async function main() {
 
   await call('DELETE', `/api/penggajian/${idGaji}`);
 
+  // ---------- Pencairan dana ----------
+  console.log('\n19. Pencairan dana marketplace');
+
+  const tokoCair = await call('POST', '/api/shops', {
+    name: `Toko Cair ${Date.now()}`, channel: 'SHOPEE',
+  });
+  const idTokoCair = (tokoCair.shop || tokoCair).id;
+
+  const produkCair = await call('POST', '/api/inventory/products', {
+    sku: `CAIR-${Date.now()}`, name: 'Uji Pencairan', category: 'Uji', unit: 'PCS',
+    cost: 10000, price: 25000,
+  });
+  await call('POST', '/api/inventory/moves', {
+    product_id: produkCair.product.id, move_date: today, move_type: 'IN',
+    qty: 30, unit_cost: 10000, note: 'Uji pencairan',
+  });
+
+  // Satu order baru dan satu order lama, supaya kelompok umurnya berbeda.
+  const orderBaru = await call('POST', '/api/sales', {
+    order_date: today, shop_id: idTokoCair, channel: 'SHOPEE',
+    items: [{ product_id: produkCair.product.id, qty: 4, price: 25000 }],
+    admin_fee: 10000, payment_status: 'UNPAID',
+  });
+  const tglLama = new Date(Date.now() - 20 * 86400000).toLocaleDateString('sv-SE');
+  const orderLama = await call('POST', '/api/sales', {
+    order_date: tglLama, shop_id: idTokoCair, channel: 'SHOPEE',
+    items: [{ product_id: produkCair.product.id, qty: 2, price: 25000 }],
+    payment_status: 'UNPAID',
+  });
+
+  const pcr = await call('GET', `/api/pencairan?asOf=${today}&from=${today.slice(0, 8)}01&to=${today}`);
+  const barisBaru = pcr.rows.find((o) => o.id === orderBaru.order.id);
+  const barisLama = pcr.rows.find((o) => o.id === orderLama.order.id);
+
+  check('order yang belum cair muncul di daftar', !!barisBaru && !!barisLama);
+  check('nilai yang akan diterima = pendapatan − potongan',
+    near(barisBaru.nilai, barisBaru.net_revenue - barisBaru.total_fees, 1),
+    `${barisBaru.nilai} vs ${barisBaru.net_revenue} − ${barisBaru.total_fees}`);
+  check('umur dana dihitung dari tanggal order',
+    barisBaru.umur_hari === 0 && barisLama.umur_hari === 20,
+    `${barisBaru.umur_hari} / ${barisLama.umur_hari}`);
+  check('kelompok umur ditentukan dari umurnya',
+    barisBaru.ember === '0-7' && barisLama.ember === '15-30',
+    `${barisBaru.ember} / ${barisLama.ember}`);
+  check('dana yang tertahan lebih dari 14 hari ditandai',
+    barisLama.perluDitanya === true && barisBaru.perluDitanya === false);
+
+  check('jumlah tiap kelompok umur = jumlah seluruh order',
+    pcr.perEmber.reduce((s2, e) => s2 + e.orders, 0) === pcr.rows.length);
+  const jumlahToko = pcr.perToko.reduce((s2, t) => s2 + t.nilai, 0);
+  check('nilai per toko = nilai seluruhnya',
+    near(jumlahToko, pcr.ringkas.nilai, 1), `${jumlahToko} vs ${pcr.ringkas.nilai}`);
+
+  // Inti layar ini: angkanya harus bisa dicocokkan dengan buku besar. Selisih
+  // yang tidak bisa dijelaskan berarti ada jurnal yang tidak seperti seharusnya.
+  const k = pcr.rekonsiliasi;
+  check('rekonsiliasi cocok dengan saldo Piutang Marketplace di buku besar',
+    k.cocok === true,
+    `belum cair ${k.nilaiBelumCair} − iklan saldo ${k.iklanPotongSaldo} = ${k.seharusnya}, buku ${k.saldoBuku}`);
+
+  // Iklan yang dibayar potong saldo mengurangi piutang tanpa menyentuh pesanan.
+  // Rekonsiliasinya harus tetap cocok sesudahnya, kalau tidak selisihnya akan
+  // muncul sebagai kesalahan yang sebenarnya bukan kesalahan.
+  await call('POST', '/api/iklan', {
+    spend_date: today, shop_id: idTokoCair, channel: 'SHOPEE',
+    amount: 30000, payment: 'SALDO', note: 'Uji potong saldo',
+  });
+  const pcr2 = await call('GET', `/api/pencairan?asOf=${today}`);
+  check('iklan potong saldo ikut diperhitungkan dalam rekonsiliasi',
+    pcr2.rekonsiliasi.cocok === true && pcr2.rekonsiliasi.iklanPotongSaldo >= 30000,
+    `iklan saldo ${pcr2.rekonsiliasi.iklanPotongSaldo}, selisih ${pcr2.rekonsiliasi.selisih}`);
+  check('nilai order yang belum cair tidak ikut berubah oleh iklan',
+    near(pcr2.rekonsiliasi.nilaiBelumCair, k.nilaiBelumCair, 1));
+
+  // Menandai cair memakai jalur yang sudah ada; jurnalnya harus ikut berpindah.
+  const nilaiTandai = barisLama.nilai;
+  const hasilTandai = await call('PATCH', '/api/sales/status-massal', {
+    ids: [orderLama.order.id],
+    fulfillment_status: 'CAIR',
+    payment_status: 'PAID',
+    payout_date: today,
+  });
+  check('order bisa ditandai cair', hasilTandai.berhasil === 1);
+
+  const pcr3 = await call('GET', `/api/pencairan?asOf=${today}&from=${today.slice(0, 8)}01&to=${today}`);
+  check('order yang sudah cair keluar dari daftar belum cair',
+    !pcr3.rows.some((o) => o.id === orderLama.order.id));
+  check('nilai belum cair berkurang persis sebesar order yang dicairkan',
+    near(pcr3.rekonsiliasi.nilaiBelumCair, pcr2.rekonsiliasi.nilaiBelumCair - nilaiTandai, 1),
+    `${pcr3.rekonsiliasi.nilaiBelumCair} vs ${pcr2.rekonsiliasi.nilaiBelumCair} − ${nilaiTandai}`);
+  check('rekonsiliasi tetap cocok setelah dana dicairkan',
+    pcr3.rekonsiliasi.cocok === true,
+    `selisih ${pcr3.rekonsiliasi.selisih}`);
+  check('order yang cair masuk ringkasan pencairan periode ini',
+    pcr3.ringkas.cairOrders >= 1 && pcr3.ringkas.cairNilai >= nilaiTandai - 1,
+    `${pcr3.ringkas.cairOrders} order, ${pcr3.ringkas.cairNilai}`);
+
+  // Order yang dibatalkan bukan piutang; ikut menghitungnya akan membuat
+  // uang yang tidak akan pernah datang tampak seolah sedang ditahan.
+  const orderBatal = await call('POST', '/api/sales', {
+    order_date: today, shop_id: idTokoCair, channel: 'SHOPEE',
+    items: [{ product_id: produkCair.product.id, qty: 1, price: 25000 }],
+    payment_status: 'UNPAID',
+  });
+  await call('DELETE', `/api/sales/${orderBatal.order.id}`);
+  const pcr4 = await call('GET', `/api/pencairan?asOf=${today}`);
+  check('order yang dibatalkan tidak dihitung sebagai dana ditahan',
+    !pcr4.rows.some((o) => o.id === orderBatal.order.id) && pcr4.rekonsiliasi.cocok === true);
+
+  // Status bayar dan tanggal cair yang tidak sejalan tidak merusak pembukuan,
+  // tetapi membuat umur dana keliru — jadi harus kelihatan, bukan didiamkan.
+  check('order yang sejalan tidak dilaporkan sebagai janggal',
+    !pcr4.takSejalan.some((o) => o.id === orderBaru.order.id));
+  await call('PUT', `/api/sales/${orderBaru.order.id}`, { payout_date: today });
+  const pcr5 = await call('GET', `/api/pencairan?asOf=${today}`);
+  check('order belum lunas tapi punya tanggal cair terdeteksi janggal',
+    pcr5.takSejalan.some((o) => o.id === orderBaru.order.id),
+    `${pcr5.takSejalan.length} janggal`);
+  check('order janggal tetap dihitung sebagai dana ditahan',
+    pcr5.rows.some((o) => o.id === orderBaru.order.id) && pcr5.rekonsiliasi.cocok === true);
+  await call('PUT', `/api/sales/${orderBaru.order.id}`, { payout_date: null });
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/pencairan/export/${bentuk}?asOf=${today}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`pencairan bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
+      `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
