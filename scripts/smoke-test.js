@@ -1918,6 +1918,71 @@ async function main() {
     perhatianGudang.rows.map((b) => b.izin).join(' | '));
   token = adminLagi;
 
+  // ---------- Proyeksi arus kas ----------
+  console.log('\n24. Proyeksi arus kas');
+
+  const proy = await call('GET', '/api/proyeksi?minggu=8');
+  check('proyeksi tersusun sebanyak minggu yang diminta',
+    proy.rows.length === 8 && proy.minggu === 8, `${proy.rows.length} minggu`);
+
+  // Titik mulainya harus kas yang sebenarnya, bukan angka lain.
+  const rekProy = await call('GET', `/api/cashflow/rekening?asOf=${today}`);
+  const kasNyata = rekProy.rows.reduce((s, a) => s + a.saldo, 0);
+  check('saldo awal = jumlah seluruh rekening kas & bank',
+    near(proy.ringkas.saldoAwal, kasNyata, 1),
+    `${proy.ringkas.saldoAwal} vs ${kasNyata}`);
+
+  // Saldo tiap minggu harus benar-benar berjalan dari minggu sebelumnya.
+  let jalan = proy.mulai.saldo;
+  const runut = proy.rows.every((b) => {
+    jalan = Math.round((jalan + b.totalMasuk - b.totalKeluar) * 100) / 100;
+    return near(jalan, b.saldoAkhir, 1);
+  });
+  check('saldo berjalan runut dari minggu ke minggu', runut);
+  check('bersih tiap minggu = masuk dikurangi keluar',
+    proy.rows.every((b) => near(b.bersih, b.totalMasuk - b.totalKeluar, 1)));
+  check('total masuk & keluar = jumlah tiap minggunya',
+    near(proy.ringkas.totalMasuk, proy.rows.reduce((s, b) => s + b.totalMasuk, 0), 1) &&
+    near(proy.ringkas.totalKeluar, proy.rows.reduce((s, b) => s + b.totalKeluar, 0), 1));
+
+  // Minggu tidak boleh bertumpuk atau berlubang: satu hari hanya boleh masuk
+  // satu minggu, kalau tidak uang yang sama terhitung dua kali.
+  check('minggu bersambung tanpa celah',
+    proy.rows.every((b, i) => i === 0 || b.dari === new Date(
+      Date.parse(`${proy.rows[i - 1].sampai}T00:00:00Z`) + 86400000
+    ).toISOString().slice(0, 10)));
+
+  // Dana marketplace yang belum cair harus seluruhnya muncul sebagai uang masuk
+  // bila jangkanya cukup panjang; kalau ada yang hilang, proyeksinya
+  // meremehkan uang yang akan datang.
+  const pencairanBanding = await call('GET', `/api/pencairan?asOf=${today}`);
+  const proyPanjang = await call('GET', '/api/proyeksi?minggu=26');
+  const masukTotal = proyPanjang.rows.reduce(
+    (s, b) => s + (b.masuk.find((m) => m.sumber === 'Pencairan marketplace') || { nilai: 0 }).nilai, 0
+  );
+  check('seluruh dana belum cair muncul di garis waktu',
+    near(masukTotal, pencairanBanding.ringkas.nilai, 2),
+    `${masukTotal} vs ${pencairanBanding.ringkas.nilai}`);
+
+  check('asumsi disebutkan beserta dasarnya',
+    proy.asumsi.length >= 4 && proy.asumsi.every((a) => a.label && a.dasar));
+  check('batas perkiraan disebutkan apa adanya',
+    Array.isArray(proy.tidakDihitung) && proy.tidakDihitung.length >= 3);
+
+  // Jangka diminta di luar batas harus dijepit, bukan diikuti apa adanya.
+  const terlaluPanjang = await call('GET', '/api/proyeksi?minggu=999');
+  check('jangka proyeksi dijepit pada batas yang masuk akal',
+    terlaluPanjang.minggu === 26, `${terlaluPanjang.minggu} minggu`);
+
+  for (const bentuk of ['excel', 'csv', 'pdf']) {
+    const res = await fetch(`${BASE}/api/proyeksi/export/${bentuk}?minggu=8`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`proyeksi bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 200, `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

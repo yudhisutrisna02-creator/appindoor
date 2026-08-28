@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -42,6 +42,7 @@ import Pencairan from './pages/Pencairan';
 import DokumenTerbit from './pages/DokumenTerbit';
 import Cadangan from './pages/Cadangan';
 import Perhatian from './pages/Perhatian';
+import Proyeksi from './pages/Proyeksi';
 import Verifikasi from './pages/Verifikasi';
 import KinerjaProduk from './pages/KinerjaProduk';
 
@@ -103,6 +104,7 @@ const NAV = [
     items: [
       { to: '/keuangan/rekening', label: 'Rekening Kas & Bank', icon: Landmark, izin: 'keuangan.lihat' },
       { to: '/keuangan/kas', label: 'Kas Masuk & Keluar', icon: Wallet, izin: 'keuangan.kas' },
+      { to: '/keuangan/proyeksi', label: 'Proyeksi Arus Kas', icon: TrendingDown, izin: 'keuangan.lihat' },
       { to: '/keuangan/utang-piutang', label: 'Utang & Piutang', icon: HandCoins, izin: 'keuangan.lihat' },
       { to: '/keuangan/laporan', label: 'Laporan Keuangan', icon: FileBarChart2, izin: 'keuangan.lihat' },
       { to: '/keuangan/jurnal', label: 'Buku Besar & Jurnal', icon: BookOpenCheck, izin: 'keuangan.lihat' },
@@ -411,6 +413,7 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/keuangan/proyeksi" element={<Dijaga izin="keuangan.lihat"><Proyeksi /></Dijaga>} />
         <Route path="/perhatian" element={<Perhatian />} />
         <Route path="/sistem/cadangan" element={<Dijaga izin="sistem.cadangan"><Cadangan /></Dijaga>} />
         <Route path="/sistem/dokumen" element={<Dijaga izin="sistem.dokumen"><DokumenTerbit /></Dijaga>} />

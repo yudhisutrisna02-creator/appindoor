@@ -155,6 +155,7 @@ app.use('/api/iklan', halaman('iklan.lihat'), require('./src/routes/iklan').rout
 app.use('/api/pembelian', halaman('pembelian.lihat'), require('./src/routes/pembelian'));
 app.use('/api/partners', halaman('mitra.lihat'), require('./src/routes/partners').router);
 app.use('/api/cashflow', halaman('keuangan.lihat'), require('./src/routes/cashflow'));
+app.use('/api/proyeksi', halaman('keuangan.lihat'), require('./src/routes/proyeksi'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/peran', require('./src/routes/peran'));
 // Identitas perusahaan boleh dibaca sebelum masuk — halaman login perlu logonya.
