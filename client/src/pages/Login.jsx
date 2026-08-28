@@ -28,7 +28,7 @@ export default function Login() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-gradient-to-br from-slate-900 via-slate-800 to-brand-900 px-4 py-10">
+    <div className="grid min-h-screen place-items-center bg-gradient-to-br from-ink-900 via-ink-800 to-brand-900 px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 w-fit rounded-2xl shadow-lg">
@@ -38,7 +38,7 @@ export default function Login() {
           <p className="mt-1 text-sm text-slate-300">{identitas.tagline || MODUL_APP}</p>
         </div>
 
-        <form onSubmit={onSubmit} className="rounded-2xl bg-white p-6 shadow-2xl">
+        <form onSubmit={onSubmit} className="rounded-2xl bg-surface p-6 shadow-2xl">
           <div className="mb-4">
             <label className="label" htmlFor="email">Email</label>
             <input

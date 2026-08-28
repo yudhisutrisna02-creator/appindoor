@@ -2,6 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Skala netral sebagai variabel.
+ *
+ * Tema gelap membalik urutannya: yang paling terang menjadi paling gelap.
+ * Dengan begitu text-slate-900 yang dipakai untuk tulisan utama tetap paling
+ * kontras terhadap latarnya pada kedua tema, tanpa satu pun halaman perlu
+ * diubah. Nilai tengah (400–500) sengaja tidak dibalik persis: tulisan
+ * sekunder di atas latar gelap perlu sedikit lebih terang agar tetap terbaca.
+ */
+:root {
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+  --slate-950: 2 6 23;
+  --surface: 255 255 255;
+  color-scheme: light;
+}
+
+.dark {
+  --slate-50: 30 41 59;
+  --slate-100: 15 23 42;
+  --slate-200: 51 65 85;
+  --slate-300: 71 85 105;
+  --slate-400: 129 143 165;
+  --slate-500: 156 168 188;
+  --slate-600: 190 200 215;
+  --slate-700: 214 222 233;
+  --slate-800: 233 238 245;
+  --slate-900: 245 248 252;
+  --slate-950: 255 255 255;
+  --surface: 30 41 59;
+  color-scheme: dark;
+}
+
+/**
+ * Permukaan yang selalu gelap pada kedua tema — sidebar dan panel ringkasan.
+ *
+ * Skala netral di dalamnya dikembalikan ke nilai tema terang, karena di sanalah
+ * slate-300 berarti abu muda yang terbaca di atas latar gelap. Tanpa ini, tema
+ * gelap membalik skalanya juga, dan tulisan menu berubah menjadi abu tua di
+ * atas latar tua — nyaris tidak terbaca.
+ */
+.di-atas-gelap {
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+  --slate-950: 2 6 23;
+  color-scheme: dark;
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
@@ -19,7 +83,7 @@
 
 @layer components {
   .card {
-    @apply rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 sm:p-5;
+    @apply rounded-2xl bg-surface p-4 shadow-sm ring-1 ring-slate-200/70 sm:p-5;
   }
   .card-title {
     @apply text-sm font-semibold uppercase tracking-wide text-slate-500;
@@ -33,7 +97,7 @@
     @apply btn bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20;
   }
   .btn-secondary {
-    @apply btn bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50;
+    @apply btn bg-surface text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50;
   }
   .btn-danger {
     @apply btn bg-rose-600 text-white hover:bg-rose-700;
@@ -43,7 +107,7 @@
   }
 
   .input {
-    @apply w-full rounded-xl border-0 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm
+    @apply w-full rounded-xl border-0 bg-surface px-3.5 py-2.5 text-sm text-slate-900 shadow-sm
            ring-1 ring-inset ring-slate-300 placeholder:text-slate-400
            focus:ring-2 focus:ring-inset focus:ring-brand-600;
   }
@@ -83,9 +147,21 @@
   .badge {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
   }
-  .badge-green { @apply badge bg-emerald-100 text-emerald-700; }
-  .badge-red   { @apply badge bg-rose-100 text-rose-700; }
-  .badge-amber { @apply badge bg-amber-100 text-amber-700; }
-  .badge-blue  { @apply badge bg-brand-100 text-brand-700; }
+  /* Pada tema gelap latarnya dibuat transparan agar tidak menyilaukan, dengan
+     tulisan yang justru dicerahkan — badge berlatar terang di layar gelap
+     menarik perhatian jauh melebihi kepentingannya. */
+  .badge-green { @apply badge bg-emerald-100 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300; }
+  .badge-red   { @apply badge bg-rose-100 text-rose-700 dark:bg-rose-400/15 dark:text-rose-300; }
+  .badge-amber { @apply badge bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300; }
+  .badge-blue  { @apply badge bg-brand-100 text-brand-700 dark:bg-brand-400/15 dark:text-brand-300; }
   .badge-slate { @apply badge bg-slate-200 text-slate-700; }
 }
+
+/* Warna angka untung/rugi ikut dicerahkan agar tetap terbaca di layar gelap. */
+.dark .text-emerald-600 { color: rgb(52 211 153); }
+.dark .text-emerald-700 { color: rgb(52 211 153); }
+.dark .text-rose-600 { color: rgb(251 113 133); }
+.dark .text-rose-700 { color: rgb(251 113 133); }
+.dark .text-amber-600 { color: rgb(251 191 36); }
+.dark .text-amber-700 { color: rgb(251 191 36); }
+.dark .text-brand-600 { color: rgb(138 194 255); }

@@ -35,7 +35,7 @@ export default function Pengaturan() {
     <div>
       <PageHeader title="Pengaturan" subtitle="Konfigurasi perusahaan, geofencing, dan pengguna" />
 
-      <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">
+      <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-surface p-1.5 shadow-sm ring-1 ring-slate-200/70">
         {TABS.filter((t) => !IZIN_TAB[t.key] || punya(...IZIN_TAB[t.key])).map((t) => (
           <button
             key={t.key} onClick={() => setTab(t.key)}

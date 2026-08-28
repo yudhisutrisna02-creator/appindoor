@@ -4,11 +4,13 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
+  Sun, Moon, MonitorSmartphone,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
 import { NAMA_APP } from './lib/brand';
 import { LogoPerusahaan, useBranding } from './lib/branding';
+import { useTema } from './lib/tema';
 import { Spinner } from './components/ui';
 
 import Login from './pages/Login';
@@ -146,7 +148,7 @@ function Sidebar({ onNavigate }) {
   }
 
   return (
-    <div className="flex h-full flex-col bg-slate-900 text-slate-300">
+    <div className="di-atas-gelap flex h-full flex-col bg-ink-900 text-slate-300">
       <div className="flex items-center gap-2.5 px-5 py-5">
         <LogoPerusahaan ukuran={36} />
         <div className="min-w-0">
@@ -168,7 +170,7 @@ function Sidebar({ onNavigate }) {
                   type="button"
                   onClick={() => toggle(group.key)}
                   aria-expanded={!tertutup}
-                  className="mb-1.5 flex w-full items-center gap-1.5 rounded-lg px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition hover:bg-slate-800/70 hover:text-slate-300"
+                  className="mb-1.5 flex w-full items-center gap-1.5 rounded-lg px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition hover:bg-ink-800/70 hover:text-slate-300"
                 >
                   <ChevronDown
                     size={13}
@@ -195,7 +197,7 @@ function Sidebar({ onNavigate }) {
                     onClick={onNavigate}
                     className={({ isActive }) =>
                       `mb-0.5 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
-                        isActive ? 'bg-brand-600 text-white shadow-sm' : 'hover:bg-slate-800 hover:text-white'
+                        isActive ? 'bg-brand-600 text-white shadow-sm' : 'hover:bg-ink-800 hover:text-white'
                       }`
                     }
                   >
@@ -208,19 +210,60 @@ function Sidebar({ onNavigate }) {
         })}
       </nav>
 
-      <div className="border-t border-slate-800 p-3">
+      <div className="border-t border-ink-800 p-3">
         <div className="mb-2 px-2">
           <p className="truncate text-sm font-semibold text-white">{user?.name}</p>
           <p className="truncate text-[11px] capitalize text-slate-400">
             {user?.role} {user?.position ? `• ${user.position}` : ''}
           </p>
         </div>
+        <PilihTema />
+
         <button
           onClick={logout}
-          className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-rose-300 transition hover:bg-rose-500/10"
+          className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-rose-300 transition hover:bg-rose-500/10"
         >
           <LogOut size={17} /> Keluar
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Pemilih tema.
+ *
+ * Tiga pilihan, bukan satu sakelar dua arah: "ikuti perangkat" perlu bisa
+ * dipilih kembali. Sakelar dua arah memaksa orang memilih terang atau gelap
+ * selamanya, padahal sebagian ingin aplikasinya berganti sendiri saat ponselnya
+ * beralih ke mode malam.
+ */
+function PilihTema() {
+  const { pilihan, setPilihan } = useTema();
+  const opsi = [
+    { nilai: 'terang', label: 'Terang', icon: Sun },
+    { nilai: 'gelap', label: 'Gelap', icon: Moon },
+    { nilai: 'sistem', label: 'Ikuti perangkat', icon: MonitorSmartphone },
+  ];
+
+  return (
+    <div className="mb-1 rounded-xl bg-ink-800/60 p-1">
+      <div className="flex gap-0.5">
+        {opsi.map((o) => (
+          <button
+            key={o.nilai}
+            type="button"
+            onClick={() => setPilihan(o.nilai)}
+            title={o.label}
+            aria-label={`Tema ${o.label}`}
+            aria-pressed={pilihan === o.nilai}
+            className={`flex flex-1 items-center justify-center rounded-lg py-1.5 transition ${
+              pilihan === o.nilai ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <o.icon size={15} />
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -244,7 +287,7 @@ function Layout({ children }) {
       {/* Drawer mobile */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/60" onClick={() => setOpen(false)} />
+          <div className="absolute inset-0 bg-ink-900/60" onClick={() => setOpen(false)} />
           <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] shadow-2xl">
             <Sidebar onNavigate={() => setOpen(false)} />
           </aside>
@@ -253,7 +296,7 @@ function Layout({ children }) {
 
       <div className="min-w-0 flex-1">
         {/* Topbar mobile */}
-        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
+        <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-slate-200 bg-surface/95 px-4 py-3 backdrop-blur lg:hidden">
           <button onClick={() => setOpen(true)} className="btn-ghost !px-2 !py-2" aria-label="Buka menu">
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -276,7 +319,7 @@ function Layout({ children }) {
 function Terlarang({ izin }) {
   return (
     <div className="grid min-h-[60vh] place-items-center px-4">
-      <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
+      <div className="max-w-md rounded-2xl bg-surface p-6 text-center shadow-sm ring-1 ring-slate-200">
         <h1 className="mb-1 text-lg font-bold text-slate-900">Halaman ini tidak terbuka untuk peran Anda</h1>
         <p className="text-sm text-slate-600">
           Diperlukan hak akses <span className="font-mono text-xs">{[].concat(izin).join(' atau ')}</span>.

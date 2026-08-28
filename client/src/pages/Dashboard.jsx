@@ -151,7 +151,7 @@ export default function Dashboard() {
       <DateRangeFilter range={range} onChange={setRange} />
 
       {/* ---------- TAB ---------- */}
-      <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">
+      <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-surface p-1.5 shadow-sm ring-1 ring-slate-200/70">
         {[
           { key: 'penjualan', label: 'Penjualan', icon: ShoppingCart },
           { key: 'presensi', label: 'Presensi', icon: Users },

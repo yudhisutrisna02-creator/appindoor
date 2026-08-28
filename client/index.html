@@ -9,6 +9,19 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <title>ERP System Indoor — Grha Indonesia Organik</title>
+    <script>
+      // Dijalankan sebelum React agar layar tidak sempat berkedip putih saat
+      // aplikasi dibuka dalam tema gelap.
+      (function () {
+        try {
+          var p = localStorage.getItem('erp-tema') || 'sistem';
+          var gelap = p === 'gelap' ||
+            (p === 'sistem' && window.matchMedia &&
+             window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (gelap) document.documentElement.classList.add('dark');
+        } catch (e) { /* mode privat — biarkan tema terang */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

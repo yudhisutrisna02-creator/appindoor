@@ -27,7 +27,7 @@ export function ToastProvider({ children }) {
   const STYLES = {
     success: 'bg-emerald-600',
     error: 'bg-rose-600',
-    info: 'bg-slate-800',
+    info: 'bg-ink-800',
   };
 
   return (
@@ -137,9 +137,9 @@ export function Modal({ open, onClose, title, children, wide = false }) {
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-900/50 p-0 sm:items-center sm:p-4">
       <div
-        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl ${
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl ${
           wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'
         }`}
       >

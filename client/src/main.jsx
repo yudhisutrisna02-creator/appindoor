@@ -5,11 +5,13 @@ import App from './App';
 import { AuthProvider } from './lib/auth';
 import { ToastProvider } from './components/ui';
 import { BrandingProvider } from './lib/branding';
+import { TemaProvider } from './lib/tema';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
+      <TemaProvider>
       <ToastProvider>
         <BrandingProvider>
         <AuthProvider>
@@ -17,6 +19,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         </AuthProvider>
         </BrandingProvider>
       </ToastProvider>
+      </TemaProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

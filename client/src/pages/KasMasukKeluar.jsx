@@ -279,7 +279,7 @@ export default function KasMasukKeluar() {
             </Field>
 
             {form.amount > 0 && form.category_code && form.cash_code && (
-              <p className="rounded-xl bg-slate-900 p-3 text-xs text-slate-200 sm:col-span-2">
+              <p className="di-atas-gelap rounded-xl bg-ink-900 p-3 text-xs text-slate-200 sm:col-span-2">
                 Jurnal yang akan terbentuk:
                 <br />
                 {form.direction === 'IN' ? (

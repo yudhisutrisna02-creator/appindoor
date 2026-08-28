@@ -128,7 +128,7 @@ export default function Jurnal() {
         <TombolEkspor path="/api/finance/journals" params={range} nama="buku-besar-jurnal" />
       </PageHeader>
 
-      <div className="mb-4 flex gap-1.5 rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">
+      <div className="mb-4 flex gap-1.5 rounded-xl bg-surface p-1.5 shadow-sm ring-1 ring-slate-200/70">
         {[
           { key: 'journals', label: 'Jurnal Umum', icon: BookOpenCheck },
           { key: 'ledger', label: 'Buku Besar per Akun', icon: Scale },

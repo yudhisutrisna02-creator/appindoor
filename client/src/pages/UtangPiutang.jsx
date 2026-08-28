@@ -112,7 +112,7 @@ export default function UtangPiutang() {
             />
           </div>
 
-          <div className="mb-4 flex gap-1.5 rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">
+          <div className="mb-4 flex gap-1.5 rounded-xl bg-surface p-1.5 shadow-sm ring-1 ring-slate-200/70">
             {[
               { key: 'piutang', label: `Piutang (${data.piutang.length})`, icon: Receipt },
               { key: 'utang', label: `Utang (${data.utang.length})`, icon: HandCoins },

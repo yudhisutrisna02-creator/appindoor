@@ -60,7 +60,7 @@ export default function LaporanKeuangan() {
         <button className="btn-secondary" onClick={() => download('pdf')}><FileText size={16} /> PDF</button>
       </PageHeader>
 
-      <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200/70">
+      <div className="mb-4 flex gap-1.5 overflow-x-auto rounded-xl bg-surface p-1.5 shadow-sm ring-1 ring-slate-200/70">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -164,7 +164,7 @@ function IncomeStatement({ rep }) {
           </>
         )}
 
-        <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3.5 text-white">
+        <div className="di-atas-gelap mt-4 flex items-center justify-between rounded-xl bg-ink-900 px-4 py-3.5 text-white">
           <span className="font-bold">LABA BERSIH</span>
           <span className={`tabular text-lg font-bold ${rep.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {rupiah(rep.netProfit)} <span className="text-sm">({pct(rep.netMarginPct)})</span>
@@ -226,7 +226,7 @@ function BalanceSheet({ rep }) {
           <Line label="Laba Berjalan" value={rep.equity.currentEarnings} indent tone={rep.equity.currentEarnings >= 0 ? 'green' : 'red'} />
           <Line label="Total Ekuitas" value={rep.equity.total} bold />
 
-          <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3 font-bold text-white">
+          <div className="di-atas-gelap mt-3 flex items-center justify-between rounded-xl bg-ink-900 px-4 py-3 font-bold text-white">
             <span>TOTAL KEWAJIBAN + EKUITAS</span>
             <span className="tabular">{rupiah(rep.totalLiabilitiesAndEquity)}</span>
           </div>
@@ -273,7 +273,7 @@ function CashFlow({ rep }) {
 
         <Line label="KENAIKAN (PENURUNAN) KAS BERSIH" value={rep.netChange} bold big />
         <Line label="Kas Awal Periode" value={rep.openingCash} indent />
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3.5 font-bold text-white">
+        <div className="di-atas-gelap mt-3 flex items-center justify-between rounded-xl bg-ink-900 px-4 py-3.5 font-bold text-white">
           <span>KAS AKHIR PERIODE</span>
           <span className="tabular text-lg">{rupiah(rep.closingCash)}</span>
         </div>

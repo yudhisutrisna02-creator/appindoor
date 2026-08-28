@@ -240,7 +240,7 @@ export default function Presensi() {
               )}
             </div>
 
-            <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-900">
+            <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-ink-900">
               {photo ? (
                 <img src={photo} alt="Hasil selfie presensi" className="h-full w-full object-cover" />
               ) : (

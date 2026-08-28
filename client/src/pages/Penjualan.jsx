@@ -520,7 +520,7 @@ export default function Penjualan() {
 
             {/* Ringkasan margin real-time */}
             {calc && (
-              <div className="mb-4 rounded-xl bg-slate-900 p-4 text-white">
+              <div className="di-atas-gelap mb-4 rounded-xl bg-ink-900 p-4 text-white">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Kalkulasi Margin Real-Time</p>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
                   <SumRow label="Penjualan Kotor" value={calc.gross} />
@@ -530,7 +530,7 @@ export default function Penjualan() {
                   <SumRow label="Pendapatan Bersih" value={calc.netReceived} bold />
                   <SumRow label="HPP" value={-calc.cogs} />
                 </div>
-                <div className="mt-3 flex items-center justify-between border-t border-slate-700 pt-3">
+                <div className="mt-3 flex items-center justify-between border-t border-ink-700 pt-3">
                   <span className="text-sm font-semibold">LABA BERSIH</span>
                   <span className={`tabular text-lg font-bold ${calc.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {rupiah(calc.netProfit)} <span className="text-sm font-medium">({calc.marginPct.toFixed(2)}%)</span>
@@ -607,7 +607,7 @@ export default function Penjualan() {
               </dl>
             </div>
 
-            <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3 text-white">
+            <div className="di-atas-gelap mt-4 flex items-center justify-between rounded-xl bg-ink-900 px-4 py-3 text-white">
               <span className="font-semibold">LABA BERSIH</span>
               <span className={`tabular text-lg font-bold ${detail.order.net_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {rupiah(detail.order.net_profit)} ({pct(detail.order.margin_pct)})
