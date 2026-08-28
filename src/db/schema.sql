@@ -481,3 +481,39 @@ CREATE TABLE IF NOT EXISTS document_signatures (
 
 CREATE INDEX IF NOT EXISTS idx_ttd_token ON document_signatures(token);
 CREATE INDEX IF NOT EXISTS idx_ttd_kind ON document_signatures(kind, ref_id);
+
+-- ---------- RIWAYAT PERUBAHAN ----------
+-- Dicatat oleh satu middleware untuk SETIAP permintaan yang mengubah data,
+-- bukan dipasang satu per satu di tiap endpoint. Dipasang satu per satu berarti
+-- endpoint berikutnya yang dibuat akan lupa dicatat, dan kelalaian itu tidak
+-- menimbulkan galat apa pun sampai ada yang mencarinya dan tidak menemukannya.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  at         TEXT    NOT NULL DEFAULT (datetime('now')),
+  user_id    INTEGER REFERENCES users(id),
+  user_name  TEXT,             -- disalin agar riwayat tetap terbaca bila akunnya dihapus
+  method     TEXT    NOT NULL,
+  path       TEXT    NOT NULL,
+  modul      TEXT,             -- bagian pertama path, mis. "sales"
+  status     INTEGER NOT NULL,
+  berhasil   INTEGER NOT NULL DEFAULT 1,
+  ringkas    TEXT,             -- pesan dari jawaban, mis. "Order SO/2026-08/0007 diubah"
+  isi        TEXT,             -- badan permintaan setelah disaring
+  ip         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_modul ON audit_log(modul);
+
+-- ---------- TUTUP BUKU ----------
+-- Bulan yang sudah dilaporkan dikunci agar angkanya tidak berubah diam-diam
+-- setelah dipakai mengambil keputusan. Penjagaannya dipasang di postJournal —
+-- satu-satunya pintu menuju buku besar — sehingga tidak ada modul yang bisa
+-- melewatinya, termasuk modul yang dibuat kemudian.
+CREATE TABLE IF NOT EXISTS period_locks (
+  period    TEXT PRIMARY KEY,          -- YYYY-MM
+  locked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  locked_by INTEGER REFERENCES users(id),
+  note      TEXT
+);

@@ -1983,6 +1983,158 @@ async function main() {
       res.ok && buf.length > 200, `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Riwayat perubahan & tutup buku ----------
+  console.log('\n25. Riwayat perubahan & tutup buku');
+
+  const tokoJejak = await call('POST', '/api/shops', {
+    name: `Toko Jejak ${Date.now()}`, channel: 'SHOPEE',
+  });
+  const riwayat = await call('GET', `/api/riwayat?from=${today}&to=${today}&limit=500`);
+  const jejakToko = riwayat.rows.find(
+    (r) => r.method === 'POST' && r.path === '/api/shops' && r.status < 400
+  );
+  check('perubahan tercatat tanpa perlu dipasang di endpointnya',
+    !!jejakToko && jejakToko.aksi === 'Tambah', jejakToko && jejakToko.path);
+  check('riwayat menyebut siapa pelakunya',
+    !!jejakToko && !!jejakToko.user_name && !!jejakToko.user_id);
+  check('membaca laporan tidak ikut dicatat',
+    !riwayat.rows.some((r) => r.method === 'GET'));
+
+  // Kata sandi tidak boleh ikut tersimpan — riwayat yang menyimpannya berubah
+  // dari catatan pengaman menjadi kebocoran.
+  const akunJejak = await call('POST', '/api/admin/users', {
+    name: 'Uji Jejak', email: `jejak-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
+    role: 'staff',
+  });
+  const riwayat2 = await call('GET', `/api/riwayat?from=${today}&to=${today}&limit=500`);
+  const jejakAkun = riwayat2.rows.find(
+    (r) => r.method === 'POST' && r.path === '/api/admin/users' && r.status < 400
+  );
+  check('badan permintaan ikut tersimpan', !!jejakAkun && !!jejakAkun.isi);
+  check('kata sandi tidak ikut tersimpan di riwayat',
+    !!jejakAkun && jejakAkun.isi.password === '[disembunyikan]'
+      && !JSON.stringify(jejakAkun.isi).includes('RahasiaKuat1'),
+    JSON.stringify(jejakAkun && jejakAkun.isi));
+
+  // Permintaan yang ditolak juga harus tercatat: percobaan yang gagal justru
+  // yang paling perlu terlihat.
+  try {
+    await call('POST', '/api/shops', { name: '', channel: 'SHOPEE' });
+  } catch { /* memang diharapkan gagal */ }
+  const riwayat3 = await call('GET', `/api/riwayat?from=${today}&to=${today}&hanyaGagal=1&limit=500`);
+  check('permintaan yang ditolak ikut tercatat',
+    riwayat3.rows.length > 0 && riwayat3.rows.every((r) => !r.berhasil),
+    `${riwayat3.rows.length} baris`);
+
+  // --- Tutup buku ---
+  const periodeAwal = await call('GET', '/api/riwayat/periode');
+  check('bulan berjurnal terdaftar', periodeAwal.rows.length > 0);
+  check('bulan berjalan ditandai sebagai sedang berjalan',
+    periodeAwal.rows.some((p) => p.berjalan === true));
+
+  let tolakTutupBerjalan = 0;
+  try {
+    await call('POST', '/api/riwayat/periode/kunci', { period: today.slice(0, 7) });
+  } catch (err) {
+    tolakTutupBerjalan = err.status;
+  }
+  check('bulan yang sedang berjalan tidak bisa ditutup',
+    tolakTutupBerjalan === 422, `status ${tolakTutupBerjalan}`);
+
+  // Tutup bulan lama, lalu pastikan pintu ke buku besar benar-benar terkunci.
+  const bulanLama = `${Number(today.slice(0, 4)) - 3}-06`;
+  const tutup = await call('POST', '/api/riwayat/periode/kunci', {
+    period: bulanLama, note: 'Uji tutup buku',
+  });
+  check('bulan lama bisa ditutup', tutup.ok);
+
+  const coa = await call('GET', '/api/finance/accounts');
+  const akunKas = coa.accounts.find((a) => a.code === '1000');
+  const akunModal = coa.accounts.find((a) => a.code === '3000');
+  const barisUji = (nominal) => [
+    { account_id: akunKas.id, debit: nominal, credit: 0 },
+    { account_id: akunModal.id, debit: 0, credit: nominal },
+  ];
+
+  let tolakJurnal = 0;
+  try {
+    await call('POST', '/api/finance/journals', {
+      entry_date: `${bulanLama}-15`,
+      description: 'Uji jurnal pada bulan tertutup',
+      lines: barisUji(50000),
+    });
+  } catch (err) {
+    tolakJurnal = err.status;
+  }
+  check('jurnal pada bulan yang sudah ditutup ditolak',
+    tolakJurnal === 409, `status ${tolakJurnal}`);
+
+  // Penjagaannya harus berlaku untuk SEMUA modul, bukan cuma jurnal manual.
+  let tolakKas = 0;
+  try {
+    await call('POST', '/api/cashflow/entries', {
+      entry_date: `${bulanLama}-20`, direction: 'OUT', amount: 25000,
+      category_code: '6190', cash_code: '1000',
+      description: 'Uji kas pada bulan tertutup',
+    });
+  } catch (err) {
+    tolakKas = err.status;
+  }
+  check('kas keluar pada bulan yang sudah ditutup juga ditolak',
+    tolakKas === 409, `status ${tolakKas}`);
+
+  let tolakOrder = 0;
+  try {
+    await call('POST', '/api/sales', {
+      order_date: `${bulanLama}-10`, channel: 'SHOPEE',
+      items: [{ product_id: produkCair.product.id, qty: 1, price: 25000 }],
+    });
+  } catch (err) {
+    tolakOrder = err.status;
+  }
+  check('order penjualan pada bulan yang sudah ditutup juga ditolak',
+    tolakOrder === 409, `status ${tolakOrder}`);
+
+  // Bulan lain tidak boleh ikut terkunci.
+  const jurnalBulanLain = await call('POST', '/api/finance/journals', {
+    entry_date: today,
+    description: 'Uji jurnal bulan terbuka',
+    lines: barisUji(1000),
+  });
+  check('bulan lain tetap bisa menerima jurnal', !!jurnalBulanLain.journal || jurnalBulanLain.ok);
+
+  const periodeKunci = await call('GET', '/api/riwayat/periode');
+  // Bulan bisa ditutup sebelum ada jurnalnya; ia tetap harus muncul di daftar,
+  // kalau tidak ia terkunci tanpa ada cara membukanya kembali lewat layar.
+  check('bulan tertutup muncul di daftar walau belum punya jurnal, beserta pelakunya',
+    periodeKunci.rows.some((p) => p.period === bulanLama && p.terkunci && p.oleh),
+    JSON.stringify(periodeKunci.rows.find((p) => p.period === bulanLama)));
+
+  const bukaLagi = await call('DELETE', `/api/riwayat/periode/${bulanLama}`);
+  check('tutup buku bisa dibuka kembali', bukaLagi.ok);
+
+  const setelahBuka = await call('POST', '/api/finance/journals', {
+    entry_date: `${bulanLama}-15`,
+    description: 'Uji jurnal setelah buku dibuka',
+    lines: barisUji(50000),
+  });
+  check('setelah dibuka, jurnalnya bisa masuk lagi', !!setelahBuka.journal || setelahBuka.ok);
+
+  // Membuka buku adalah tindakan yang harus meninggalkan jejak.
+  const riwayat4 = await call('GET', `/api/riwayat?from=${today}&to=${today}&limit=500`);
+  check('penutupan dan pembukaan buku ikut tercatat di riwayat',
+    riwayat4.rows.some((r) => r.path.includes('/api/riwayat/periode') && r.method === 'POST') &&
+    riwayat4.rows.some((r) => r.path.includes('/api/riwayat/periode') && r.method === 'DELETE'));
+
+  for (const bentuk of ['excel', 'csv', 'pdf']) {
+    const res = await fetch(`${BASE}/api/riwayat/export/${bentuk}?from=${today}&to=${today}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`riwayat bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 200, `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -98,6 +98,7 @@ const KATALOG = [
       { kunci: 'keuangan.kas', label: 'Mencatat kas masuk & keluar' },
       { kunci: 'keuangan.jurnal', label: 'Membuat jurnal manual' },
       { kunci: 'keuangan.coa', label: 'Mengubah bagan akun (Chart of Accounts)' },
+      { kunci: 'keuangan.tutupbuku', label: 'Menutup & membuka kembali buku bulanan' },
     ],
   },
   {
@@ -120,6 +121,7 @@ const KATALOG = [
       // Berkas cadangan berisi seluruh data termasuk hash kata sandi. Izinnya
       // sengaja berdiri sendiri, tidak menumpang izin pengaturan.
       { kunci: 'sistem.cadangan', label: 'Membuat & mengunduh cadangan basis data' },
+      { kunci: 'sistem.riwayat', label: 'Membaca riwayat perubahan' },
     ],
   },
 ];

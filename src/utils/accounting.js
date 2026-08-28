@@ -85,6 +85,7 @@ function postJournal({ date, description, lines, source = 'MANUAL', sourceId = n
   if (totalDebit === 0) throw ruleError('Nilai jurnal tidak boleh nol', 400);
 
   const period = String(date).slice(0, 7);
+  pastikanTerbuka(period, date);
   const entryNo = nextNumber('JV', period);
 
   const info = db
@@ -107,8 +108,46 @@ function postJournal({ date, description, lines, source = 'MANUAL', sourceId = n
   return { id: info.lastInsertRowid, entry_no: entryNo };
 }
 
+/**
+ * Menolak perubahan pada bulan yang sudah ditutup.
+ *
+ * Diletakkan di postJournal dan deleteJournalsBySource — dua-duanya satu-satunya
+ * pintu menuju buku besar. Dengan begitu penjualan, pembelian, gaji, kas, iklan,
+ * dan modul apa pun yang dibuat kemudian ikut terjaga tanpa perlu diberi
+ * pemeriksaan sendiri-sendiri yang bisa terlupa.
+ */
+function pastikanTerbuka(period, tanggal) {
+  const kunci = db.prepare('SELECT period, locked_at FROM period_locks WHERE period = ?').get(period);
+  if (!kunci) return;
+  throw ruleError(
+    `Bulan ${period} sudah ditutup pada ${kunci.locked_at}, jadi ${tanggal} tidak bisa diubah lagi. ` +
+      'Buka kembali tutup bukunya bila perubahan ini memang diperlukan.',
+    409
+  );
+}
+
 /** Menghapus jurnal yang berasal dari dokumen tertentu (dipakai saat edit/batal). */
 function deleteJournalsBySource(source, sourceId) {
+  // Menghapus jurnal pada bulan tertutup sama saja dengan mengubahnya; kalau
+  // hanya penulisan yang dijaga, mengubah dokumen lama akan tetap membongkar
+  // laporan yang sudah ditutup — jurnalnya terhapus lalu gagal ditulis ulang.
+  const terkunci = db
+    .prepare(
+      `SELECT DISTINCT substr(j.entry_date, 1, 7) AS period
+         FROM journals j
+         JOIN period_locks p ON p.period = substr(j.entry_date, 1, 7)
+        WHERE j.source = ? AND j.source_id = ?`
+    )
+    .all(source, sourceId);
+
+  if (terkunci.length > 0) {
+    throw ruleError(
+      `Dokumen ini punya jurnal pada bulan yang sudah ditutup (${terkunci.map((t) => t.period).join(', ')}), ` +
+        'jadi tidak bisa diubah. Buka kembali tutup bukunya bila perubahan ini memang diperlukan.',
+      409
+    );
+  }
+
   return db.prepare('DELETE FROM journals WHERE source = ? AND source_id = ?').run(source, sourceId)
     .changes;
 }
@@ -176,4 +215,5 @@ module.exports = {
   postJournal,
   deleteJournalsBySource,
   buildSalesJournalLines,
+  pastikanTerbuka,
 };

@@ -140,6 +140,10 @@ function halaman(...izin) {
   return (req, res, next) => requireAuth(req, res, (err) => (err ? next(err) : penjaga(req, res, next)));
 }
 
+// Riwayat dicatat sebelum rute mana pun berjalan, sehingga tidak ada endpoint
+// yang bisa lolos karena lupa diberi pencatat sendiri.
+app.use('/api', require('./src/middleware/jejak').jejak);
+
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/dashboard', halaman('dashboard.lihat'), require('./src/routes/dashboard'));
 app.use('/api/attendance', require('./src/routes/attendance'));
@@ -168,6 +172,7 @@ app.use('/api/cadangan', require('./src/routes/cadangan'));
 // Pusat Perhatian menyaring isinya sendiri menurut izin pembacanya, jadi cukup
 // menuntut sudah login di sini.
 app.use('/api/perhatian', require('./src/routes/perhatian'));
+app.use('/api/riwayat', require('./src/routes/riwayat'));
 
 // Foto selfie presensi hanya boleh diakses pengguna yang sudah login.
 app.use('/api/uploads', requireAuth, express.static(UPLOAD_DIR, { maxAge: '7d' }));
