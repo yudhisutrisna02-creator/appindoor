@@ -1102,6 +1102,132 @@ async function main() {
       `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Target & pencapaian ----------
+  console.log('\n17. Target & pencapaian');
+
+  const periodeIni = today.slice(0, 7);
+  const tokoTarget = (await call('POST', '/api/shops', {
+    name: `Toko Target ${Date.now()}`, channel: 'TIKTOK_SHOP',
+  }));
+  const idTokoTarget = (tokoTarget.shop || tokoTarget).id;
+
+  const produkTarget = await call('POST', '/api/inventory/products', {
+    sku: `TGT-${Date.now()}`, name: 'Uji Target', category: 'Uji', unit: 'PCS',
+    cost: 10000, price: 30000,
+  });
+  await call('POST', '/api/inventory/moves', {
+    product_id: produkTarget.product.id, move_date: today, move_type: 'IN',
+    qty: 20, unit_cost: 10000, note: 'Uji target',
+  });
+  await call('POST', '/api/sales', {
+    order_date: today, shop_id: idTokoTarget, channel: 'TIKTOK_SHOP',
+    items: [{ product_id: produkTarget.product.id, qty: 10, price: 30000 }],
+  });
+  await call('POST', '/api/iklan', {
+    spend_date: today, shop_id: idTokoTarget, channel: 'TIKTOK_SHOP',
+    amount: 50000, payment: 'BANK', note: 'Uji target',
+  });
+
+  const tgtBaru = await call('POST', '/api/target', {
+    period: periodeIni, shop_id: idTokoTarget,
+    omzet: 600000, laba: 100000, orders: 4, budget_iklan: 40000,
+  });
+  check('target toko bisa ditetapkan', tgtBaru.ok && tgtBaru.target.period === periodeIni);
+
+  // Menetapkan target untuk bulan dan toko yang sama tidak boleh menambah baris
+  // baru — kalau bisa, akan ada dua target berbeda untuk satu hal yang sama dan
+  // tidak ada cara memilih mana yang berlaku.
+  const tgtUlang = await call('POST', '/api/target', {
+    period: periodeIni, shop_id: idTokoTarget,
+    omzet: 500000, laba: 90000, orders: 5, budget_iklan: 40000,
+  });
+  check('target yang sama diperbarui, bukan digandakan',
+    tgtUlang.target.id === tgtBaru.target.id && tgtUlang.target.omzet === 500000);
+
+  const cap = await call('GET', `/api/target?period=${periodeIni}`);
+  const barisTarget = cap.rows.find((r) => r.kunci === idTokoTarget);
+
+  check('realisasi omzet diambil dari order penjualan',
+    near(barisTarget.realisasi.omzet, 300000, 1), String(barisTarget.realisasi.omzet));
+  check('realisasi iklan diambil dari belanja iklan',
+    near(barisTarget.realisasi.iklan, 50000, 1), String(barisTarget.realisasi.iklan));
+  check('laba yang dinilai sudah dikurangi belanja iklan',
+    near(barisTarget.realisasi.laba, barisTarget.realisasi.labaSebelumIklan - 50000, 1),
+    `${barisTarget.realisasi.laba} vs ${barisTarget.realisasi.labaSebelumIklan} − 50000`);
+  check('pencapaian omzet = realisasi / target',
+    near(barisTarget.capai.omzet, 60, 0.5), String(barisTarget.capai.omzet));
+  check('belanja iklan yang melewati batas ditandai', barisTarget.iklanLewatBatas === true);
+  check('kekurangan omzet dihitung', near(barisTarget.kurang.omzet, 200000, 1),
+    String(barisTarget.kurang.omzet));
+
+  // Baris perusahaan harus benar-benar menjumlahkan barisnya. Kalau ia dihitung
+  // lewat jalur query sendiri, order yang tidak menunjuk toko mana pun akan
+  // hilang dari salah satu sisi tanpa ada yang menyadarinya.
+  const jumlahBaris = cap.rows.reduce((s2, r) => s2 + r.realisasi.omzet, 0);
+  check('omzet perusahaan = jumlah seluruh baris toko',
+    near(cap.perusahaan.realisasi.omzet, jumlahBaris, 1),
+    `${cap.perusahaan.realisasi.omzet} vs ${jumlahBaris}`);
+  const jumlahIklan = cap.rows.reduce((s2, r) => s2 + r.realisasi.iklan, 0);
+  check('belanja iklan perusahaan = jumlah seluruh baris toko',
+    near(cap.perusahaan.realisasi.iklan, jumlahIklan, 1));
+
+  // Angkanya harus sama persis dengan menu yang sudah ada, kalau tidak akan ada
+  // dua versi kebenaran untuk bulan yang sama.
+  const iklanBulan = await call('GET', `/api/iklan?from=${periodeIni}-01&to=${periodeIni}-31`);
+  check('omzet di target = pendapatan kotor di menu Biaya Iklan',
+    near(cap.perusahaan.realisasi.omzet, iklanBulan.ringkas.pendapatanKotor, 1),
+    `${cap.perusahaan.realisasi.omzet} vs ${iklanBulan.ringkas.pendapatanKotor}`);
+  check('laba di target = laba setelah iklan di menu Biaya Iklan',
+    near(cap.perusahaan.realisasi.laba, iklanBulan.ringkas.labaSetelahIklan, 1),
+    `${cap.perusahaan.realisasi.laba} vs ${iklanBulan.ringkas.labaSetelahIklan}`);
+
+  check('toko tanpa target tetap ditampilkan',
+    cap.rows.some((r) => r.punyaTarget === false && r.capai.omzet === null));
+
+  // Proyeksi hanya masuk akal untuk bulan yang masih berjalan.
+  check('perkiraan akhir bulan terisi untuk bulan berjalan',
+    cap.hari.berjalan === true && typeof cap.perusahaan.proyeksi.omzet === 'number');
+  const capLalu = await call('GET', '/api/target?period=2020-01');
+  check('bulan yang sudah lewat tidak diproyeksikan',
+    capLalu.hari.berjalan === false && capLalu.perusahaan.proyeksi.omzet === null);
+
+  const salinHasil = await call('POST', '/api/target/salin', {
+    dari: periodeIni, ke: '2027-01', naikPersen: 10,
+  });
+  check('target bisa disalin ke bulan lain dengan kenaikan', salinHasil.dibuat >= 1);
+  const capSalin = await call('GET', '/api/target?period=2027-01');
+  const barisSalin = capSalin.rows.find((r) => r.kunci === idTokoTarget);
+  check('target hasil salinan naik sesuai persentase',
+    near(barisSalin.target.omzet, 550000, 1), String(barisSalin.target.omzet));
+
+  const salinUlang = await call('POST', '/api/target/salin', {
+    dari: periodeIni, ke: '2027-01', naikPersen: 50,
+  });
+  check('salinan tidak menimpa target yang sudah ada tanpa diminta',
+    salinUlang.dilewati >= 1 && salinUlang.dibuat === 0);
+
+  let tolakPeriode = 0;
+  try {
+    await call('POST', '/api/target', { period: 'Agustus', omzet: 1000 });
+  } catch (err) {
+    tolakPeriode = err.status;
+  }
+  check('periode yang bukan YYYY-MM ditolak', tolakPeriode === 400, `status ${tolakPeriode}`);
+
+  const hapusTarget = await call('DELETE', `/api/target/${barisSalin.target_id}`);
+  check('target bisa dihapus', hapusTarget.ok);
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/target/export/${bentuk}?period=${periodeIni}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`target bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
+      `${res.status}, ${buf.length} byte`);
+  }
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

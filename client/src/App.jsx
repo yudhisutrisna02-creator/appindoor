@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -36,6 +36,7 @@ import Iklan from './pages/Iklan';
 import Pengiriman from './pages/Pengiriman';
 import Pembelian from './pages/Pembelian';
 import Rekening from './pages/Rekening';
+import TargetPencapaian from './pages/Target';
 import KinerjaProduk from './pages/KinerjaProduk';
 
 const NAV = [
@@ -82,6 +83,7 @@ const NAV = [
       { to: '/penjualan/retur', label: 'Retur Penjualan', icon: Undo2, izin: 'penjualan.retur' },
       { to: '/penjualan/toko', label: 'Toko / Marketplace', icon: Store, izin: 'penjualan.lihat' },
       { to: '/penjualan/iklan', label: 'Biaya Iklan', icon: Megaphone, izin: 'iklan.lihat' },
+      { to: '/penjualan/target', label: 'Target & Pencapaian', icon: Target, izin: 'target.lihat' },
     ],
   },
   {
@@ -381,6 +383,7 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/penjualan/target" element={<Dijaga izin="target.lihat"><TargetPencapaian /></Dijaga>} />
         <Route path="/gudang/kinerja" element={<Dijaga izin="gudang.kinerja"><KinerjaProduk /></Dijaga>} />
         <Route path="/keuangan/rekening" element={<Dijaga izin="keuangan.lihat"><Rekening /></Dijaga>} />
         <Route path="/keuangan/kas" element={<Dijaga izin="keuangan.kas"><KasMasukKeluar /></Dijaga>} />

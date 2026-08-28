@@ -381,3 +381,28 @@ CREATE TABLE IF NOT EXISTS purchase_items (
 CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status);
 CREATE INDEX IF NOT EXISTS idx_po_partner ON purchase_orders(partner_id);
 CREATE INDEX IF NOT EXISTS idx_poi_po ON purchase_items(po_id);
+
+-- ---------- TARGET BULANAN ----------
+-- Target disimpan per bulan dan per toko; baris dengan shop_id kosong berarti
+-- target seluruh perusahaan. Realisasinya tidak ikut disimpan di sini — ia
+-- selalu dihitung ulang dari order penjualan dan belanja iklan, supaya angka
+-- pencapaian tidak bisa berbeda dari laporan yang lain.
+CREATE TABLE IF NOT EXISTS targets (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  period       TEXT    NOT NULL,             -- YYYY-MM
+  shop_id      INTEGER REFERENCES shops(id), -- kosong = seluruh perusahaan
+  omzet        REAL    NOT NULL DEFAULT 0,
+  laba         REAL    NOT NULL DEFAULT 0,   -- laba bersih setelah biaya iklan
+  orders       REAL    NOT NULL DEFAULT 0,
+  budget_iklan REAL    NOT NULL DEFAULT 0,   -- batas belanja iklan, bukan sasaran
+  note         TEXT,
+  user_id      INTEGER REFERENCES users(id),
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT
+);
+
+-- SQLite menganggap dua NULL berbeda satu sama lain, sehingga UNIQUE biasa
+-- akan membiarkan target perusahaan tercatat berkali-kali untuk bulan yang
+-- sama. IFNULL menyamakannya ke satu nilai supaya benar-benar tunggal.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_target_unik ON targets(period, IFNULL(shop_id, 0));
+CREATE INDEX IF NOT EXISTS idx_target_period ON targets(period);

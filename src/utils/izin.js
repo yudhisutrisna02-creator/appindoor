@@ -72,6 +72,14 @@ const KATALOG = [
     ],
   },
   {
+    modul: 'target',
+    label: 'Target & Pencapaian',
+    izin: [
+      { kunci: 'target.lihat', label: 'Melihat target bulanan & pencapaiannya' },
+      { kunci: 'target.kelola', label: 'Menetapkan & mengubah target' },
+    ],
+  },
+  {
     modul: 'keuangan',
     label: 'Keuangan',
     izin: [
@@ -142,6 +150,7 @@ const PERAN_BAWAAN = [
       'pembelian.lihat',
       'penjualan.lihat', 'penjualan.buat', 'penjualan.ubah', 'penjualan.retur', 'penjualan.margin',
       'mitra.lihat', 'mitra.kelola',
+      'target.lihat',
     ],
   },
   {
@@ -155,6 +164,7 @@ const PERAN_BAWAAN = [
       'presensi.absen',
       'penjualan.lihat', 'penjualan.margin', 'penjualan.toko',
       'iklan.lihat', 'iklan.kelola',
+      'target.lihat',
     ],
   },
   {
