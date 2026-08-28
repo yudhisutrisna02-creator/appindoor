@@ -628,6 +628,43 @@ async function main() {
   check('tim gudang boleh menambah produk (punya gudang.produk)', tolakUbahProduk === 201 || tolakUbahProduk === 200,
     `status ${tolakUbahProduk}`);
 
+  // Kinerja produk memakai angka penjualan, jadi batasnya tidak cukup di
+  // halaman: tim gudang perlu tahu apa yang bergerak dan apa yang menumpuk,
+  // tetapi laba per produk bukan urusannya. Kolomnya harus benar-benar tidak
+  // ikut terkirim — menyembunyikannya di layar saja berarti angkanya tetap ada
+  // di dalam jawaban server dan tetap terbaca siapa pun yang mau melihat.
+  check('tim gudang boleh membuka kinerja produk', (await cobaAkses('/api/kinerja/produk')) === 200);
+  const kinerjaGudang = await call('GET', `/api/kinerja/produk?from=${today}&to=${today}`);
+  check('kinerja produk menyembunyikan laba dari tim gudang',
+    kinerjaGudang.tanpaLaba === true &&
+    kinerjaGudang.rows.every((r) => r.laba_kotor === undefined && r.hpp === undefined) &&
+    kinerjaGudang.ringkas.labaKotor === undefined);
+  check('tim gudang tetap melihat pergerakan stoknya',
+    kinerjaGudang.rows.every((r) => typeof r.stok === 'number' && typeof r.qty === 'number'));
+
+  const judulKolom = async (bearer) => {
+    const res = await fetch(`${BASE}/api/kinerja/produk/export/excel?from=${today}&to=${today}`, {
+      headers: { Authorization: `Bearer ${bearer}` },
+    });
+    if (!res.ok) return [`gagal ${res.status}`];
+    const wb = new (require('exceljs').Workbook)();
+    await wb.xlsx.load(Buffer.from(await res.arrayBuffer()));
+    const ws = wb.worksheets[0];
+    let baris = [];
+    // Kepala tabel tidak selalu di baris pertama; berkasnya diawali judul dan
+    // keterangan periode.
+    ws.eachRow((row) => {
+      const isi = row.values.slice(1).map((v) => String(v ?? '').trim());
+      if (isi.includes('SKU') && isi.includes('Produk')) baris = isi;
+    });
+    return baris;
+  };
+
+  const kolomGudang = await judulKolom(token);
+  check('unduhan kinerja produk ikut menanggalkan kolom laba',
+    kolomGudang.includes('Stok') && !kolomGudang.includes('Laba Kotor') && !kolomGudang.includes('Margin'),
+    kolomGudang.join(', '));
+
   token = tokenAdmin;
 
   // Peran khusus: dibuat, dipakai, lalu diuji batasnya.
@@ -974,6 +1011,92 @@ async function main() {
     });
     const buf = Buffer.from(await res.arrayBuffer());
     check(`rekening bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 500 &&
+      (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
+      `${res.status}, ${buf.length} byte`);
+  }
+
+  // ---------- Kinerja produk ----------
+  console.log('\n16. Kinerja produk');
+
+  const awalBulan = `${today.slice(0, 8)}01`;
+  const kin = await call('GET', `/api/kinerja/produk?from=${awalBulan}&to=${today}`);
+  const anal = await call('GET', `/api/sales/analytics?from=${awalBulan}&to=${today}`);
+  const val = await call('GET', '/api/inventory/valuation');
+
+  check('setiap produk muncul tepat sekali',
+    new Set(kin.rows.map((r) => r.id)).size === kin.rows.length &&
+    kin.rows.length === val.totalSku,
+    `${kin.rows.length} baris, ${val.totalSku} SKU`);
+
+  // Tiga pemeriksaan berikut yang membuat layar ini bisa dipercaya: angkanya
+  // harus sama persis dengan laporan yang sudah ada. Kalau salah satunya
+  // melenceng, berarti ada penjualan atau stok yang terhitung dua kali.
+  check('nilai persediaan = valuasi stok gudang',
+    near(kin.ringkas.nilaiStok, val.totalValue, 1),
+    `${kin.ringkas.nilaiStok} vs ${val.totalValue}`);
+  check('pendapatan per produk = penjualan kotor di analisis margin',
+    near(kin.ringkas.pendapatan, anal.totals.gross_sales, 1),
+    `${kin.ringkas.pendapatan} vs ${anal.totals.gross_sales}`);
+  check('laba kotor per produk = laba kotor di analisis margin',
+    near(kin.ringkas.labaKotor, anal.totals.gross_profit, 1),
+    `${kin.ringkas.labaKotor} vs ${anal.totals.gross_profit}`);
+
+  check('jumlah tiap golongan = jumlah seluruh produk',
+    kin.perGolongan.reduce((s2, g) => s2 + g.produk, 0) === kin.rows.length);
+
+  // Produk laris yang stoknya habis adalah penjualan yang hilang tanpa jejak —
+  // pesanan yang batal karena barang kosong tidak tercatat di mana pun.
+  const produkHabis = await call('POST', '/api/inventory/products', {
+    sku: `HABIS-${Date.now()}`, name: 'Uji Barang Habis', category: 'Uji', unit: 'PCS',
+    cost: 5000, price: 12000,
+  });
+  await call('POST', '/api/inventory/moves', {
+    product_id: produkHabis.product.id, move_date: today, move_type: 'IN',
+    qty: 4, unit_cost: 5000, note: 'Uji kinerja',
+  });
+  const dibuatKin = await call('POST', '/api/shops', { name: `Toko Kinerja ${Date.now()}`, channel: 'SHOPEE' });
+  const tokoKin = dibuatKin.shop || dibuatKin;
+  await call('POST', '/api/sales', {
+    order_date: today, shop_id: tokoKin.id, channel: tokoKin.channel,
+    items: [{ product_id: produkHabis.product.id, qty: 4, price: 12000 }],
+  });
+
+  const kin2 = await call('GET', `/api/kinerja/produk?from=${awalBulan}&to=${today}`);
+  const barisHabis = kin2.rows.find((r) => r.id === produkHabis.product.id);
+  check('produk laku yang stoknya habis ditandai "habis"',
+    barisHabis.golongan === 'habis' && barisHabis.stok === 0 && barisHabis.qty === 4,
+    `${barisHabis.golongan}, stok ${barisHabis.stok}, terjual ${barisHabis.qty}`);
+  check('produk habis tidak dihitung sebagai modal menganggur',
+    barisHabis.modal_tertahan === 0);
+  check('produk yang belum pernah terjual punya golongan sendiri',
+    kin2.rows.filter((r) => r.golongan === 'belum-terjual')
+      .every((r) => r.terakhir_terjual === null && r.qty === 0));
+  check('modal menganggur hanya dari barang yang diam',
+    near(
+      kin2.ringkas.modalTertahan,
+      kin2.rows.filter((r) => r.modal_tertahan > 0).reduce((s2, r) => s2 + r.nilai_stok, 0),
+      1
+    ));
+
+  // Sisa hari hanya bermakna bila barangnya memang bergerak; produk diam tidak
+  // "cukup nol hari", ia tidak punya perkiraan sama sekali.
+  check('sisa hari kosong untuk produk tanpa penjualan',
+    kin2.rows.filter((r) => r.qty === 0).every((r) => r.cover_hari === null));
+  check('sisa hari terisi untuk produk yang bergerak',
+    kin2.rows.filter((r) => r.qty > 0 && r.stok > 0).every((r) => typeof r.cover_hari === 'number'));
+
+  const kolomAdmin = await judulKolom(token);
+  check('unduhan admin memuat kolom laba',
+    kolomAdmin.includes('Laba Kotor') && kolomAdmin.includes('Margin'),
+    kolomAdmin.join(', '));
+
+  for (const bentuk of ['excel', 'pdf']) {
+    const res = await fetch(`${BASE}/api/kinerja/produk/export/${bentuk}?from=${awalBulan}&to=${today}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`kinerja produk bisa diunduh sebagai ${bentuk.toUpperCase()}`,
       res.ok && buf.length > 500 &&
       (bentuk === 'pdf' ? buf.slice(0, 4).toString() === '%PDF' : buf.slice(0, 2).toString('hex') === '504b'),
       `${res.status}, ${buf.length} byte`);

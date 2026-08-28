@@ -39,6 +39,7 @@ const KATALOG = [
       { kunci: 'gudang.produk', label: 'Menambah & mengubah master produk' },
       { kunci: 'gudang.mutasi', label: 'Mencatat barang masuk & keluar' },
       { kunci: 'gudang.opname', label: 'Melakukan stok opname' },
+      { kunci: 'gudang.kinerja', label: 'Melihat kinerja & perputaran produk' },
     ],
   },
   {
@@ -137,7 +138,7 @@ const PERAN_BAWAAN = [
     izin: [
       'dashboard.lihat',
       'presensi.absen',
-      'gudang.lihat',
+      'gudang.lihat', 'gudang.kinerja',
       'pembelian.lihat',
       'penjualan.lihat', 'penjualan.buat', 'penjualan.ubah', 'penjualan.retur', 'penjualan.margin',
       'mitra.lihat', 'mitra.kelola',
@@ -165,7 +166,7 @@ const PERAN_BAWAAN = [
     izin: [
       'dashboard.lihat',
       'presensi.absen',
-      'gudang.lihat', 'gudang.produk', 'gudang.mutasi', 'gudang.opname',
+      'gudang.lihat', 'gudang.produk', 'gudang.mutasi', 'gudang.opname', 'gudang.kinerja',
       'pembelian.lihat', 'pembelian.kelola',
       'mitra.lihat',
     ],

@@ -37,17 +37,21 @@ function namaBerkas(dasar, ekstensi) {
 function daftarkanEkspor(router, { path, judul, kolom, ambil }) {
   const kirim = (bentuk) =>
     ah(async (req, res) => {
-      const { rows, meta = [], subtitle = '' } = await ambil(req);
+      // Sebagian laporan menyembunyikan kolom tertentu dari pengguna yang tidak
+      // berhak melihatnya. Kalau kolomnya tetap kaku di sini, berkas unduhan
+      // akan membocorkan persis angka yang sudah disembunyikan di layar.
+      const { rows, meta = [], subtitle = '', kolom: kolomKhusus } = await ambil(req);
+      const kol = kolomKhusus || kolom;
       const perusahaan = getSetting('company_name', 'Perusahaan');
 
       if (bentuk === 'excel') {
-        const buffer = await tableExcel(judul, kolom, rows, meta);
+        const buffer = await tableExcel(judul, kol, rows, meta);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${namaBerkas(judul, 'xlsx')}"`);
         return res.send(Buffer.from(buffer));
       }
 
-      const buffer = await tablePdf(judul, subtitle, kolom, rows, meta, perusahaan);
+      const buffer = await tablePdf(judul, subtitle, kol, rows, meta, perusahaan);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${namaBerkas(judul, 'pdf')}"`);
       return res.send(buffer);
