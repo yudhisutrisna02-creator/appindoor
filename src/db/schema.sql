@@ -535,3 +535,24 @@ CREATE TABLE IF NOT EXISTS sales_item_variants (
 );
 
 CREATE INDEX IF NOT EXISTS idx_varian_item ON sales_item_variants(item_id);
+
+-- ---------- LAPORAN YANG DITERBITKAN ----------
+-- Tiap laporan resmi yang dicetak dicatat di sini supaya QR pada lembarnya
+-- punya sesuatu yang bisa ditunjuk. Ringkasan angkanya ikut disimpan: laporan
+-- adalah potret satu periode, dan memeriksanya berarti membandingkan lembar
+-- yang dipegang dengan angka yang tercatat saat lembar itu dikeluarkan —
+-- bukan menghitung ulang seluruh periodenya di halaman publik.
+CREATE TABLE IF NOT EXISTS laporan_terbit (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  jenis      TEXT    NOT NULL,          -- presensi, persediaan, pembelian, ...
+  judul      TEXT    NOT NULL,
+  dari       TEXT,
+  sampai     TEXT,
+  ringkas    TEXT,                      -- JSON: pasangan label & nilai pokok
+  baris      INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+
+  UNIQUE (jenis, dari, sampai)
+);
+
+CREATE INDEX IF NOT EXISTS idx_laporan_jenis ON laporan_terbit(jenis);

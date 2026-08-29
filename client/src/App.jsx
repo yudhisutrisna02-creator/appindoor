@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -44,6 +44,7 @@ import Cadangan from './pages/Cadangan';
 import Perhatian from './pages/Perhatian';
 import Proyeksi from './pages/Proyeksi';
 import Riwayat from './pages/Riwayat';
+import Laporan from './pages/Laporan';
 import Verifikasi from './pages/Verifikasi';
 import KinerjaProduk from './pages/KinerjaProduk';
 
@@ -110,6 +111,18 @@ const NAV = [
       { to: '/keuangan/laporan', label: 'Laporan Keuangan', icon: FileBarChart2, izin: 'keuangan.lihat' },
       { to: '/keuangan/jurnal', label: 'Buku Besar & Jurnal', icon: BookOpenCheck, izin: 'keuangan.lihat' },
       { to: '/keuangan/coa', label: 'Chart of Accounts', icon: ListTree, izin: 'keuangan.coa' },
+    ],
+  },
+  {
+    section: 'Laporan',
+    key: 'laporan',
+    items: [
+      { to: '/laporan/presensi', label: 'Laporan Presensi', icon: FileText, izin: 'presensi.lihat' },
+      { to: '/laporan/persediaan', label: 'Laporan Persediaan', icon: FileText, izin: 'gudang.lihat' },
+      { to: '/laporan/pembelian', label: 'Laporan Pembelian', icon: FileText, izin: 'pembelian.lihat' },
+      { to: '/laporan/penjualan', label: 'Laporan Penjualan', icon: FileText, izin: 'penjualan.lihat' },
+      { to: '/laporan/keuangan', label: 'Laporan Keuangan', icon: FileText, izin: 'keuangan.lihat' },
+      { to: '/laporan/mitra', label: 'Laporan Mitra', icon: FileText, izin: 'mitra.lihat' },
     ],
   },
   {
@@ -415,6 +428,12 @@ export default function App() {
         <Route path="/penjualan/retur" element={<Dijaga izin="penjualan.retur"><Retur /></Dijaga>} />
         <Route path="/penjualan/toko" element={<Dijaga izin="penjualan.lihat"><Toko /></Dijaga>} />
         <Route path="/penjualan/iklan" element={<Dijaga izin="iklan.lihat"><Iklan /></Dijaga>} />
+        <Route path="/laporan/presensi" element={<Dijaga izin="presensi.lihat"><Laporan jenis="presensi" /></Dijaga>} />
+        <Route path="/laporan/persediaan" element={<Dijaga izin="gudang.lihat"><Laporan jenis="persediaan" /></Dijaga>} />
+        <Route path="/laporan/pembelian" element={<Dijaga izin="pembelian.lihat"><Laporan jenis="pembelian" /></Dijaga>} />
+        <Route path="/laporan/penjualan" element={<Dijaga izin="penjualan.lihat"><Laporan jenis="penjualan" /></Dijaga>} />
+        <Route path="/laporan/keuangan" element={<Dijaga izin="keuangan.lihat"><Laporan jenis="keuangan" /></Dijaga>} />
+        <Route path="/laporan/mitra" element={<Dijaga izin="mitra.lihat"><Laporan jenis="mitra" /></Dijaga>} />
         <Route path="/sistem/riwayat" element={<Dijaga izin={["sistem.riwayat", "keuangan.tutupbuku"]}><Riwayat /></Dijaga>} />
         <Route path="/keuangan/proyeksi" element={<Dijaga izin="keuangan.lihat"><Proyeksi /></Dijaga>} />
         <Route path="/perhatian" element={<Perhatian />} />

@@ -114,6 +114,44 @@ function isiDokumen(ttd) {
     };
   }
 
+  if (ttd.kind === KIND.LAPORAN) {
+    const l = db.prepare('SELECT * FROM laporan_terbit WHERE id = ?').get(ttd.ref_id);
+    if (!l) return null;
+
+    let ringkas = [];
+    try {
+      ringkas = JSON.parse(l.ringkas || '[]');
+    } catch {
+      ringkas = [];
+    }
+
+    // Laporan adalah potret satu periode. Yang diperiksa bukan hasil hitung
+    // ulang seluruh periodenya, melainkan apakah lembar yang dipegang sama
+    // dengan angka yang tercatat saat lembar itu dikeluarkan.
+    return {
+      kanonik: {
+        kind: KIND.LAPORAN,
+        jenis: l.jenis,
+        dari: l.dari,
+        sampai: l.sampai,
+        baris: l.baris,
+        ringkas,
+      },
+      tampil: {
+        jenis: LABEL_KIND.LAPORAN,
+        judul: l.judul,
+        untuk: l.judul,
+        keterangan: l.dari && l.sampai ? `Periode ${l.dari} s/d ${l.sampai}` : null,
+        tanggal: l.sampai || l.dari || null,
+        baris: ringkas.filter(([, nilai]) => typeof nilai === 'number'),
+        total: ['Jumlah baris data', l.baris],
+        catatan:
+          'Angka di atas adalah yang tercatat saat laporan ini dikeluarkan. ' +
+          'Data setelahnya bisa saja bertambah atau diperbaiki.',
+      },
+    };
+  }
+
   return null;
 }
 

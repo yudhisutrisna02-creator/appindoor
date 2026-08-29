@@ -2488,6 +2488,116 @@ async function main() {
   });
   check('produk biasa tetap bisa dipesan tanpa label varian', !!orderBiasa.order);
 
+  // ---------- Menu Laporan ----------
+  console.log('\n30. Menu Laporan');
+
+  const JENIS_LAPORAN = ['presensi', 'persediaan', 'pembelian', 'penjualan', 'keuangan', 'mitra'];
+  const bulanLap = `${today.slice(0, 8)}01`;
+
+  const daftarLap = await call('GET', '/api/laporan');
+  check('keenam laporan terdaftar untuk admin',
+    JENIS_LAPORAN.every((j) => daftarLap.rows.some((r) => r.jenis === j)),
+    daftarLap.rows.map((r) => r.jenis).join(', '));
+
+  for (const jenis of JENIS_LAPORAN) {
+    const d = await call('GET', `/api/laporan/${jenis}?from=${bulanLap}&to=${today}&asOf=${today}`);
+    check(`laporan ${jenis} bisa dibuka dan berkolom`,
+      Array.isArray(d.rows) && Array.isArray(d.kolom) && d.kolom.length > 0 && !!d.judul,
+      `${d.rows ? d.rows.length : '?'} baris`);
+  }
+
+  // Neraca saldo harus seimbang; kalau tidak, laporannya sendiri yang salah.
+  const lapKeu = await call('GET', `/api/laporan/keuangan?from=${bulanLap}&to=${today}`);
+  check('laporan keuangan seimbang antara debit dan kredit',
+    near(lapKeu.ringkasBawah.debit, lapKeu.ringkasBawah.credit, 1),
+    `${lapKeu.ringkasBawah.debit} vs ${lapKeu.ringkasBawah.credit}`);
+
+  // Angkanya wajib sama dengan menunya, bukan hitungan baru yang berdiri sendiri.
+  const lapJual = await call('GET', `/api/laporan/penjualan?from=${bulanLap}&to=${today}`);
+  const menuJual = await call('GET', `/api/sales?from=${bulanLap}&to=${today}&limit=5000`);
+  check('laporan penjualan sama dengan menu Order Penjualan',
+    lapJual.rows.length === menuJual.summary.orders &&
+    near(lapJual.ringkasBawah.net_revenue, menuJual.summary.netRevenue, 1),
+    `${lapJual.rows.length} vs ${menuJual.summary.orders} order`);
+
+  const lapPersed = await call('GET', `/api/laporan/persediaan?asOf=${today}`);
+  const valuasi = await call('GET', '/api/inventory/valuation');
+  check('laporan persediaan sama dengan Valuasi Stok',
+    near(lapPersed.ringkasBawah.nilai, valuasi.totalValue, 1),
+    `${lapPersed.ringkasBawah.nilai} vs ${valuasi.totalValue}`);
+
+  // PDF: berkop, bertanda tangan, dan dikirim inline agar bisa langsung dicetak.
+  const pdfLap = await fetch(
+    `${BASE}/api/laporan/penjualan/export/pdf?from=${bulanLap}&to=${today}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const bufLap = Buffer.from(await pdfLap.arrayBuffer());
+  check('laporan bisa dicetak sebagai PDF',
+    pdfLap.ok && bufLap.slice(0, 4).toString() === '%PDF' && bufLap.length > 1000,
+    `${pdfLap.status}, ${bufLap.length} byte`);
+  check('PDF laporan dikirim untuk langsung dibuka & dicetak',
+    (pdfLap.headers.get('Content-Disposition') || '').startsWith('inline'));
+
+  const dokSetelah = await call('GET', '/api/dokumen');
+  const dokLap = dokSetelah.rows.find((r) => r.kind === 'LAPORAN');
+  check('laporan yang dicetak ikut tercatat bertanda tangan digital',
+    !!dokLap && /^LAP\//.test(dokLap.nomor) && !!dokLap.kode,
+    dokLap && dokLap.nomor);
+
+  const periksaLap = await fetch(`${BASE}/api/verifikasi/${dokLap.tautan.split('/').pop()}`)
+    .then((r) => r.json());
+  check('QR laporan bisa diperiksa tanpa login',
+    periksaLap.status === 'sah' && periksaLap.jenis === 'Laporan Resmi',
+    `${periksaLap.status}`);
+
+  // Ukuran kertas bisa dipilih; Folio menghasilkan berkas yang berbeda dari A4.
+  const pdfA4 = await fetch(
+    `${BASE}/api/laporan/mitra/export/pdf?from=${bulanLap}&to=${today}&kertas=A4`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const pdfFolio = await fetch(
+    `${BASE}/api/laporan/mitra/export/pdf?from=${bulanLap}&to=${today}&kertas=FOLIO`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  check('ukuran kertas A4 dan Folio sama-sama bisa dicetak',
+    pdfA4.ok && pdfFolio.ok);
+
+  for (const bentuk of ['excel', 'csv']) {
+    const res = await fetch(
+      `${BASE}/api/laporan/pembelian/export/${bentuk}?from=${bulanLap}&to=${today}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const buf = Buffer.from(await res.arrayBuffer());
+    check(`laporan bisa diunduh sebagai ${bentuk.toUpperCase()}`,
+      res.ok && buf.length > 200, `${res.status}, ${buf.length} byte`);
+  }
+
+  // Hak akses: tim gudang hanya boleh laporan yang modulnya memang ia pegang.
+  const masukGudang4 = await call('POST', '/api/auth/login', {
+    email: akunGudang.user.email, password: 'RahasiaKuat1',
+  });
+  const adminLap = token;
+  token = masukGudang4.token;
+
+  const daftarGudang = await call('GET', '/api/laporan');
+  check('daftar laporan disaring menurut hak akses',
+    daftarGudang.rows.some((r) => r.jenis === 'persediaan') &&
+    !daftarGudang.rows.some((r) => r.jenis === 'keuangan' || r.jenis === 'penjualan'),
+    daftarGudang.rows.map((r) => r.jenis).join(', '));
+
+  const tolakLap = await fetch(`${BASE}/api/laporan/keuangan?from=${bulanLap}&to=${today}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  check('laporan di luar hak aksesnya ditolak', tolakLap.status === 403, `status ${tolakLap.status}`);
+
+  const tolakUnduh = await fetch(
+    `${BASE}/api/laporan/penjualan/export/pdf?from=${bulanLap}&to=${today}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  check('unduhan laporan di luar hak akses juga ditolak',
+    tolakUnduh.status === 403, `status ${tolakUnduh.status}`);
+  token = adminLap;
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

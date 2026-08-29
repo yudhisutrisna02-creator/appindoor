@@ -20,11 +20,13 @@ const { db, getSetting } = require('./../db');
 const KIND = {
   SLIP_GAJI: 'SLIP_GAJI',
   NOTA_SUPPLIER: 'NOTA_SUPPLIER',
+  LAPORAN: 'LAPORAN',
 };
 
 const LABEL_KIND = {
   SLIP_GAJI: 'Slip Gaji',
   NOTA_SUPPLIER: 'Nota Pembayaran Supplier',
+  LAPORAN: 'Laporan Resmi',
 };
 
 /**

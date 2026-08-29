@@ -173,6 +173,9 @@ app.use('/api/cadangan', require('./src/routes/cadangan'));
 // menuntut sudah login di sini.
 app.use('/api/perhatian', require('./src/routes/perhatian'));
 app.use('/api/riwayat', require('./src/routes/riwayat'));
+// Tiap laporan menjaga izinnya sendiri sesuai modulnya, jadi di sini cukup
+// menuntut sudah login.
+app.use('/api/laporan', require('./src/routes/laporan'));
 
 // Foto selfie presensi hanya boleh diakses pengguna yang sudah login.
 app.use('/api/uploads', requireAuth, express.static(UPLOAD_DIR, { maxAge: '7d' }));
