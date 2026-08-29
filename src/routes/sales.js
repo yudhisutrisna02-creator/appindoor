@@ -249,6 +249,35 @@ router.post('/', butuhIzin('penjualan.buat'), ah((req, res) => {
 }));
 
 /** Filter bersama untuk daftar & analisis. */
+/**
+ * Pencarian bebas pada daftar order.
+ *
+ * Dikerjakan di basis data, bukan di layar. Menyaring di layar berarti hanya
+ * baris yang sudah terlanjur terkirim yang bisa ditemukan — dan karena daftarnya
+ * dibatasi, order yang dicari justru sering berada di luar batas itu. Yang paling
+ * membingungkan: hasilnya kosong padahal ordernya ada.
+ *
+ * Kolom yang dicari adalah yang benar-benar dipakai orang saat mencari satu
+ * pesanan: nomor order kita, nomor pesanan marketplace, nomor resi, nama
+ * pembeli, dan nama toko.
+ */
+function cariOrder(q) {
+  const kata = String(q || '').trim();
+  if (kata.length < 2) return null;
+
+  // LIKE dengan awalan % memang tidak memakai indeks, tetapi jumlah ordernya
+  // masih ribuan — bukan jutaan — dan pencarian yang hanya cocok di awal kata
+  // akan gagal menemukan resi yang diketik separuh, yaitu cara orang mencari.
+  const pola = `%${kata.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+  const kolom = ['o.order_no', 'o.order_ref', 'o.tracking_no', 'o.buyer_name', 'sh.name'];
+
+  return {
+    kata,
+    where: `(${kolom.map((k) => `${k} LIKE ? ESCAPE '\\'`).join(' OR ')})`,
+    params: kolom.map(() => pola),
+  };
+}
+
 function orderFilter(query) {
   const { from, to } = dateRange(query);
   const params = [from, to];
@@ -265,7 +294,14 @@ function orderFilter(query) {
     where += ' AND o.fulfillment_status = ?';
     params.push(query.fulfillment_status);
   }
-  return { from, to, where, params };
+
+  const cari = cariOrder(query.q);
+  if (cari) {
+    where += ` AND ${cari.where}`;
+    params.push(...cari.params);
+  }
+
+  return { from, to, where, params, q: cari ? cari.kata : '' };
 }
 
 /** GET /api/sales — daftar order + ringkasan. */
@@ -310,7 +346,9 @@ router.get('/', ah((req, res) => {
               COALESCE(SUM(o.total_fees), 0)   AS total_fees,
               COALESCE(SUM(o.gross_profit), 0) AS gross_profit,
               COALESCE(SUM(o.net_profit), 0)   AS net_profit
-         FROM sales_orders o ${where}`
+         FROM sales_orders o
+         LEFT JOIN shops sh ON sh.id = o.shop_id
+         ${where}`
     )
     .get(...params);
 
@@ -447,6 +485,12 @@ router.get('/papan', ah((req, res) => {
   if (req.query.shop_id) {
     where += ' AND o.shop_id = ?';
     params.push(Number(req.query.shop_id));
+  }
+
+  const cari = cariOrder(req.query.q);
+  if (cari) {
+    where += ` AND ${cari.where}`;
+    params.push(...cari.params);
   }
 
   const rows = db
@@ -780,14 +824,23 @@ router.post('/returns', butuhIzin('penjualan.buat'), ah((req, res) => {
 /** Pengambil daftar retur — dipakai layar dan berkas unduhan. */
 function ambilRetur(req) {
   const { from, to } = dateRange(req.query);
+
+  const kata = String(req.query.q || '').trim();
+  const cari = kata.length >= 2
+    ? {
+        where: '(p.name LIKE ? OR p.sku LIKE ? OR r.reason LIKE ? OR r.return_no LIKE ?)',
+        params: Array(4).fill(`%${kata}%`),
+      }
+    : null;
+
   const rows = db
     .prepare(
       `SELECT r.*, p.sku, p.name AS product_name
          FROM sales_returns r JOIN products p ON p.id = r.product_id
-        WHERE r.return_date BETWEEN ? AND ?
+        WHERE r.return_date BETWEEN ? AND ? ${cari ? `AND ${cari.where}` : ''}
         ORDER BY r.return_date DESC, r.id DESC`
     )
-    .all(from, to);
+    .all(from, to, ...(cari ? cari.params : []));
   return { from, to, rows, total: r2(rows.reduce((s, r) => s + r.amount, 0)) };
 }
 

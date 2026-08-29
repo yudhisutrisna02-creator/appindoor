@@ -5,7 +5,7 @@ import {
   LineChart, Line, Legend,
 } from 'recharts';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, TombolEkspor } from '../components/ui';
+import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, TombolEkspor, KotakCari, saringLokal } from '../components/ui';
 import { rupiah, rupiahShort, num, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 
 const FEE_KEYS = [
@@ -21,6 +21,7 @@ const FEE_KEYS = [
 export default function AnalisisMargin() {
   const toast = useToast();
   const [range, setRange] = useState(defaultRange);
+  const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -55,7 +56,12 @@ export default function AnalisisMargin() {
       <PageHeader title="Analisis Margin" subtitle="Profitabilitas per channel penjualan dan per produk">
         <TombolEkspor path="/api/sales/analytics" params={range} nama="analisis-margin" />
       </PageHeader>
-      <DateRangeFilter range={range} onChange={setRange} />
+      <DateRangeFilter range={range} onChange={setRange}>
+        <div className="flex-[2]">
+          <label className="label">Cari</label>
+          <KotakCari nilai={q} onCari={setQ} placeholder="Nama produk atau SKU..." />
+        </div>
+      </DateRangeFilter>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Pendapatan Bersih" value={rupiahShort(data.totals.net_revenue || 0)} sub={`${data.totals.orders || 0} order`} icon={Receipt} />
@@ -172,7 +178,7 @@ export default function AnalisisMargin() {
                     <tr><th>#</th><th>Produk</th><th>Qty Terjual</th><th>Pendapatan</th><th>HPP</th><th>Laba Kotor</th><th>Margin</th></tr>
                   </thead>
                   <tbody>
-                    {data.byProduct.map((p, i) => (
+                    {saringLokal(data.byProduct, q, (p) => [p.name, p.sku]).map((p, i) => (
                       <tr key={p.id}>
                         <td className="tabular text-slate-400">{i + 1}</td>
                         <td>

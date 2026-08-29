@@ -4,7 +4,9 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
+  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor,
+  KotakCari, saringLokal,
+} from '../components/ui';
 import { rupiah, rupiahShort, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -19,6 +21,7 @@ export default function Toko() {
   const toast = useToast();
   const { canManage, isAdmin } = useAuth();
   const [range, setRange] = useState(defaultRange);
+  const [q, setQ] = useState('');
   const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
@@ -82,7 +85,12 @@ export default function Toko() {
         <TombolEkspor path="/api/shops" params={range} nama="toko-marketplace" />
       </PageHeader>
 
-      <DateRangeFilter range={range} onChange={setRange} />
+      <DateRangeFilter range={range} onChange={setRange}>
+        <div className="flex-[2]">
+          <label className="label">Cari</label>
+          <KotakCari nilai={q} onCari={setQ} placeholder="Nama toko atau channel..." />
+        </div>
+      </DateRangeFilter>
 
       {loading ? (
         <Spinner />
@@ -109,7 +117,7 @@ export default function Toko() {
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Bar dataKey="net_profit" name="Laba Bersih" radius={[0, 6, 6, 0]}>
-                    {aktif.map((d, i) => (
+                    {saringLokal(aktif, q, (d) => [d.name, d.channel, d.channelLabel, d.label]).map((d, i) => (
                       <Cell key={i} fill={d.net_profit >= 0 ? CHART_COLORS[i % CHART_COLORS.length] : '#ef4444'} />
                     ))}
                   </Bar>
@@ -135,7 +143,7 @@ export default function Toko() {
                     </tr>
                   </thead>
                   <tbody>
-                    {shops.map((s) => (
+                    {saringLokal(shops, q, (s) => [s.name, s.channel, s.note]).map((s) => (
                       <tr key={s.id}>
                         <td className="font-medium text-slate-900">{s.name}</td>
                         <td className="text-xs text-slate-500">{CHANNEL_LABEL[s.channel] || s.channel}</td>

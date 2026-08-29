@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   DateRangeFilter, defaultRange, useToast, Field, TombolEkspor,
+  KotakCari, saringLokal,
 } from '../components/ui';
 import { rupiah, rupiahShort, pct, dateID, today, CHANNEL_LABEL } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -37,6 +38,7 @@ export default function Iklan() {
   const toast = useToast();
   const { canManage } = useAuth();
   const [range, setRange] = useState(defaultRange);
+  const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [shops, setShops] = useState([]);
   const [rekening, setRekening] = useState([]);
@@ -124,7 +126,12 @@ export default function Iklan() {
         <TombolEkspor path="/api/iklan" params={range} nama="biaya-iklan" />
       </PageHeader>
 
-      <DateRangeFilter range={range} onChange={setRange} />
+      <DateRangeFilter range={range} onChange={setRange}>
+        <div className="flex-[2]">
+          <label className="label">Cari</label>
+          <KotakCari nilai={q} onCari={setQ} placeholder="Toko, platform, catatan..." />
+        </div>
+      </DateRangeFilter>
 
       {loading || !data ? (
         <Spinner />
@@ -257,7 +264,7 @@ export default function Iklan() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.rows.map((b) => (
+                    {saringLokal(data.rows, q, (b) => [b.shop_name, b.platform, b.note, b.channel]).map((b) => (
                       <tr key={b.id}>
                         <td className="tabular">{dateID(b.spend_date)}</td>
                         <td className="text-sm">{b.shop_name || <span className="text-slate-400">tanpa toko</span>}</td>

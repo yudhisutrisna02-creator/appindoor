@@ -3,7 +3,7 @@ import { Target as TargetIcon, TrendingUp, Copy, Pencil, Trash2, AlertTriangle }
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  useToast, Field, TombolEkspor,
+  useToast, Field, TombolEkspor, KotakCari, saringLokal,
 } from '../components/ui';
 import { rupiah, rupiahShort, num } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -72,6 +72,7 @@ export default function Target() {
   const bolehKelola = punya('target.kelola');
 
   const [period, setPeriod] = useState(bulanIni);
+  const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
@@ -187,9 +188,15 @@ export default function Target() {
       </PageHeader>
 
       <div className="card mb-4">
-        <Field label="Bulan" className="max-w-xs">
-          <input type="month" className="input" value={period} onChange={(e) => setPeriod(e.target.value)} />
-        </Field>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <Field label="Bulan" className="sm:max-w-xs sm:flex-1">
+            <input type="month" className="input" value={period} onChange={(e) => setPeriod(e.target.value)} />
+          </Field>
+          <div className="sm:flex-[2]">
+            <label className="label">Cari</label>
+            <KotakCari nilai={q} onCari={setQ} placeholder="Nama toko atau channel..." />
+          </div>
+        </div>
         <p className="mt-2 text-xs text-slate-500">
           {data.hari.berjalan
             ? `Hari ke-${data.hari.lewat} dari ${data.hari.total} — tersisa ${sisaHari} hari.`
@@ -283,7 +290,7 @@ export default function Target() {
           <EmptyState message="Belum ada toko terdaftar" hint="Tambahkan toko di menu Penjualan → Toko / Marketplace" />
         ) : (
           <div className="space-y-3">
-            {data.rows.map((r) => (
+            {saringLokal(data.rows, q, (r) => [r.nama, r.channelLabel, r.channel]).map((r) => (
               <div
                 key={r.kunci}
                 className={`rounded-xl p-4 ring-1 ${

@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState,
   DateRangeFilter, defaultRange, useToast, Field,
+  KotakCari,
 } from '../components/ui';
 import { rupiah, rupiahShort, dateID, today, STATUS_PESANAN, WARNA_STATUS, CHANNEL_LABEL } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -28,6 +29,7 @@ export default function Pengiriman() {
   const bolehUbah = punya('penjualan.ubah');
 
   const [range, setRange] = useState(defaultRange);
+  const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tahap, setTahap] = useState('DIPROSES');
@@ -40,7 +42,7 @@ export default function Pengiriman() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.get('/api/sales/papan', range));
+      setData(await api.get('/api/sales/papan', { ...range, q }));
       setPilih([]);
     } catch (err) {
       toast.error(err.message);
@@ -48,7 +50,7 @@ export default function Pengiriman() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range]);
+  }, [range, q]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -112,7 +114,15 @@ export default function Pengiriman() {
         subtitle="Pindahkan pesanan antar tahap tanpa membuka satu per satu"
       />
 
-      <DateRangeFilter range={range} onChange={setRange} />
+      <DateRangeFilter range={range} onChange={setRange}>
+        <div className="flex-[2]">
+          <label className="label">Cari</label>
+          <KotakCari
+            nilai={q} onCari={setQ}
+            placeholder="No. order, no. pesanan, resi, nama pembeli, toko..."
+          />
+        </div>
+      </DateRangeFilter>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
         <StatCard label="Total Pesanan" value={r.total} sub={`${data.from} s/d ${data.to}`} icon={Truck} />

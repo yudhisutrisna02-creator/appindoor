@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
-import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
+import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, KotakCari } from '../components/ui';
 import UbahOrder from './UbahOrder';
 import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -49,6 +49,10 @@ export default function Penjualan() {
   const { canManage } = useAuth();
   const [range, setRange] = useState(defaultRange);
   const [channel, setChannel] = useState('');
+  const [q, setQ] = useState('');
+  // Kolom keuangan disembunyikan secara bawaan; angkanya tetap ada, hanya tidak
+  // ikut memenuhi layar saat yang dicari adalah satu pesanan.
+  const [tampilUang, setTampilUang] = useState(false);
   const [data, setData] = useState(null);
   const [products, setProducts] = useState([]);
   const [partners, setPartners] = useState([]);
@@ -62,14 +66,14 @@ export default function Penjualan() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.get('/api/sales', { ...range, channel }));
+      setData(await api.get('/api/sales', { ...range, channel, q }));
     } catch (err) {
       toast.error(err.message);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, channel]);
+  }, [range, channel, q]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -199,7 +203,7 @@ export default function Penjualan() {
         <Link className="btn-secondary" to="/penjualan/retur">
           <Undo2 size={16} /> Retur
         </Link>
-          <TombolEkspor path="/api/sales" params={{ ...range, channel }} nama="order-penjualan" />
+          <TombolEkspor path="/api/sales" params={{ ...range, channel, q }} nama="order-penjualan" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange}>
@@ -210,7 +214,21 @@ export default function Penjualan() {
             {Object.entries(CHANNEL_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </div>
+        <div className="flex-[2]">
+          <label className="label">Cari</label>
+          <KotakCari
+            nilai={q} onCari={setQ}
+            placeholder="No. order, no. pesanan, resi, nama pembeli, toko..."
+          />
+        </div>
       </DateRangeFilter>
+
+      {q && (
+        <p className="mb-4 rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-800 dark:bg-brand-400/10">
+          Mencari <strong>{q}</strong> pada seluruh order dalam rentang tanggal ini — bukan hanya
+          yang sedang tampil di layar.
+        </p>
+      )}
 
       {loading ? (
         <Spinner />
@@ -238,6 +256,20 @@ export default function Penjualan() {
             {/* Ringkasan di atas selalu menghitung seluruh periode; tabel di
                 bawah dibatasi agar halaman tetap ringan. Bedanya disebutkan
                 supaya daftar yang terpotong tidak dikira sudah lengkap. */}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-600">
+                {data.rows.length} order ditampilkan
+                {q && ` untuk pencarian “${q}”`}
+              </p>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox" checked={tampilUang}
+                  onChange={(e) => setTampilUang(e.target.checked)}
+                />
+                Tampilkan kolom keuangan
+              </label>
+            </div>
+
             {data.terpotong && (
               <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Menampilkan {data.rows.length} order terbaru dari {data.totalRows} order pada periode ini.
@@ -250,28 +282,41 @@ export default function Penjualan() {
               <div className="table-wrap">
                 <table className="table">
                   <thead>
+                    {/* Kolom utama adalah yang dipakai mencari dan mencocokkan
+                        satu pesanan dengan marketplace. Angka keuangannya
+                        disembunyikan secara bawaan — bukan dibuang — karena
+                        tiga belas kolom sekaligus membuat yang penting justru
+                        tenggelam. */}
                     <tr>
-                      <th>No. Order</th><th>Tanggal</th><th>Channel</th><th>Pelanggan</th>
-                      <th>Pendapatan</th><th>HPP</th><th>Biaya</th><th>Laba Bersih</th><th>Margin</th><th>Pesanan</th><th>Bayar</th><th></th>
+                      <th>No. Order</th><th>Tanggal</th><th>Toko</th><th>Nama Pembeli</th>
+                      <th>No. Pesanan</th><th>Resi / Kode Booking</th>
+                      <th>Pesanan</th><th>Bayar</th>
+                      {tampilUang && (
+                        <>
+                          <th className="text-right">Pendapatan</th>
+                          <th className="text-right">HPP</th>
+                          <th className="text-right">Biaya</th>
+                          <th className="text-right">Laba Bersih</th>
+                          <th className="text-right">Margin</th>
+                        </>
+                      )}
+                      <th>Detail Pesanan</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.rows.map((o) => (
                       <tr key={o.id}>
                         <td className="font-mono text-xs">{o.order_no}</td>
-                        <td className="tabular">{dateID(o.order_date)}</td>
-                        <td className="text-xs">{CHANNEL_LABEL[o.channel]}</td>
-                        <td className="text-sm">{o.customer || '-'}</td>
-                        <td className="tabular">{rupiah(o.net_revenue)}</td>
-                        <td className="tabular text-slate-500">{rupiah(o.cogs)}</td>
-                        <td className="tabular text-amber-600">{rupiah(o.total_fees)}</td>
-                        <td className={`tabular font-semibold ${o.net_profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {rupiah(o.net_profit)}
+                        <td className="tabular whitespace-nowrap">{dateID(o.order_date)}</td>
+                        <td className="text-sm">
+                          {o.shop_name || '-'}
+                          <span className="block text-[11px] text-slate-500">{CHANNEL_LABEL[o.channel]}</span>
                         </td>
-                        <td className="tabular">
-                          <span className={o.margin_pct >= 15 ? 'badge-green' : o.margin_pct >= 0 ? 'badge-amber' : 'badge-red'}>
-                            {pct(o.margin_pct)}
-                          </span>
+                        <td className="text-sm">{o.buyer_name || o.customer || '-'}</td>
+                        <td className="font-mono text-xs">{o.order_ref || '-'}</td>
+                        <td className="font-mono text-xs">
+                          {o.tracking_no || '-'}
+                          {o.courier && <span className="block text-[11px] text-slate-500">{o.courier}</span>}
                         </td>
                         <td>
                           <span className={WARNA_STATUS[o.fulfillment_status] || 'badge-slate'}>
@@ -283,6 +328,21 @@ export default function Penjualan() {
                             {o.payment_status === 'PAID' ? 'Lunas' : 'Belum cair'}
                           </span>
                         </td>
+                        {tampilUang && (
+                          <>
+                            <td className="tabular text-right">{rupiah(o.net_revenue)}</td>
+                            <td className="tabular text-right text-slate-500">{rupiah(o.cogs)}</td>
+                            <td className="tabular text-right text-amber-600">{rupiah(o.total_fees)}</td>
+                            <td className={`tabular text-right font-semibold ${o.net_profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {rupiah(o.net_profit)}
+                            </td>
+                            <td className="tabular text-right">
+                              <span className={o.margin_pct >= 15 ? 'badge-green' : o.margin_pct >= 0 ? 'badge-amber' : 'badge-red'}>
+                                {pct(o.margin_pct)}
+                              </span>
+                            </td>
+                          </>
+                        )}
                         <td>
                           <div className="flex gap-1">
                             <button

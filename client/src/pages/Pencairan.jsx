@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   useToast, Field, DateRangeFilter, defaultRange, TombolEkspor,
+  KotakCari, saringLokal,
 } from '../components/ui';
 import { rupiah, rupiahShort, dateID, today } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -28,6 +29,7 @@ export default function Pencairan() {
   const bolehTandai = punya('penjualan.ubah');
 
   const [asOf, setAsOf] = useState(today());
+  const [q, setQ] = useState('');
   const [range, setRange] = useState(defaultRange);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -54,11 +56,11 @@ export default function Pencairan() {
 
   const tampil = useMemo(() => {
     if (!data) return [];
-    return data.rows
+    return saringLokal(data.rows, q, (o) => [o.order_no, o.order_ref, o.shop_name, o.buyer_city, o.courier])
       .filter((o) => !ember || o.ember === ember)
       .filter((o) => !toko || String(o.shop_id) === toko)
       .sort((a, b) => b.umur_hari - a.umur_hari || b.nilai - a.nilai);
-  }, [data, ember, toko]);
+  }, [data, ember, toko, q]);
 
   const nilaiPilih = useMemo(
     () => (data ? data.rows.filter((o) => pilih.has(o.id)).reduce((s, o) => s + o.nilai, 0) : 0),
@@ -383,7 +385,12 @@ export default function Pencairan() {
 
       <div className="card mt-4">
         <h2 className="card-title mb-2">Ringkasan Pencairan per Periode</h2>
-        <DateRangeFilter range={range} onChange={setRange} />
+        <DateRangeFilter range={range} onChange={setRange}>
+        <div className="flex-[2]">
+          <label className="label">Cari</label>
+          <KotakCari nilai={q} onCari={setQ} placeholder="No. pesanan, no. order, toko, kota..." />
+        </div>
+      </DateRangeFilter>
         <p className="mt-2 text-sm text-slate-700">
           Pada {dateID(data.from)} – {dateID(data.to)}, <strong>{r.cairOrders} order</strong> cair
           senilai <strong>{rupiah(r.cairNilai)}</strong>, rata-rata{' '}

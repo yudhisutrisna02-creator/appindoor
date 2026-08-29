@@ -2139,6 +2139,94 @@ async function main() {
       res.ok && buf.length > 200, `${res.status}, ${buf.length} byte`);
   }
 
+  // ---------- Pencarian order ----------
+  console.log('\n26. Pencarian di menu Penjualan');
+
+  const tokoCari = await call('POST', '/api/shops', {
+    name: `Toko Cari ${Date.now()}`, channel: 'SHOPEE',
+  });
+  const idTokoCari = (tokoCari.shop || tokoCari).id;
+  const resiUji = `JX${Date.now()}`;
+  const refUji = `INV-CARI-${Date.now()}`;
+
+  const orderCari = await call('POST', '/api/sales', {
+    order_date: today, shop_id: idTokoCari, channel: 'SHOPEE',
+    items: [{ product_id: produkCair.product.id, qty: 1, price: 25000 }],
+    order_ref: refUji, tracking_no: resiUji, courier: 'JNE',
+    buyer_name: 'Sitti Rahmawati Uji',
+  });
+
+  const cariLewat = async (kata) =>
+    call('GET', `/api/sales?from=${today}&to=${today}&q=${encodeURIComponent(kata)}`);
+
+  for (const [label, kata] of [
+    ['nomor order', orderCari.order.order_no],
+    ['nomor pesanan marketplace', refUji],
+    ['nomor resi', resiUji],
+    ['nama pembeli', 'Sitti Rahmawati'],
+  ]) {
+    const h = await cariLewat(kata);
+    check(`order ketemu lewat ${label}`,
+      h.rows.some((o) => o.id === orderCari.order.id), `${h.rows.length} hasil`);
+  }
+
+  // Pencarian sebagian kata harus tetap menemukan — orang mengetik separuh resi.
+  const separuh = await cariLewat(resiUji.slice(2, 10));
+  check('pencarian separuh nomor resi tetap menemukan',
+    separuh.rows.some((o) => o.id === orderCari.order.id));
+
+  const takAda = await cariLewat('zzz-tidak-ada-zzz');
+  check('kata yang tidak cocok menghasilkan daftar kosong', takAda.rows.length === 0);
+
+  // Ringkasan harus ikut menyempit; kalau tidak, angka di atas layar bertentangan
+  // dengan daftar di bawahnya.
+  const hasilCari = await cariLewat(refUji);
+  check('ringkasan ikut menyempit mengikuti pencarian',
+    hasilCari.summary.orders === hasilCari.rows.length && hasilCari.summary.orders === 1,
+    `ringkas ${hasilCari.summary.orders} vs baris ${hasilCari.rows.length}`);
+
+  // Pencarian tidak boleh mengabaikan penyaring lain yang sedang aktif.
+  const dgnChannel = await call('GET',
+    `/api/sales?from=${today}&to=${today}&q=${encodeURIComponent(refUji)}&channel=TIKTOK_SHOP`);
+  check('pencarian tetap tunduk pada penyaring channel', dgnChannel.rows.length === 0);
+
+  const satuHuruf = await cariLewat('a');
+  const tanpaCari = await call('GET', `/api/sales?from=${today}&to=${today}`);
+  check('kata terlalu pendek diabaikan, bukan menyaring asal',
+    satuHuruf.rows.length === tanpaCari.rows.length,
+    `${satuHuruf.rows.length} vs ${tanpaCari.rows.length}`);
+
+  // Karakter khusus LIKE tidak boleh berlaku sebagai wildcard. Dipakai dua
+  // karakter, bukan satu, supaya tidak keburu tersaring oleh batas kata minimum
+  // dan lolos tanpa benar-benar menguji apa pun. Bila '%' tidak di-escape,
+  // polanya menjadi cocok untuk semua baris.
+  const persen = await cariLewat('%%');
+  check('tanda % dicari apa adanya, bukan sebagai wildcard',
+    persen.rows.length === 0, `${persen.rows.length} hasil`);
+
+  const garisBawah = await cariLewat('__');
+  check('tanda _ juga tidak berlaku sebagai wildcard',
+    garisBawah.rows.length === 0, `${garisBawah.rows.length} hasil`);
+
+  const papanCari = await call('GET',
+    `/api/sales/papan?from=${today}&to=${today}&q=${encodeURIComponent(resiUji)}`);
+  const semuaTahap = Object.values(papanCari.tahap || {}).flat();
+  check('papan pengiriman ikut bisa dicari',
+    semuaTahap.some((o) => o.id === orderCari.order.id) ||
+    JSON.stringify(papanCari).includes(resiUji),
+    `${semuaTahap.length} baris`);
+
+  // Berkas unduhan harus berisi persis apa yang sedang dicari, bukan seluruhnya.
+  const unduhCari = await fetch(
+    `${BASE}/api/sales/export/csv?from=${today}&to=${today}&q=${encodeURIComponent(refUji)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const isiUnduh = Buffer.from(await unduhCari.arrayBuffer()).toString('utf8');
+  const barisUnduh = isiUnduh.trim().split('\r\n').length - 1;
+  check('unduhan mengikuti pencarian yang sedang aktif',
+    unduhCari.ok && barisUnduh === 1 && isiUnduh.includes(refUji),
+    `${barisUnduh} baris`);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

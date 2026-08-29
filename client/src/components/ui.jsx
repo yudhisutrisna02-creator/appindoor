@@ -1,5 +1,5 @@
 import { createContext, useContext, useCallback, useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle2, Info, X, Loader2, FileSpreadsheet, FileText, Printer } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, X, Loader2, FileSpreadsheet, FileText, Printer, Search } from 'lucide-react';
 import { firstOfMonth, today } from '../lib/format';
 import { api } from '../lib/api';
 
@@ -193,6 +193,69 @@ export function Field({ label, children, hint, className = '' }) {
 }
 
 /**
+ * Kotak pencarian.
+ *
+ * Dibuat satu komponen supaya seluruh menu berperilaku sama: penundaan yang
+ * sama sebelum mencari, tombol hapus di tempat yang sama, dan keterangan yang
+ * sama tentang kolom apa saja yang dicari. Pengguna tidak perlu belajar ulang
+ * tiap pindah halaman.
+ *
+ * `onCari` dipanggil setelah pengetikan berhenti sejenak. Tanpa jeda itu,
+ * pencarian di sisi peladen akan mengirim satu permintaan per huruf.
+ */
+export function KotakCari({ nilai, onCari, placeholder = 'Cari...', jeda = 350, className = '' }) {
+  const [teks, setTeks] = useState(nilai || '');
+
+  // Nilai dari luar (mis. saringan direset halaman) harus menang atas isi kotak.
+  useEffect(() => { setTeks(nilai || ''); }, [nilai]);
+
+  useEffect(() => {
+    if ((nilai || '') === teks) return undefined;
+    const t = setTimeout(() => onCari(teks), jeda);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teks, jeda]);
+
+  return (
+    <div className={`relative ${className}`}>
+      <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+      <input
+        className="input !pl-9 !pr-8"
+        value={teks}
+        placeholder={placeholder}
+        onChange={(e) => setTeks(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter mencari seketika tanpa menunggu jeda; Escape mengosongkan.
+          if (e.key === 'Enter') onCari(teks);
+          if (e.key === 'Escape') { setTeks(''); onCari(''); }
+        }}
+      />
+      {teks && (
+        <button
+          type="button"
+          onClick={() => { setTeks(''); onCari(''); }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          aria-label="Hapus pencarian"
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Penyaring di sisi layar untuk daftar yang sudah termuat seluruhnya. */
+export function saringLokal(rows, kata, ambil) {
+  const k = String(kata || '').trim().toLowerCase();
+  if (k.length < 1) return rows;
+  return rows.filter((r) =>
+    ambil(r).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(k))
+  );
+}
+
+const EKSTENSI = { excel: 'xlsx', pdf: 'pdf', csv: 'csv' };
+
+/**
  * Sepasang tombol unduhan Excel dan PDF.
  *
  * Dibuat satu komponen supaya setiap menu mendapat perilaku yang sama —
@@ -200,8 +263,6 @@ export function Field({ label, children, hint, className = '' }) {
  * yang sedang aktif di layar ikut dikirim sebagai parameter, jadi berkas yang
  * turun berisi persis apa yang sedang dilihat pengguna, bukan seluruh tabel.
  */
-const EKSTENSI = { excel: 'xlsx', pdf: 'pdf', csv: 'csv' };
-
 export function TombolEkspor({ path, params = {}, nama = 'laporan', kecil = false, csv = false }) {
   const toast = useToast();
   const [sibuk, setSibuk] = useState(null);

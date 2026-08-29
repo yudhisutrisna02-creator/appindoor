@@ -3,12 +3,15 @@ import { Undo2, Plus, PackageCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
-  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
+  DateRangeFilter, defaultRange, useToast, Field, TombolEkspor,
+  KotakCari,
+} from '../components/ui';
 import { rupiah, num, today, dateID } from '../lib/format';
 
 export default function Retur() {
   const toast = useToast();
   const [range, setRange] = useState(defaultRange);
+  const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,14 +21,14 @@ export default function Retur() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.get('/api/sales/returns/list', range));
+      setData(await api.get('/api/sales/returns/list', { ...range, q }));
     } catch (err) {
       toast.error(err.message);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range]);
+  }, [range, q]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -83,7 +86,12 @@ export default function Retur() {
         <TombolEkspor path="/api/sales/returns/list" params={range} nama="retur-penjualan" />
       </PageHeader>
 
-      <DateRangeFilter range={range} onChange={setRange} />
+      <DateRangeFilter range={range} onChange={setRange}>
+        <div className="flex-[2]">
+          <label className="label">Cari</label>
+          <KotakCari nilai={q} onCari={setQ} placeholder="Nama produk, SKU, no. retur, alasan..." />
+        </div>
+      </DateRangeFilter>
 
       {loading || !data ? (
         <Spinner />
