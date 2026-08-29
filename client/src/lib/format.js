@@ -81,3 +81,32 @@ export const WARNA_STATUS = {
   RETUR: 'badge-red',
   BATAL: 'badge-red',
 };
+
+/**
+ * Warna lencana per channel penjualan.
+ *
+ * Memakai warna yang sudah dikenali orang dari aplikasi marketplace-nya
+ * masing-masing, supaya satu baris bisa dikenali tanpa membaca tulisannya —
+ * yang berguna saat menyusuri ratusan order sekaligus.
+ *
+ * Nilainya ditulis sebagai heksadesimal, bukan warna bawaan Tailwind, karena
+ * yang diminta adalah warna merek yang tepat; padanan terdekat Tailwind
+ * meleset cukup jauh untuk oranye Shopee dan hijau army Tokopedia.
+ */
+export const WARNA_CHANNEL = {
+  SHOPEE: 'bg-[#EE4D2D]',
+  TIKTOK_SHOP: 'bg-[#111111]',
+  LAZADA: 'bg-[#EC1C7E]',
+  OFFLINE_WA: 'bg-[#16A34A]',
+  WEBSITE: 'bg-[#2563EB]',
+  TOKOPEDIA: 'bg-[#4B5320]',
+  // Tidak diminta secara khusus; diberi warna sendiri agar tidak tertukar
+  // dengan channel lain saat muncul.
+  SOCIAL_MEDIA: 'bg-[#7C3AED]',
+};
+
+/** Lencana channel siap pakai — teksnya selalu putih agar kontras terjaga. */
+export const kelasChannel = (channel) =>
+  `inline-block rounded-md px-2 py-0.5 text-xs font-semibold text-white ${
+    WARNA_CHANNEL[channel] || 'bg-slate-500'
+  }`;

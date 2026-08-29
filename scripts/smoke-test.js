@@ -2276,6 +2276,97 @@ async function main() {
   check('penyaring status pesanan juga menonaktifkan angka iklan',
     dgnStatus.iklan.berlaku === false);
 
+  // ---------- Ubah detail pesanan ----------
+  console.log('\n28. Ubah isi pesanan dari layar');
+
+  const stokAwalUbah = (await call('GET', `/api/inventory/products?limit=2000`))
+    .products.find((p) => p.id === produkCair.product.id).stock;
+
+  const orderUbah = await call('POST', '/api/sales', {
+    order_date: today, shop_id: idTokoCari, channel: 'SHOPEE',
+    items: [{ product_id: produkCair.product.id, qty: 2, price: 25000 }],
+    buyer_name: 'Pembeli Awal',
+  });
+  const stokSetelahBuat = (await call('GET', `/api/inventory/products?limit=2000`))
+    .products.find((p) => p.id === produkCair.product.id).stock;
+  check('membuat order memotong stok', near(stokSetelahBuat, stokAwalUbah - 2, 0.001),
+    `${stokAwalUbah} lalu ${stokSetelahBuat}`);
+
+  // Detail order harus membawa barisnya — layar mengambilnya dari sini saat
+  // formulir ubah dibuka.
+  const detailUbah = await call('GET', `/api/sales/${orderUbah.order.id}`);
+  check('detail order membawa baris barangnya',
+    Array.isArray(detailUbah.items) && detailUbah.items.length === 1
+      && detailUbah.items[0].qty === 2);
+
+  // Ubah data pembeli saja: stok tidak boleh ikut bergerak.
+  await call('PUT', `/api/sales/${orderUbah.order.id}`, {
+    buyer_name: 'Pembeli Diperbaiki', buyer_phone: '08123456789',
+  });
+  const stokSetelahPembeli = (await call('GET', `/api/inventory/products?limit=2000`))
+    .products.find((p) => p.id === produkCair.product.id).stock;
+  check('mengubah data pembeli tidak menyentuh stok',
+    near(stokSetelahPembeli, stokSetelahBuat, 0.001));
+  const cekPembeli = await call('GET', `/api/sales/${orderUbah.order.id}`);
+  check('data pembeli tersimpan', cekPembeli.order.buyer_name === 'Pembeli Diperbaiki');
+
+  // Ubah isi pesanan: stok harus menyesuaikan selisihnya, bukan dipotong ulang.
+  await call('PUT', `/api/sales/${orderUbah.order.id}`, {
+    items: [{ product_id: produkCair.product.id, qty: 5, price: 30000 }],
+  });
+  const stokSetelahItem = (await call('GET', `/api/inventory/products?limit=2000`))
+    .products.find((p) => p.id === produkCair.product.id).stock;
+  check('menaikkan qty memotong stok sebesar selisihnya saja',
+    near(stokSetelahItem, stokSetelahBuat - 3, 0.001),
+    `${stokSetelahBuat} lalu ${stokSetelahItem}`);
+
+  const sesudahItem = await call('GET', `/api/sales/${orderUbah.order.id}`);
+  check('baris pesanan tersimpan sesuai yang dikirim',
+    sesudahItem.items.length === 1 && sesudahItem.items[0].qty === 5
+      && near(sesudahItem.items[0].price, 30000, 1));
+  check('nilai order dihitung ulang mengikuti barisnya',
+    near(sesudahItem.order.gross_sales, 150000, 1), `${sesudahItem.order.gross_sales}`);
+
+  // Jurnalnya harus ikut ditulis ulang, bukan menyisakan yang lama.
+  const jurnalUbah = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('pembukuan tetap seimbang setelah isi pesanan diubah',
+    near(jurnalUbah.totalDebit, jurnalUbah.totalCredit, 1));
+
+  // Menambah baris kedua pada order yang sama. Barang keduanya diberi stok
+  // lebih dulu — produk dari uji nota tadi memang belum pernah diterima.
+  await call('POST', '/api/inventory/moves', {
+    product_id: produkNota.product.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 12000, note: 'Stok untuk uji ubah pesanan',
+  });
+  await call('PUT', `/api/sales/${orderUbah.order.id}`, {
+    items: [
+      { product_id: produkCair.product.id, qty: 2, price: 30000 },
+      { product_id: produkNota.product.id, qty: 1, price: 20000 },
+    ],
+  });
+  const duaBarisUbah = await call('GET', `/api/sales/${orderUbah.order.id}`);
+  check('barang bisa ditambahkan ke pesanan yang sudah ada',
+    duaBarisUbah.items.length === 2 && near(duaBarisUbah.order.gross_sales, 80000, 1),
+    `${duaBarisUbah.items.length} baris, ${duaBarisUbah.order.gross_sales}`);
+
+  const stokKembali = (await call('GET', `/api/inventory/products?limit=2000`))
+    .products.find((p) => p.id === produkCair.product.id).stock;
+  check('menurunkan qty mengembalikan stoknya',
+    near(stokKembali, stokSetelahBuat, 0.001), `${stokKembali} vs ${stokSetelahBuat}`);
+
+  // Stok tetap dijaga saat diubah, bukan hanya saat dibuat.
+  let tolakStokUbah = 0;
+  try {
+    await call('PUT', `/api/sales/${orderUbah.order.id}`, {
+      items: [{ product_id: produkCair.product.id, qty: 999999, price: 30000 }],
+    });
+  } catch (err) {
+    tolakStokUbah = err.status;
+  }
+  check('mengubah pesanan melebihi stok tetap ditolak',
+    tolakStokUbah === 422, `status ${tolakStokUbah}`);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

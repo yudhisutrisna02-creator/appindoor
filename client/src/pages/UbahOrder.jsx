@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { Modal, Field, useToast } from '../components/ui';
 import { STATUS_PESANAN, CHANNEL_LABEL, rupiah } from '../lib/format';
@@ -13,15 +13,48 @@ import { STATUS_PESANAN, CHANNEL_LABEL, rupiah } from '../lib/format';
  * disentuh ikut ditulis ulang, dan perbedaan pembulatan kecil pun bisa
  * menggeser angka yang sebenarnya tidak diapa-apakan.
  */
-export default function UbahOrder({ order, shops = [], open, onClose, onSaved }) {
+export default function UbahOrder({ order, shops = [], products = [], open, onClose, onSaved }) {
   const toast = useToast();
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [bukaBiaya, setBukaBiaya] = useState(false);
+  // Baris pesanan tidak ikut pada daftar order — daftar hanya membawa
+  // ringkasannya — jadi harus diambil tersendiri saat formulirnya dibuka.
+  const [itemAwal, setItemAwal] = useState(null);
+  const [memuatItem, setMemuatItem] = useState(false);
+
+  useEffect(() => {
+    if (!order) {
+      setItemAwal(null);
+      return;
+    }
+    let batalAmbil = false;
+    setMemuatItem(true);
+    api
+      .get(`/api/sales/${order.id}`)
+      .then((d) => {
+        if (batalAmbil) return;
+        // Peladen mengirim items sejajar dengan order, bukan di dalamnya.
+        const isi = (d.items || []).map((i) => ({
+          product_id: String(i.product_id),
+          qty: i.qty,
+          price: i.price,
+        }));
+        setItemAwal(isi);
+        setForm((f) => (f ? { ...f, items: isi.map((x) => ({ ...x })) } : f));
+      })
+      .catch((err) => {
+        if (!batalAmbil) toast.error(`Gagal memuat detail pesanan: ${err.message}`);
+      })
+      .finally(() => { if (!batalAmbil) setMemuatItem(false); });
+    return () => { batalAmbil = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order]);
 
   useEffect(() => {
     if (!order) return setForm(null);
     setForm({
+      items: [],
       fulfillment_status: order.fulfillment_status || 'DIPROSES',
       payment_status: order.payment_status || 'UNPAID',
       payout_date: order.payout_date || '',
@@ -53,6 +86,12 @@ export default function UbahOrder({ order, shops = [], open, onClose, onSaved })
 
   const batal = form.fulfillment_status === 'BATAL';
 
+  // Penjualan kotor dari baris yang sedang tampil; peladen tetap menghitung
+  // ulang sendiri, angka ini hanya supaya perubahannya terlihat sebelum disimpan.
+  const totalItem = (form.items || []).reduce(
+    (s2, i) => s2 + (Number(i.qty) || 0) * (Number(i.price) || 0), 0
+  );
+
   /** Hanya kolom yang berbeda dari nilai semula yang dikirim. */
   function perubahan() {
     const kirim = {};
@@ -62,6 +101,10 @@ export default function UbahOrder({ order, shops = [], open, onClose, onSaved })
     ]);
 
     for (const [k, v] of Object.entries(form)) {
+      // Baris pesanan dibandingkan tersendiri di bawah; ia larik, bukan nilai
+      // tunggal, dan perbandingan biasa akan menganggapnya selalu berubah.
+      if (k === 'items') continue;
+
       const semula = order[k];
       if (angka.has(k)) {
         const n = Number(v) || 0;
@@ -77,6 +120,29 @@ export default function UbahOrder({ order, shops = [], open, onClose, onSaved })
       const lama = semula === '' || semula === undefined ? null : semula;
       if (teks !== lama) kirim[k] = teks;
     }
+
+    // Baris pesanan hanya ikut dikirim bila benar-benar berbeda. Mengirimnya
+    // setiap kali berarti stok dikembalikan lalu dipotong lagi pada tiap
+    // penyimpanan — pekerjaan berat yang tidak perlu, dan satu kesempatan
+    // tambahan untuk salah setiap kali.
+    const bersih = (form.items || [])
+      .filter((i) => i.product_id && Number(i.qty) > 0)
+      .map((i) => ({
+        product_id: Number(i.product_id),
+        qty: Number(i.qty),
+        price: Number(i.price) || 0,
+      }));
+
+    if (itemAwal) {
+      const sama =
+        bersih.length === itemAwal.length &&
+        bersih.every((i, n) =>
+          i.product_id === Number(itemAwal[n].product_id) &&
+          Math.abs(i.qty - Number(itemAwal[n].qty)) < 0.0001 &&
+          Math.abs(i.price - Number(itemAwal[n].price)) < 0.004);
+      if (!sama) kirim.items = bersih;
+    }
+
     return kirim;
   }
 
@@ -91,6 +157,12 @@ export default function UbahOrder({ order, shops = [], open, onClose, onSaved })
 
     if (batal && !window.confirm(
       `Menandai ${order.order_no} sebagai Batal akan mengembalikan stoknya dan menghapus jurnalnya. Lanjutkan?`
+    )) return;
+
+    // Mengubah isi pesanan menyentuh stok dan jurnal sekaligus, jadi layak
+    // ditanyakan sekali — berbeda dengan mengoreksi nomor resi.
+    if (kirim.items && !window.confirm(
+      `Isi pesanan ${order.order_no} berubah. Stok akan disesuaikan dan jurnalnya ditulis ulang. Lanjutkan?`
     )) return;
 
     setSaving(true);
@@ -178,6 +250,113 @@ export default function UbahOrder({ order, shops = [], open, onClose, onSaved })
         <Field label="Alamat Pembeli" className="sm:col-span-2">
           <input className="input" value={form.buyer_address} onChange={ubah('buyer_address')} disabled={batal} />
         </Field>
+        {/* ---------- Detail pesanan ---------- */}
+        <div className="sm:col-span-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-slate-900">Detail Pesanan</p>
+            {!batal && (
+              <button
+                type="button" className="btn-secondary !px-2.5 !py-1 text-xs"
+                onClick={() => setForm({
+                  ...form,
+                  items: [...(form.items || []), { product_id: '', qty: 1, price: '' }],
+                })}
+              >
+                <Plus size={13} /> Tambah Barang
+              </button>
+            )}
+          </div>
+
+          {memuatItem ? (
+            <p className="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-500">Memuat detail pesanan...</p>
+          ) : (form.items || []).length === 0 ? (
+            <p className="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-500">
+              Pesanan ini belum punya baris barang.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {form.items.map((it, i) => {
+                const p = products.find((x) => String(x.id) === String(it.product_id));
+                const subtotal = (Number(it.qty) || 0) * (Number(it.price) || 0);
+                return (
+                  <div key={i} className="grid gap-2 rounded-xl bg-slate-50 p-2 sm:grid-cols-12">
+                    <select
+                      className="input sm:col-span-5" value={it.product_id} disabled={batal}
+                      onChange={(e) => {
+                        const items = [...form.items];
+                        const dipilih = products.find((x) => String(x.id) === e.target.value);
+                        items[i] = {
+                          ...items[i],
+                          product_id: e.target.value,
+                          // Harga diisikan dari master hanya bila masih kosong,
+                          // supaya harga khusus yang sudah diketik tidak tertimpa.
+                          price: items[i].price === '' && dipilih ? dipilih.price : items[i].price,
+                        };
+                        setForm({ ...form, items });
+                      }}
+                    >
+                      <option value="">— pilih barang —</option>
+                      {products.map((x) => (
+                        <option key={x.id} value={x.id}>{x.name} (stok {x.stock})</option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="number" min="0" step="0.01" className="input sm:col-span-2"
+                      value={it.qty} placeholder="Qty" disabled={batal}
+                      onChange={(e) => {
+                        const items = [...form.items];
+                        items[i] = { ...items[i], qty: e.target.value };
+                        setForm({ ...form, items });
+                      }}
+                    />
+                    <input
+                      type="number" min="0" className="input sm:col-span-3"
+                      value={it.price} placeholder="Harga satuan" disabled={batal}
+                      onChange={(e) => {
+                        const items = [...form.items];
+                        items[i] = { ...items[i], price: e.target.value };
+                        setForm({ ...form, items });
+                      }}
+                    />
+
+                    <div className="flex items-center justify-between gap-2 sm:col-span-2">
+                      <span className="tabular text-xs text-slate-600">{rupiah(subtotal)}</span>
+                      {!batal && (
+                        <button
+                          type="button" className="btn-ghost !px-2 !py-1 text-rose-600"
+                          onClick={() => setForm({ ...form, items: form.items.filter((_, n) => n !== i) })}
+                          aria-label="Hapus barang"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    {p && (
+                      <p className="text-[11px] text-slate-500 sm:col-span-12">
+                        {p.sku} • HPP {rupiah(p.cost)} • laba baris {rupiah(subtotal - (Number(it.qty) || 0) * p.cost)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="flex justify-between px-2 text-sm">
+                <span className="text-slate-600">Penjualan kotor</span>
+                <span className="tabular font-semibold text-slate-900">{rupiah(totalItem)}</span>
+              </div>
+              {Math.abs(totalItem - (order.gross_sales || 0)) > 0.5 && (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:bg-amber-400/10">
+                  Berubah dari {rupiah(order.gross_sales)}. Menyimpan akan menyesuaikan stok dan
+                  menulis ulang jurnal order ini; biaya admin yang dihitung dari persentase ikut
+                  dihitung ulang.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         <Field label="Asal Leads">
           <input className="input" value={form.lead_source} onChange={ubah('lead_source')} disabled={batal} />
         </Field>

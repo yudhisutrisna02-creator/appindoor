@@ -4,7 +4,7 @@ import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2, Penci
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, KotakCari } from '../components/ui';
 import UbahOrder from './UbahOrder';
-import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS } from '../lib/format';
+import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 /** Preset biaya admin tipikal per marketplace — tetap dapat diubah manual. */
@@ -362,7 +362,11 @@ export default function Penjualan() {
                         <td className="tabular whitespace-nowrap">{dateID(o.order_date)}</td>
                         <td className="text-sm">
                           {o.shop_name || '-'}
-                          <span className="block text-[11px] text-slate-500">{CHANNEL_LABEL[o.channel]}</span>
+                          {/* Lencana channel diberi warna mereknya sendiri supaya
+                              satu baris bisa dikenali tanpa membaca tulisannya. */}
+                          <span className={`${kelasChannel(o.channel)} mt-0.5`}>
+                            {CHANNEL_LABEL[o.channel] || o.channel}
+                          </span>
                         </td>
                         <td className="text-sm">{o.buyer_name || o.customer || '-'}</td>
                         <td className="font-mono text-xs">{o.order_ref || '-'}</td>
