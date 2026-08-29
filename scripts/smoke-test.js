@@ -2227,6 +2227,55 @@ async function main() {
     unduhCari.ok && barisUnduh === 1 && isiUnduh.includes(refUji),
     `${barisUnduh} baris`);
 
+  // ---------- Ringkasan iklan pada Order Penjualan ----------
+  console.log('\n27. Biaya iklan pada ringkasan penjualan');
+
+  const bulanIni = `${today.slice(0, 8)}01`;
+  const sblmIklan = await call('GET', `/api/sales?from=${bulanIni}&to=${today}&limit=1`);
+  check('ringkasan penjualan membawa angka iklan',
+    sblmIklan.iklan && typeof sblmIklan.summary.iklan === 'number');
+
+  await call('POST', '/api/iklan', {
+    spend_date: today, shop_id: idTokoCari, channel: 'SHOPEE',
+    amount: 400000, payment: 'BANK', note: 'Uji kartu iklan',
+  });
+
+  const sslhIklan = await call('GET', `/api/sales?from=${bulanIni}&to=${today}&limit=1`);
+  check('belanja iklan ikut terhitung di ringkasan',
+    near(sslhIklan.summary.iklan, sblmIklan.summary.iklan + 400000, 1),
+    `${sblmIklan.summary.iklan} lalu ${sslhIklan.summary.iklan}`);
+  check('laba setelah iklan = laba bersih dikurangi iklan',
+    near(sslhIklan.summary.labaSetelahIklan, sslhIklan.summary.netProfit - sslhIklan.summary.iklan, 1),
+    `${sslhIklan.summary.labaSetelahIklan}`);
+  check('ROAS = pendapatan kotor dibagi belanja iklan',
+    sslhIklan.summary.roas === null ||
+    near(sslhIklan.summary.roas, sslhIklan.summary.netRevenue / sslhIklan.summary.iklan, 0.02),
+    `${sslhIklan.summary.roas}`);
+
+  // Penyaring toko punya padanan di catatan iklan, jadi ikut menyempit.
+  const perToko = await call('GET',
+    `/api/sales?from=${bulanIni}&to=${today}&shop_id=${idTokoCari}&limit=1`);
+  check('penyaring toko ikut menyempitkan belanja iklan',
+    perToko.iklan.berlaku && near(perToko.summary.iklan, 400000, 1),
+    `${perToko.summary.iklan}`);
+
+  // Inti kehati-hatiannya: pencarian tidak punya padanan pada catatan iklan.
+  // Menampilkan belanja sebulan penuh di sebelah satu order akan membuat
+  // "laba setelah iklan" jadi angka minus yang sepenuhnya karangan.
+  const dgnCari = await call('GET',
+    `/api/sales?from=${bulanIni}&to=${today}&q=${encodeURIComponent(refUji)}&limit=1`);
+  check('saat pencarian aktif, angka iklan dinyatakan tidak berlaku',
+    dgnCari.iklan.berlaku === false && dgnCari.summary.labaSetelahIklan === null,
+    JSON.stringify(dgnCari.iklan));
+  check('alasannya disebutkan, bukan sekadar dikosongkan',
+    typeof dgnCari.iklan.alasan === 'string' && dgnCari.iklan.alasan.length > 0,
+    dgnCari.iklan.alasan);
+
+  const dgnStatus = await call('GET',
+    `/api/sales?from=${bulanIni}&to=${today}&fulfillment_status=DIPROSES&limit=1`);
+  check('penyaring status pesanan juga menonaktifkan angka iklan',
+    dgnStatus.iklan.berlaku === false);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

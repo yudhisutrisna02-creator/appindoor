@@ -76,7 +76,30 @@ export function PageHeader({ title, subtitle, children }) {
   );
 }
 
-export function StatCard({ label, value, sub, icon: Icon, tone = 'brand' }) {
+/**
+ * Warna latar kartu.
+ *
+ * Dipakai untuk membedakan kartu yang berjajar banyak, bukan untuk menghias:
+ * warnanya mengikuti arti — biru untuk jumlah, hijau untuk yang menambah uang,
+ * amber dan merah untuk yang menguranginya. Warna yang dipilih asal justru
+ * membuat orang mencari makna yang tidak ada.
+ *
+ * Tiap warna disebut lengkap untuk mode terang dan gelap. Latar yang hanya
+ * ditulis untuk mode terang akan menenggelamkan tulisannya saat tema gelap.
+ */
+const LATAR = {
+  biru: 'bg-brand-50 ring-brand-200 dark:bg-brand-400/10 dark:ring-brand-400/25',
+  langit: 'bg-sky-50 ring-sky-200 dark:bg-sky-400/10 dark:ring-sky-400/25',
+  toska: 'bg-teal-50 ring-teal-200 dark:bg-teal-400/10 dark:ring-teal-400/25',
+  hijau: 'bg-emerald-50 ring-emerald-200 dark:bg-emerald-400/10 dark:ring-emerald-400/25',
+  amber: 'bg-amber-50 ring-amber-200 dark:bg-amber-400/10 dark:ring-amber-400/25',
+  jingga: 'bg-orange-50 ring-orange-200 dark:bg-orange-400/10 dark:ring-orange-400/25',
+  merah: 'bg-rose-50 ring-rose-200 dark:bg-rose-400/10 dark:ring-rose-400/25',
+  ungu: 'bg-violet-50 ring-violet-200 dark:bg-violet-400/10 dark:ring-violet-400/25',
+  abu: 'bg-slate-100 ring-slate-200 dark:bg-slate-400/10',
+};
+
+export function StatCard({ label, value, sub, icon: Icon, tone = 'brand', latar }) {
   const tones = {
     brand: 'bg-brand-50 text-brand-700',
     green: 'bg-emerald-50 text-emerald-700',
@@ -85,7 +108,7 @@ export function StatCard({ label, value, sub, icon: Icon, tone = 'brand' }) {
     slate: 'bg-slate-100 text-slate-700',
   };
   return (
-    <div className="card">
+    <div className={`card ${latar ? `ring-1 ${LATAR[latar] || ''}` : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="card-title truncate">{label}</p>
@@ -96,7 +119,9 @@ export function StatCard({ label, value, sub, icon: Icon, tone = 'brand' }) {
           {sub && <p className="mt-0.5 text-xs leading-snug text-slate-500">{sub}</p>}
         </div>
         {Icon && (
-          <div className={`shrink-0 rounded-xl p-2.5 ${tones[tone]}`}>
+          // Pada kartu berlatar warna, ikonnya tidak diberi bantalan berwarna
+          // lagi — dua warna bertumpuk membuat keduanya sama-sama sulit dibaca.
+          <div className={`shrink-0 rounded-xl p-2.5 ${latar ? 'text-slate-500' : tones[tone]}`}>
             <Icon size={20} />
           </div>
         )}

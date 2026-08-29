@@ -278,6 +278,47 @@ function cariOrder(q) {
   };
 }
 
+/**
+ * Belanja iklan pada periode yang sama dengan daftar order.
+ *
+ * Penyaring toko dan channel ikut diterapkan karena ad_spends memang punya
+ * kedua kolom itu. Pencarian bebas TIDAK bisa: kata kunci seperti nomor resi
+ * tidak punya padanan apa pun pada catatan iklan.
+ *
+ * Yang terjadi kalau itu diabaikan: mencari satu pesanan akan menyisakan satu
+ * order senilai seratus ribu, sementara kartu Biaya Iklan tetap menampilkan
+ * belanja sebulan penuh — dan "laba setelah iklan" berubah menjadi angka minus
+ * raksasa yang sepenuhnya karangan. Karena itu saat pencarian aktif, angkanya
+ * dinyatakan tidak berlaku, bukan ditampilkan apa adanya.
+ */
+function belanjaIklan(query, from, to) {
+  const kata = String(query.q || '').trim();
+  if (kata.length >= 2) {
+    return { nilai: 0, berlaku: false, alasan: 'pencarian aktif' };
+  }
+
+  const params = [from, to];
+  let where = 'WHERE spend_date BETWEEN ? AND ?';
+  if (query.channel && CHANNELS.includes(query.channel)) {
+    where += ' AND channel = ?';
+    params.push(query.channel);
+  }
+  if (query.shop_id) {
+    where += ' AND shop_id = ?';
+    params.push(Number(query.shop_id));
+  }
+  if (query.fulfillment_status) {
+    // Status pesanan tidak punya padanan pada belanja iklan.
+    return { nilai: 0, berlaku: false, alasan: 'disaring status pesanan' };
+  }
+
+  const row = db
+    .prepare(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM ad_spends ${where}`)
+    .get(...params);
+
+  return { nilai: r2(row.total), catatan: row.n, berlaku: true };
+}
+
 function orderFilter(query) {
   const { from, to } = dateRange(query);
   const params = [from, to];
@@ -352,9 +393,12 @@ router.get('/', ah((req, res) => {
     )
     .get(...params);
 
+  const iklan = belanjaIklan(req.query, from, to);
+
   const diminta = batas(req.query.limit);
   res.json({
     from, to, rows,
+    iklan,
     // Daftar boleh terpotong; ringkasannya tidak. Keduanya dibedakan supaya
     // layar bisa mengatakan "menampilkan 500 dari 1.043" dengan jujur.
     terpotong: total.orders > rows.length,
@@ -375,6 +419,12 @@ router.get('/', ah((req, res) => {
       netProfit: r2(total.net_profit),
       marginPct: total.net_revenue ? r2((total.net_profit / total.net_revenue) * 100) : 0,
       avgOrderValue: total.orders ? r2(total.net_revenue / total.orders) : 0,
+      // Iklan tidak dibebankan ke pesanan — satu kampanye menarik banyak order
+      // dan sebagian tidak menghasilkan apa pun. Karena itu ia berdiri sebagai
+      // angka periode, lalu dipotongkan dari laba di tingkat ringkasan.
+      iklan: iklan.nilai,
+      labaSetelahIklan: iklan.berlaku ? r2(total.net_profit - iklan.nilai) : null,
+      roas: iklan.berlaku && iklan.nilai > 0 ? r2(total.net_revenue / iklan.nilai) : null,
     },
   });
 }));

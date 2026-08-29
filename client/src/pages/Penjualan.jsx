@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2, Pencil } from 'lucide-react';
+import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2, Pencil, Megaphone } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, KotakCari } from '../components/ui';
 import UbahOrder from './UbahOrder';
@@ -234,23 +234,75 @@ export default function Penjualan() {
         <Spinner />
       ) : (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <StatCard label="Jumlah Order" value={data.summary.orders} sub={`AOV ${rupiahShort(data.summary.avgOrderValue)}`} icon={ShoppingCart} />
+          {/* Delapan kartu disusun mengikuti alur uangnya, bukan urutan
+              kepentingan: dari yang masuk, dipotong biaya channel, dikurangi
+              HPP, sampai yang tersisa setelah iklan. Dibaca kiri ke kanan,
+              tiap kartu adalah hasil pengurangan kartu sebelumnya. */}
+          <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard
+              label="Jumlah Order" value={num(data.summary.orders)}
+              sub={`AOV ${rupiahShort(data.summary.avgOrderValue)}`}
+              icon={ShoppingCart} latar="biru"
+            />
             <StatCard
               label="Pendapatan Kotor" value={rupiahShort(data.summary.netRevenue)}
               sub={`Penjualan ${rupiahShort(data.summary.grossSales)} − diskon`}
+              latar="langit"
+            />
+            <StatCard
+              label="Biaya Channel" value={rupiahShort(data.summary.totalFees)}
+              sub="Admin, ongkir, voucher, packing"
+              latar="amber"
             />
             <StatCard
               label="Pendapatan Bersih" value={rupiahShort(data.summary.netReceived)}
-              sub={`Setelah biaya channel ${rupiahShort(data.summary.totalFees)}`}
+              sub="Yang benar-benar diterima"
+              latar="toska"
             />
-            <StatCard label="HPP" value={rupiahShort(data.summary.cogs)} tone="slate" />
+
+            <StatCard
+              label="HPP" value={rupiahShort(data.summary.cogs)}
+              sub="Harga pokok barang terjual"
+              latar="ungu"
+            />
             <StatCard
               label="Laba Bersih" value={rupiahShort(data.summary.netProfit)}
-              sub={`Margin ${pct(data.summary.marginPct)}`}
-              tone={data.summary.netProfit >= 0 ? 'green' : 'red'}
+              sub={`Margin ${pct(data.summary.marginPct)} — sebelum iklan`}
+              latar={data.summary.netProfit >= 0 ? 'hijau' : 'merah'}
+            />
+            <StatCard
+              label="Biaya Iklan"
+              value={data.iklan.berlaku ? rupiahShort(data.summary.iklan) : '—'}
+              sub={
+                data.iklan.berlaku
+                  ? `${data.iklan.catatan} catatan belanja iklan`
+                  : `Tidak dihitung saat ${data.iklan.alasan}`
+              }
+              icon={Megaphone} latar="jingga"
+            />
+            <StatCard
+              label="Laba Setelah Iklan"
+              value={data.iklan.berlaku ? rupiahShort(data.summary.labaSetelahIklan) : '—'}
+              sub={
+                data.iklan.berlaku
+                  ? (data.summary.roas ? `ROAS ${data.summary.roas}×` : 'belum ada belanja iklan')
+                  : 'perlu tanpa penyaring'
+              }
+              latar={
+                !data.iklan.berlaku ? 'abu'
+                  : data.summary.labaSetelahIklan >= 0 ? 'hijau' : 'merah'
+              }
             />
           </div>
+
+          {!data.iklan.berlaku && (
+            <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+              Biaya iklan tidak ikut menyempit mengikuti penyaring ini. Satu kampanye menarik banyak
+              pesanan sekaligus, jadi belanjanya tidak bisa dibagi ke satu pesanan tertentu —
+              menampilkannya apa adanya akan membuat “laba setelah iklan” jadi angka minus yang
+              sepenuhnya karangan. Hapus pencarian dan penyaring status untuk melihatnya kembali.
+            </p>
+          )}
 
           <div className="card">
             {/* Ringkasan di atas selalu menghitung seluruh periode; tabel di
