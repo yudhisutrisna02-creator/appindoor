@@ -27,6 +27,13 @@ const orderSchema = z.object({
         product_id: z.number().int().positive(),
         qty: z.number().positive(),
         price: z.number().nonnegative(),
+        // Label varian untuk produk yang dijual tanpa label.
+        variants: z
+          .array(z.object({
+            label: z.string().trim().min(1).max(120),
+            qty: z.number().positive(),
+          }))
+          .optional(),
       })
     )
     .min(1, 'minimal satu item produk'),
@@ -136,8 +143,46 @@ function resolveItems(rawItems, { checkStock = true } = {}) {
       cost: product.cost,
       subtotal: r2(qty * price),
       subcost: r2(qty * product.cost),
+      varian: periksaVarian(product, qty, it.variants),
     };
   });
+}
+
+/**
+ * Label varian pada satu baris pesanan.
+ *
+ * Hanya berlaku untuk produk yang ditandai butuh label — produk yang dijual
+ * tanpa label dan baru diberi label pesanan pembeli. Labelnya tidak menjadi
+ * produk tersendiri: stok tetap berkurang dari produk induknya.
+ *
+ * Jumlah tiap label wajib dijumlahkan sama dengan jumlah barisnya. Kalau tidak
+ * diperiksa, label yang tertinggal atau tertulis dua kali akan lolos diam-diam,
+ * dan lembar pengiriman menyebut jumlah yang berbeda dari yang dipotong dari
+ * stok — persis jenis selisih yang baru ketahuan setelah barangnya dikirim.
+ */
+function periksaVarian(product, qty, variants) {
+  const daftar = Array.isArray(variants) ? variants.filter((v) => String(v.label || '').trim()) : [];
+
+  if (!product.needs_variant) {
+    // Label yang terkirim untuk produk biasa diabaikan, bukan ditolak: yang
+    // salah cuma kelebihan keterangan, dan menggagalkan seluruh pesanan
+    // karenanya lebih merugikan daripada membuangnya.
+    return [];
+  }
+
+  if (daftar.length === 0) {
+    throw httpError(422, `${product.name} dijual tanpa label — isi dulu label varian dan jumlahnya`);
+  }
+
+  const total = r2(daftar.reduce((s, v) => s + (Number(v.qty) || 0), 0));
+  if (Math.abs(total - qty) > 0.004) {
+    throw httpError(
+      422,
+      `Jumlah label varian ${product.name} (${total}) tidak sama dengan jumlah pesanannya (${qty})`
+    );
+  }
+
+  return daftar.map((v) => ({ label: String(v.label).trim().slice(0, 120), qty: r2(v.qty) }));
 }
 
 /** POST /api/sales/preview — hitung margin tanpa menyimpan. */
@@ -208,8 +253,13 @@ const createOrder = db.transaction((body, userId) => {
   /** Sisa stok berjalan selama satu order diproses, per produk. */
   const sisaStok = new Map();
 
+  const insertVarian = db.prepare(
+    'INSERT INTO sales_item_variants (item_id, label, qty) VALUES (?,?,?)'
+  );
+
   for (const it of items) {
-    insertItem.run(orderId, it.product_id, it.qty, it.price, it.cost, it.subtotal, it.subcost);
+    const hasilItem = insertItem.run(orderId, it.product_id, it.qty, it.price, it.cost, it.subtotal, it.subcost);
+    for (const v of it.varian || []) insertVarian.run(hasilItem.lastInsertRowid, v.label, v.qty);
 
     // Saldo dihitung dari sisa berjalan, bukan dari snapshot produk. Bila satu
     // order memuat produk yang sama dua kali, snapshot membuat pengurangan
@@ -441,6 +491,17 @@ router.get('/:id(\\d+)', ah((req, res) => {
         WHERE i.order_id = ?`
     )
     .all(order.id);
+
+  // Label varian dilampirkan ke barisnya masing-masing supaya layar tidak perlu
+  // menggabungkannya sendiri dan salah memasangkan.
+  const varian = db
+    .prepare(
+      `SELECT v.* FROM sales_item_variants v
+         JOIN sales_items i ON i.id = v.item_id
+        WHERE i.order_id = ? ORDER BY v.id`
+    )
+    .all(order.id);
+  for (const it of items) it.variants = varian.filter((v) => v.item_id === it.id);
 
   const journal = db
     .prepare("SELECT * FROM journals WHERE source = 'SALES' AND source_id = ?")

@@ -4,6 +4,7 @@ import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2, Penci
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, KotakCari } from '../components/ui';
 import UbahOrder from './UbahOrder';
+import BarisVarian from '../components/BarisVarian';
 import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -157,7 +158,18 @@ export default function Penjualan() {
         note: form.note || null,
         items: form.items
           .filter((i) => i.product_id && Number(i.qty) > 0)
-          .map((i) => ({ product_id: Number(i.product_id), qty: Number(i.qty), price: Number(i.price) })),
+          .map((i) => ({
+            product_id: Number(i.product_id),
+            qty: Number(i.qty),
+            price: Number(i.price),
+            ...(i.variants && i.variants.length
+              ? {
+                  variants: i.variants
+                    .filter((v) => String(v.label || '').trim())
+                    .map((v) => ({ label: String(v.label).trim(), qty: Number(v.qty) || 0 })),
+                }
+              : {}),
+          })),
         discount: Number(form.discount) || 0,
         admin_fee_pct: Number(form.admin_fee_pct) || 0,
         handling_fee: Number(form.handling_fee) || 0,
@@ -513,6 +525,19 @@ export default function Penjualan() {
                           </button>
                         )}
                       </div>
+
+                      {/* Produk yang dijual tanpa label baru diberi label
+                          pesanan pembeli. Labelnya keterangan pada baris ini,
+                          bukan produk tersendiri — stoknya tetap berkurang dari
+                          produk induk yang dipilih di atas. */}
+                      {p && p.needs_variant && (
+                        <BarisVarian
+                          produk={p}
+                          varian={it.variants || []}
+                          qtyBaris={it.qty}
+                          onUbah={(variants) => setItem(i, { variants })}
+                        />
+                      )}
                     </div>
                   );
                 })}

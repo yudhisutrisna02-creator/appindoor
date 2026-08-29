@@ -517,3 +517,21 @@ CREATE TABLE IF NOT EXISTS period_locks (
   locked_by INTEGER REFERENCES users(id),
   note      TEXT
 );
+
+-- ---------- LABEL VARIAN PADA BARIS PESANAN ----------
+-- Sebagian produk dijual tanpa label dan baru diberi label pesanan pembeli.
+-- Satu baris pesanan bisa dikirim dengan beberapa label sekaligus, misalnya 10
+-- berlabel A dan 5 berlabel B dari satu produk yang sama.
+--
+-- Labelnya TIDAK menjadi produk tersendiri: stok tetap berkurang dari produk
+-- induknya. Menjadikan tiap label sebagai SKU baru akan memecah stok, HPP, dan
+-- riwayat penjualan barang yang sebenarnya sama — persis masalah yang sudah
+-- terjadi pada produk varian rusak dan non-label.
+CREATE TABLE IF NOT EXISTS sales_item_variants (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES sales_items(id) ON DELETE CASCADE,
+  label   TEXT    NOT NULL,
+  qty     REAL    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_varian_item ON sales_item_variants(item_id);

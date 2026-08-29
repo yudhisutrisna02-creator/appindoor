@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { Modal, Field, useToast } from '../components/ui';
+import BarisVarian from '../components/BarisVarian';
 import { STATUS_PESANAN, CHANNEL_LABEL, rupiah } from '../lib/format';
 
 /**
@@ -39,6 +40,7 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
           product_id: String(i.product_id),
           qty: i.qty,
           price: i.price,
+          variants: (i.variants || []).map((v) => ({ label: v.label, qty: v.qty })),
         }));
         setItemAwal(isi);
         setForm((f) => (f ? { ...f, items: isi.map((x) => ({ ...x })) } : f));
@@ -131,15 +133,32 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
         product_id: Number(i.product_id),
         qty: Number(i.qty),
         price: Number(i.price) || 0,
+        ...(i.variants && i.variants.length
+          ? {
+              variants: i.variants
+                .filter((v) => String(v.label || '').trim())
+                .map((v) => ({ label: String(v.label).trim(), qty: Number(v.qty) || 0 })),
+            }
+          : {}),
       }));
 
     if (itemAwal) {
+      // Label varian ikut dibandingkan. Kalau tidak, mengganti label tanpa
+      // menyentuh jumlah maupun harga akan dianggap "tidak ada yang diubah"
+      // dan perubahannya hilang tanpa pesan apa pun.
+      const samaVarian = (a = [], b = []) =>
+        a.length === b.length &&
+        a.every((v, n) =>
+          String(v.label).trim() === String(b[n].label).trim() &&
+          Math.abs(Number(v.qty) - Number(b[n].qty)) < 0.0001);
+
       const sama =
         bersih.length === itemAwal.length &&
         bersih.every((i, n) =>
           i.product_id === Number(itemAwal[n].product_id) &&
           Math.abs(i.qty - Number(itemAwal[n].qty)) < 0.0001 &&
-          Math.abs(i.price - Number(itemAwal[n].price)) < 0.004);
+          Math.abs(i.price - Number(itemAwal[n].price)) < 0.004 &&
+          samaVarian(i.variants || [], itemAwal[n].variants || []));
       if (!sama) kirim.items = bersih;
     }
 
@@ -337,6 +356,22 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
                       <p className="text-[11px] text-slate-500 sm:col-span-12">
                         {p.sku} • HPP {rupiah(p.cost)} • laba baris {rupiah(subtotal - (Number(it.qty) || 0) * p.cost)}
                       </p>
+                    )}
+
+                    {p && p.needs_variant && (
+                      <div className="sm:col-span-12">
+                        <BarisVarian
+                          produk={p}
+                          varian={it.variants || []}
+                          qtyBaris={it.qty}
+                          terkunci={batal}
+                          onUbah={(variants) => {
+                            const items = [...form.items];
+                            items[i] = { ...items[i], variants };
+                            setForm({ ...form, items });
+                          }}
+                        />
+                      </div>
                     )}
                   </div>
                 );

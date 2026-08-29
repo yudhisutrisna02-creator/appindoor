@@ -2367,6 +2367,127 @@ async function main() {
   check('mengubah pesanan melebihi stok tetap ditolak',
     tolakStokUbah === 422, `status ${tolakStokUbah}`);
 
+  // ---------- Label varian produk non-label ----------
+  console.log('\n29. Label varian produk yang dijual tanpa label');
+
+  const produkVarian = await call('POST', '/api/inventory/products', {
+    sku: `NLBL-${Date.now()}`, name: 'Booster Uji Non Label', category: 'Uji', unit: 'PCS',
+    cost: 10000, price: 25000, needs_variant: true,
+  });
+  check('produk bisa ditandai dijual tanpa label',
+    produkVarian.product.needs_variant === 1 || produkVarian.product.needs_variant === true,
+    String(produkVarian.product.needs_variant));
+
+  await call('POST', '/api/inventory/moves', {
+    product_id: produkVarian.product.id, move_date: today, move_type: 'IN',
+    qty: 100, unit_cost: 10000, note: 'Stok uji varian',
+  });
+  const stokSblmVarian = (await call('GET', '/api/inventory/products?limit=2000'))
+    .products.find((p) => p.id === produkVarian.product.id).stock;
+
+  // Tanpa label sama sekali harus ditolak — itu inti penandanya.
+  let tolakTanpaLabel = 0;
+  try {
+    await call('POST', '/api/sales', {
+      order_date: today, channel: 'OFFLINE_WA',
+      items: [{ product_id: produkVarian.product.id, qty: 15, price: 25000 }],
+    });
+  } catch (err) {
+    tolakTanpaLabel = err.status;
+  }
+  check('produk tanpa label ditolak bila label variannya kosong',
+    tolakTanpaLabel === 422, `status ${tolakTanpaLabel}`);
+
+  // Jumlah label yang tidak sama dengan jumlah pesanan juga ditolak: lembar
+  // pengiriman tidak boleh menyebut jumlah berbeda dari yang dipotong stok.
+  let tolakJumlah = 0;
+  try {
+    await call('POST', '/api/sales', {
+      order_date: today, channel: 'OFFLINE_WA',
+      items: [{
+        product_id: produkVarian.product.id, qty: 15, price: 25000,
+        variants: [{ label: 'Tani Makmur', qty: 10 }],
+      }],
+    });
+  } catch (err) {
+    tolakJumlah = err.status;
+  }
+  check('jumlah label yang tidak sama dengan jumlah pesanan ditolak',
+    tolakJumlah === 422, `status ${tolakJumlah}`);
+
+  const orderVarian = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA',
+    items: [{
+      product_id: produkVarian.product.id, qty: 15, price: 25000,
+      variants: [
+        { label: 'Tani Makmur', qty: 10 },
+        { label: 'Subur Jaya', qty: 5 },
+      ],
+    }],
+  });
+  check('pesanan dengan beberapa label tersimpan', !!orderVarian.order);
+
+  const detVarian = await call('GET', `/api/sales/${orderVarian.order.id}`);
+  const barisVarian = detVarian.items[0].variants || [];
+  check('label varian tersimpan lengkap beserta jumlahnya',
+    barisVarian.length === 2 &&
+    barisVarian.some((v) => v.label === 'Tani Makmur' && v.qty === 10) &&
+    barisVarian.some((v) => v.label === 'Subur Jaya' && v.qty === 5),
+    JSON.stringify(barisVarian));
+
+  // Inti permintaannya: stok berkurang dari produk induk, bukan dari produk
+  // baru per label. Kalau tiap label jadi SKU sendiri, stok dan HPP barang yang
+  // sebenarnya sama akan terpecah.
+  const stokSslhVarian = (await call('GET', '/api/inventory/products?limit=2000'))
+    .products.find((p) => p.id === produkVarian.product.id).stock;
+  check('stok berkurang dari produk induk sebesar seluruh pesanan',
+    near(stokSslhVarian, stokSblmVarian - 15, 0.001),
+    `${stokSblmVarian} lalu ${stokSslhVarian}`);
+
+  const produkSetelah = await call('GET', '/api/inventory/products?limit=2000');
+  check('tidak ada produk baru dibuat untuk tiap label',
+    produkSetelah.products.filter((p) => /Tani Makmur|Subur Jaya/.test(p.name)).length === 0);
+
+  // Label bisa diubah lewat modal ubah, dan jumlahnya tetap dijaga.
+  await call('PUT', `/api/sales/${orderVarian.order.id}`, {
+    items: [{
+      product_id: produkVarian.product.id, qty: 15, price: 25000,
+      variants: [
+        { label: 'Tani Makmur', qty: 12 },
+        { label: 'Subur Jaya', qty: 3 },
+      ],
+    }],
+  });
+  const setelahUbahVarian = await call('GET', `/api/sales/${orderVarian.order.id}`);
+  const varianBaru = setelahUbahVarian.items[0].variants || [];
+  check('label varian bisa diubah lewat ubah order',
+    varianBaru.length === 2 && varianBaru.some((v) => v.label === 'Tani Makmur' && v.qty === 12),
+    JSON.stringify(varianBaru));
+  check('mengubah label saja tidak menggeser stok',
+    near((await call('GET', '/api/inventory/products?limit=2000'))
+      .products.find((p) => p.id === produkVarian.product.id).stock, stokSslhVarian, 0.001));
+
+  let tolakUbahJumlah = 0;
+  try {
+    await call('PUT', `/api/sales/${orderVarian.order.id}`, {
+      items: [{
+        product_id: produkVarian.product.id, qty: 15, price: 25000,
+        variants: [{ label: 'Tani Makmur', qty: 99 }],
+      }],
+    });
+  } catch (err) {
+    tolakUbahJumlah = err.status;
+  }
+  check('aturan jumlah label tetap berlaku saat mengubah pesanan',
+    tolakUbahJumlah === 422, `status ${tolakUbahJumlah}`);
+
+  // Produk biasa tidak boleh ikut menuntut label.
+  const orderBiasa = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA',
+    items: [{ product_id: produkCair.product.id, qty: 1, price: 25000 }],
+  });
+  check('produk biasa tetap bisa dipesan tanpa label varian', !!orderBiasa.order);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

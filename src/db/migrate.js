@@ -35,6 +35,7 @@ function addColumn(db, table, column, definition, applied) {
 
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   applied.push(`${table}.${column}`);
+  return true;
 }
 
 /**
@@ -190,6 +191,20 @@ function runMigrations(db) {
   // membayar adalah angka pada periode itu, bukan angka di master.
   addColumn(db, 'users', 'base_salary', 'REAL NOT NULL DEFAULT 0', applied);
   addColumn(db, 'users', 'allowance', 'REAL NOT NULL DEFAULT 0', applied);
+
+  // --- Label varian untuk produk yang dijual tanpa label ---
+  // Penandanya di master produk, bukan daftar SKU di dalam kode: produk non
+  // label bertambah dari waktu ke waktu, dan daftar di kode akan tertinggal
+  // tanpa ada yang menyadarinya.
+  const varianBaru = addColumn(db, 'products', 'needs_variant', 'INTEGER NOT NULL DEFAULT 0', applied);
+  if (varianBaru) {
+    // Hanya saat kolomnya pertama kali dibuat. Menyetel ulang tiap boot akan
+    // menghidupkan kembali penanda yang sengaja dimatikan pemiliknya.
+    const tandai = db.prepare('UPDATE products SET needs_variant = 1 WHERE sku = ?');
+    let n = 0;
+    for (const sku of ['GPN', 'B-NLN', 'F-ON-NL', 'BN-SBRNL']) n += tandai.run(sku).changes;
+    if (n) applied.push(n + ' produk ditandai butuh label varian');
+  }
 
   // --- Nota pembayaran ke supplier ---
   // Nomor faktur yang dikeluarkan supplier. Berbeda dari po_no yang kita buat

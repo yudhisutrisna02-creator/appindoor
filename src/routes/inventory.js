@@ -22,6 +22,8 @@ const productSchema = z.object({
   cost: z.number().nonnegative().default(0),
   price: z.number().nonnegative().default(0),
   min_stock: z.number().nonnegative().default(0),
+  // Produk yang dijual tanpa label dan baru diberi label pesanan pembeli.
+  needs_variant: z.boolean().default(false),
   supplier_id: z.number().int().positive().optional().nullable(),
   active: z.boolean().default(true),
 });
@@ -78,11 +80,11 @@ router.post('/products', butuhIzin('gudang.produk'), ah((req, res) => {
 
   const info = db
     .prepare(
-      `INSERT INTO products (sku, name, category, unit, cost, price, min_stock, supplier_id, active)
-       VALUES (?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO products (sku, name, category, unit, cost, price, min_stock, supplier_id, active, needs_variant)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`
     )
     .run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock,
-      p.supplier_id || null, p.active ? 1 : 0);
+      p.supplier_id || null, p.active ? 1 : 0, p.needs_variant ? 1 : 0);
 
   res.status(201).json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid) });
 }));
@@ -97,10 +99,10 @@ router.put('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
 
   db.prepare(
     `UPDATE products SET sku=?, name=?, category=?, unit=?, cost=?, price=?, min_stock=?,
-            supplier_id=?, active=?
+            supplier_id=?, active=?, needs_variant=?
       WHERE id=?`
   ).run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock,
-    p.supplier_id || null, p.active ? 1 : 0, existing.id);
+    p.supplier_id || null, p.active ? 1 : 0, p.needs_variant ? 1 : 0, existing.id);
 
   res.json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id) });
 }));

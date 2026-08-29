@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth';
 
 const EMPTY = {
   sku: '', name: '', category: 'Umum', unit: 'PCS',
-  cost: 0, price: 0, min_stock: 0, supplier_id: null, active: true,
+  cost: 0, price: 0, min_stock: 0, supplier_id: null, active: true, needs_variant: false,
 };
 
 export default function Produk() {
@@ -50,6 +50,7 @@ export default function Produk() {
       cost: Number(editing.cost),
       price: Number(editing.price),
       min_stock: Number(editing.min_stock),
+      needs_variant: !!editing.needs_variant,
       supplier_id: editing.supplier_id ? Number(editing.supplier_id) : null,
     };
     try {
@@ -230,6 +231,23 @@ export default function Produk() {
             <Field label="Harga Jual Base (Rp)">
               <input type="number" min="0" step="any" className="input" value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value })} />
             </Field>
+            <div className="sm:col-span-2">
+              <label className="flex items-start gap-2 rounded-xl bg-amber-50/70 px-3 py-2 text-sm text-slate-700 ring-1 ring-amber-200 dark:bg-amber-400/10">
+                <input
+                  type="checkbox" className="mt-0.5"
+                  checked={!!editing.needs_variant}
+                  onChange={(e) => setEditing({ ...editing, needs_variant: e.target.checked })}
+                />
+                <span>
+                  <span className="font-medium text-slate-900">Dijual tanpa label</span>
+                  <span className="block text-xs text-slate-600">
+                    Saat produk ini dipilih di order penjualan, akan muncul isian label varian yang
+                    bisa ditambah beberapa baris. Stoknya tetap berkurang dari produk ini, bukan
+                    dari produk baru per label.
+                  </span>
+                </span>
+              </label>
+            </div>
 
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input type="checkbox" className="h-4 w-4 rounded" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} />
