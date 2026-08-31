@@ -189,8 +189,11 @@ router.post('/users', butuhIzin('sistem.tim'), ah((req, res) => {
 
   const info = db
     .prepare(
-      `INSERT INTO users (name, email, password_hash, role, role_id, position, phone, active, photo, ${KOLOM_TIM.join(', ')})
-       VALUES (?,?,?,?,?,?,?,?,?, ${KOLOM_TIM.map(() => '?').join(', ')})`
+      // Akun baru selalu wajib mengganti kata sandinya pada masuk pertama: kata
+      // sandi yang ditetapkan orang lain, sebaik apa pun, sudah diketahui orang
+      // lain sejak detik pertama.
+      `INSERT INTO users (name, email, password_hash, role, role_id, position, phone, active, photo, must_change_password, ${KOLOM_TIM.join(', ')})
+       VALUES (?,?,?,?,?,?,?,?,?,1, ${KOLOM_TIM.map(() => '?').join(', ')})`
     )
     .run(
       u.name, u.email, bcrypt.hashSync(u.password, 10), u.role, u.role_id || null,
@@ -231,7 +234,11 @@ router.put('/users/:id', butuhIzin('sistem.tim'), ah((req, res) => {
   );
 
   if (u.password) {
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(u.password, 10), existing.id);
+    // Kata sandi yang direset pengelola juga wajib diganti pemiliknya sendiri,
+    // dengan alasan yang sama seperti akun baru.
+    db.prepare(
+      'UPDATE users SET password_hash = ?, must_change_password = 1, password_changed_at = NULL WHERE id = ?'
+    ).run(bcrypt.hashSync(u.password, 10), existing.id);
   }
 
   res.json({

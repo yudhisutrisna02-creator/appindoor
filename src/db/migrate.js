@@ -254,6 +254,29 @@ function runMigrations(db) {
   addColumn(db, 'sales_item_variants', 'variant_id', 'INTEGER REFERENCES product_variants(id)', applied);
   addColumn(db, 'sales_item_variants', 'variant_nama', 'TEXT', applied);
 
+  // --- Masa berlaku kata sandi ---
+  // Kolom baru dibiarkan kosong untuk akun yang sudah ada. Itu memang berarti
+  // mereka diminta mengganti kata sandi pada masuk berikutnya — dan untuk akun
+  // yang kata sandinya belum pernah diganti sejak dibuat, itu justru yang
+  // seharusnya terjadi.
+  const sandiBaru = addColumn(db, 'users', 'password_changed_at', 'TEXT', applied);
+  addColumn(db, 'users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0', applied);
+
+  if (sandiBaru) {
+    // Umur kata sandi akun yang sudah ada diisi dari tanggal akunnya dibuat.
+    //
+    // Membiarkannya kosong berarti SELURUH akun mendadak wajib mengganti kata
+    // sandi begitu pembaruan ini terpasang — termasuk pemilik usaha sendiri,
+    // pada hari kerja, tanpa pemberitahuan. Menyamakannya dengan umur akun
+    // adalah tebakan paling masuk akal yang bisa dibuat: kata sandinya memang
+    // belum pernah diganti sejak itu. Yang akunnya sudah lewat masa berlaku
+    // tetap diminta mengganti, yang belum diminta pada waktunya nanti.
+    const n = db
+      .prepare('UPDATE users SET password_changed_at = created_at WHERE password_changed_at IS NULL')
+      .run().changes;
+    if (n) applied.push(`${n} akun: umur kata sandi diisi dari tanggal akun dibuat`);
+  }
+
   semaiKatalogVarian(db, applied);
 
   // --- Nota pembayaran ke supplier ---

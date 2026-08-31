@@ -27,8 +27,12 @@ function seedAdmin() {
   const password = process.env.SEED_ADMIN_PASSWORD || 'Admin#12345';
 
   db.prepare(
-    `INSERT INTO users (name, email, password_hash, role, position)
-     VALUES (?, ?, ?, 'admin', 'Owner')`
+    // Kata sandi admin pertama ditetapkan pemiliknya sendiri lewat
+    // SEED_ADMIN_PASSWORD, bukan oleh orang lain — jadi tidak diwajibkan ganti
+    // seketika. Masa berlakunya tetap berjalan seperti akun lain, dan
+    // dihitung sejak sekarang.
+    `INSERT INTO users (name, email, password_hash, role, position, password_changed_at)
+     VALUES (?, ?, ?, 'admin', 'Owner', datetime('now'))`
   ).run(name, email, bcrypt.hashSync(password, 10));
 
   return { email, password };

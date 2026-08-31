@@ -34,6 +34,31 @@ async function call(method, path, body) {
   return data;
 }
 
+
+const sandiAkun = new Map();
+
+/**
+ * Masuk sebagai akun selain admin.
+ *
+ * Akun yang dibuatkan pengelola wajib mengganti kata sandi sebelum boleh
+ * memakai menu apa pun, jadi langkah itu ditirukan di sini — pemeriksaan hak
+ * akses di bawah harus menguji izin, bukan kewajiban ganti kata sandi. Kata
+ * sandi penggantinya diingat supaya akun yang sama bisa dipakai masuk lagi.
+ */
+async function masukSebagai(email, sandiAwal) {
+  const sandi = sandiAkun.get(email) || sandiAwal;
+  const masuk = await call('POST', '/api/auth/login', { email, password: sandi });
+  if (!masuk.sandi || !masuk.sandi.wajib) return masuk.token;
+
+  const simpan = token;
+  token = masuk.token;
+  const baru = `Uji#Sandi${Date.now()}a`;
+  await call('POST', '/api/auth/ganti-sandi', { currentPassword: sandi, newPassword: baru });
+  sandiAkun.set(email, baru);
+  const lagi = await call('POST', '/api/auth/login', { email, password: baru });
+  token = simpan;
+  return lagi.token;
+}
 function check(label, condition, detail = '') {
   if (condition) {
     passed += 1;
@@ -593,11 +618,8 @@ async function main() {
   });
   check('akun bisa ditautkan ke peran', akunGudang.user.role_id === peranGudang.id);
 
-  const masukGudang = await call('POST', '/api/auth/login', {
-    email: akunGudang.user.email, password: 'RahasiaKuat1',
-  });
   const tokenAdmin = token;
-  token = masukGudang.token;
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
 
   const cobaAkses = async (path) => {
     try {
@@ -679,10 +701,7 @@ async function main() {
     name: 'Uji Sempit', email: `sempit-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
     role: 'staff', role_id: peranBaru.role.id,
   });
-  const masukSempit = await call('POST', '/api/auth/login', {
-    email: akunSempit.user.email, password: 'RahasiaKuat1',
-  });
-  token = masukSempit.token;
+  token = await masukSebagai(akunSempit.user.email, 'RahasiaKuat1');
   check('peran sempit hanya boleh membuka dashboard',
     (await cobaAkses('/api/dashboard')) === 200 &&
     (await cobaAkses('/api/inventory/products')) === 403 &&
@@ -1822,11 +1841,8 @@ async function main() {
 
   // Berkas cadangan berisi seluruh data termasuk akun; izinnya harus berdiri
   // sendiri, bukan menumpang "sudah login".
-  const masukGudangLagi = await call('POST', '/api/auth/login', {
-    email: akunGudang.user.email, password: 'RahasiaKuat1',
-  });
   const simpanAdmin = token;
-  token = masukGudangLagi.token;
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
   const ditolak = await fetch(`${BASE}/api/cadangan`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1900,11 +1916,8 @@ async function main() {
 
   // Inti pembatasan: peringatan tidak boleh membocorkan apa yang sudah
   // disembunyikan di menunya. Tim gudang tidak melihat keuangan.
-  const masukGudang3 = await call('POST', '/api/auth/login', {
-    email: akunGudang.user.email, password: 'RahasiaKuat1',
-  });
   const adminLagi = token;
-  token = masukGudang3.token;
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
   const perhatianGudang = await call('GET', '/api/perhatian');
   check('tim gudang tetap boleh membuka pusat perhatian',
     Array.isArray(perhatianGudang.rows));
@@ -2573,11 +2586,8 @@ async function main() {
   }
 
   // Hak akses: tim gudang hanya boleh laporan yang modulnya memang ia pegang.
-  const masukGudang4 = await call('POST', '/api/auth/login', {
-    email: akunGudang.user.email, password: 'RahasiaKuat1',
-  });
   const adminLap = token;
-  token = masukGudang4.token;
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
 
   const daftarGudang = await call('GET', '/api/laporan');
   check('daftar laporan disaring menurut hak akses',
@@ -2842,6 +2852,126 @@ async function main() {
   const detLamaA = await call('GET', `/api/sales/${orderLamaA.order.id}`);
   check('detail pesanan tetap menyebut nama produknya walau daftar aktif berubah',
     !!detLamaA.items[0].product_name);
+
+  // ---------- Akun saya & kewajiban ganti kata sandi ----------
+  console.log('\n34. Akun saya & kata sandi');
+
+  const emailAkun = `akun-${Date.now()}@uji.local`;
+  const akunBaru = await call('POST', '/api/admin/users', {
+    name: 'Uji Akun Sendiri', email: emailAkun, password: 'Sementara#1',
+    role: 'staff', position: 'Packing',
+  });
+
+  const masukPertama = await call('POST', '/api/auth/login', {
+    email: emailAkun, password: 'Sementara#1',
+  });
+  check('akun baru wajib mengganti kata sandi pada masuk pertama',
+    masukPertama.sandi.wajib === true && masukPertama.sandi.alasan === 'baru',
+    JSON.stringify(masukPertama.sandi));
+  check('syarat kata sandi ikut dikirim ke layar',
+    Array.isArray(masukPertama.syaratSandi) && masukPertama.syaratSandi.length === 5);
+
+  const adminAkun = token;
+  token = masukPertama.token;
+
+  // Inti kewajibannya: menu lain benar-benar terkunci di peladen, bukan hanya
+  // disembunyikan di layar.
+  const cobaAkun = async (path) => {
+    const r = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: r.status, isi: await r.json().catch(() => ({})) };
+  };
+
+  const tolakSandi = await cobaAkun('/api/dashboard');
+  check('menu lain ditolak selama kata sandi belum diganti',
+    tolakSandi.status === 403 && tolakSandi.isi.harusGantiSandi === true,
+    `status ${tolakSandi.status}`);
+  const tolakSandi2 = await cobaAkun('/api/sales?from=2026-01-01&to=2026-12-31');
+  check('penolakan berlaku untuk seluruh modul, bukan satu saja',
+    tolakSandi2.status === 403 && tolakSandi2.isi.harusGantiSandi === true);
+
+  const bolehAkun = await cobaAkun('/api/auth/akun');
+  check('halaman akun sendiri tetap bisa dibuka', bolehAkun.status === 200);
+  check('akun sendiri menampilkan data pemiliknya',
+    bolehAkun.isi.user.email === emailAkun && !!bolehAkun.isi.user.peran_nama);
+
+  // Aturan kata sandi ditegakkan di peladen, bukan hanya di layar.
+  const lemah = [
+    ['Pen1!aA', 'terlalu pendek'],
+    ['semuahurufkecil1!', 'tanpa huruf besar'],
+    ['SEMUAHURUFBESAR1!', 'tanpa huruf kecil'],
+    ['TanpaAngkaSama!', 'tanpa angka'],
+    ['TanpaSimbol123', 'tanpa simbol'],
+  ];
+  for (const [sandi, kenapa] of lemah) {
+    let st = 0;
+    try {
+      await call('POST', '/api/auth/ganti-sandi', {
+        currentPassword: 'Sementara#1', newPassword: sandi,
+      });
+    } catch (err) {
+      st = err.status;
+    }
+    check(`kata sandi ${kenapa} ditolak`, st === 422, `status ${st}`);
+  }
+
+  let tolakSama = 0;
+  try {
+    await call('POST', '/api/auth/ganti-sandi', {
+      currentPassword: 'Sementara#1', newPassword: 'Sementara#1',
+    });
+  } catch (err) {
+    tolakSama = err.status;
+  }
+  check('kata sandi baru yang sama dengan yang lama ditolak', tolakSama === 422);
+
+  let tolakSalahLama = 0;
+  try {
+    await call('POST', '/api/auth/ganti-sandi', {
+      currentPassword: 'BukanIni#9', newPassword: 'RahasiaBaru#2026',
+    });
+  } catch (err) {
+    tolakSalahLama = err.status;
+  }
+  check('kata sandi lama yang salah ditolak', tolakSalahLama === 400);
+
+  const berhasil = await call('POST', '/api/auth/ganti-sandi', {
+    currentPassword: 'Sementara#1', newPassword: 'RahasiaBaru#2026',
+  });
+  check('kata sandi yang memenuhi syarat diterima', berhasil.ok);
+  check('kewajiban ganti hilang setelah diganti', berhasil.sandi.wajib === false);
+  check('masa berlaku baru mulai dihitung',
+    berhasil.sandi.sisaHari >= 89 && berhasil.sandi.sisaHari <= 90,
+    `sisa ${berhasil.sandi.sisaHari} hari`);
+
+  const setelahGanti = await cobaAkun('/api/dashboard');
+  check('menu terbuka kembali setelah kata sandi diganti', setelahGanti.status === 200);
+
+  // Profil sendiri: foto dan nomor HP boleh diubah, identitas tidak.
+  const fotoUji =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const profilBaru = await call('PUT', '/api/auth/akun', { phone: '081299887766', photo: fotoUji });
+  check('foto dan nomor HP sendiri bisa disimpan',
+    !!profilBaru.user.photo && profilBaru.user.phone === '081299887766');
+
+  const cekProfil = await call('GET', '/api/auth/akun');
+  check('perubahan profil tersimpan', !!cekProfil.user.photo);
+
+  // Identitas tidak boleh ikut berubah lewat endpoint akun sendiri.
+  await call('PUT', '/api/auth/akun', { phone: '0812', photo: null });
+  const cekIdentitas = await call('GET', '/api/auth/akun');
+  check('nama, email, dan peran tidak berubah lewat akun sendiri',
+    cekIdentitas.user.name === 'Uji Akun Sendiri' && cekIdentitas.user.email === emailAkun);
+
+  // Reset oleh pengelola mewajibkan penggantian lagi.
+  token = adminAkun;
+  await call('PUT', `/api/admin/users/${akunBaru.user.id}`, {
+    name: 'Uji Akun Sendiri', email: emailAkun, role: 'staff', password: 'DiresetAdmin#7',
+  });
+  const masukSetelahReset = await call('POST', '/api/auth/login', {
+    email: emailAkun, password: 'DiresetAdmin#7',
+  });
+  check('kata sandi yang direset pengelola wajib diganti pemiliknya',
+    masukSetelahReset.sandi.wajib === true, JSON.stringify(masukSetelahReset.sandi));
 
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);

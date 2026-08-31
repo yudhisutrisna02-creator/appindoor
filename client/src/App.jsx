@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -45,6 +45,7 @@ import Perhatian from './pages/Perhatian';
 import Proyeksi from './pages/Proyeksi';
 import Riwayat from './pages/Riwayat';
 import Laporan from './pages/Laporan';
+import AkunSaya from './pages/AkunSaya';
 import Verifikasi from './pages/Verifikasi';
 import KinerjaProduk from './pages/KinerjaProduk';
 
@@ -57,6 +58,9 @@ const NAV = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true, izin: 'dashboard.lihat' },
       { to: '/perhatian', label: 'Pusat Perhatian', icon: BellRing },
+      // Tanpa izin: setiap orang perlu bisa mengurus foto dan kata sandinya
+      // sendiri, apa pun perannya.
+      { to: '/akun', label: 'Akun Saya', icon: UserCircle },
     ],
   },
   {
@@ -386,7 +390,7 @@ function Dijaga({ izin, children }) {
 }
 
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, sandi, sandiSelesai } = useAuth();
   const lokasi = useLocation();
 
   // Halaman pemeriksaan dokumen berada di luar gerbang login, dan diperiksa
@@ -410,6 +414,17 @@ export default function App() {
   }
 
   if (!user) return <Login />;
+
+  // Kata sandi yang wajib diganti mengunci seluruh aplikasi sampai selesai.
+  // Layarnya berdiri sendiri tanpa menu supaya tidak ada pintu lain yang
+  // tampak bisa dibuka padahal peladen pasti menolaknya.
+  if (sandi && sandi.wajib) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <AkunSaya wajibGanti onSelesai={sandiSelesai} />
+      </div>
+    );
+  }
 
   return (
     <Layout>
@@ -436,6 +451,7 @@ export default function App() {
         <Route path="/laporan/mitra" element={<Dijaga izin="mitra.lihat"><Laporan jenis="mitra" /></Dijaga>} />
         <Route path="/sistem/riwayat" element={<Dijaga izin={["sistem.riwayat", "keuangan.tutupbuku"]}><Riwayat /></Dijaga>} />
         <Route path="/keuangan/proyeksi" element={<Dijaga izin="keuangan.lihat"><Proyeksi /></Dijaga>} />
+        <Route path="/akun" element={<AkunSaya />} />
         <Route path="/perhatian" element={<Perhatian />} />
         <Route path="/sistem/cadangan" element={<Dijaga izin="sistem.cadangan"><Cadangan /></Dijaga>} />
         <Route path="/sistem/dokumen" element={<Dijaga izin="sistem.dokumen"><DokumenTerbit /></Dijaga>} />

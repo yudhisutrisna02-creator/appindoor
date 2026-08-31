@@ -1,6 +1,7 @@
 'use strict';
 const jwt = require('jsonwebtoken');
 const { db } = require('../db');
+const { statusSandi } = require('../utils/sandi');
 const { PETA_PERAN_LAMA } = require('../utils/izin');
 
 function jwtSecret() {
@@ -19,6 +20,23 @@ function signToken(user) {
   );
 }
 
+/**
+ * Alamat yang tetap boleh dibuka walau kata sandinya wajib diganti.
+ *
+ * Hanya yang benar-benar diperlukan untuk mengganti kata sandi dan menampilkan
+ * halaman akun. Kalau daftar ini kelewat longgar, kewajibannya berhenti jadi
+ * kewajiban.
+ */
+function jalurBebasSandi(req) {
+  const jalur = (req.baseUrl || '') + (req.path || '');
+  return (
+    jalur.startsWith('/api/auth/akun') ||
+    jalur.startsWith('/api/auth/me') ||
+    jalur.startsWith('/api/auth/change-password') ||
+    jalur.startsWith('/api/auth/ganti-sandi')
+  );
+}
+
 /** Memvalidasi Bearer token dan memuat user aktif ke req.user. */
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -34,6 +52,7 @@ function requireAuth(req, res, next) {
     const user = db
       .prepare(
         `SELECT u.id, u.name, u.email, u.role, u.position, u.active, u.role_id,
+                u.photo, u.password_changed_at, u.must_change_password,
                 r.slug AS role_slug, r.name AS role_name
            FROM users u LEFT JOIN roles r ON r.id = u.role_id
           WHERE u.id = ?`
@@ -42,6 +61,23 @@ function requireAuth(req, res, next) {
     if (!user || !user.active) {
       return res.status(401).json({ error: 'Akun tidak aktif atau tidak ditemukan' });
     }
+
+    // Kewajiban mengganti kata sandi ditegakkan di sini — satu-satunya pintu
+    // yang dilewati SETIAP permintaan yang sudah masuk. Menegakkannya di layar
+    // saja berarti "wajib" hanya berlaku bagi yang memakai layar; siapa pun
+    // yang memanggil API langsung tetap bisa bekerja dengan kata sandi
+    // sementara yang belum pernah diganti.
+    const sandi = statusSandi(user);
+    if (sandi.wajib && !jalurBebasSandi(req)) {
+      return res.status(403).json({
+        error: sandi.pesan,
+        // Ditandai supaya layar bisa mengarahkan ke penggantian kata sandi,
+        // bukan menampilkannya sebagai penolakan hak akses biasa.
+        harusGantiSandi: true,
+        alasan: sandi.alasan,
+      });
+    }
+
     req.user = user;
     // Izin dibaca tiap permintaan, bukan disimpan di dalam token: peran yang
     // dicabut harus langsung berlaku, bukan menunggu token kedaluwarsa.
