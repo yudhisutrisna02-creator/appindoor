@@ -829,10 +829,14 @@ const KOLOM_ORDER = [
   { header: 'Pendapatan Bersih', key: 'net_revenue', width: 16, money: true },
   { header: 'HPP', key: 'cogs', width: 13, money: true },
   { header: 'Laba Kotor', key: 'gross_profit', width: 14, money: true },
-  { header: 'Adm. Marketplace', key: 'admin_fee', width: 15, money: true },
-  { header: 'Ongkir Ditanggung', key: 'shipping_extra', width: 15, money: true },
+  // Nama kolom mengikuti rincian pencairan marketplace, sama dengan yang
+  // tampil di formulir order — berkas unduhan tidak boleh memakai istilah yang
+  // berbeda dari layar tempat angkanya diketik.
+  { header: 'Voucher & Subsidi', key: 'voucher_platform', width: 16, money: true },
+  { header: 'Biaya Platform', key: 'admin_fee', width: 15, money: true },
+  { header: 'Biaya Gratis Ongkir XTRA', key: 'shipping_extra', width: 20, money: true },
+  { header: 'Biaya Layanan', key: 'handling_fee', width: 15, money: true },
   { header: 'Ongkir Ditagih', key: 'shipping_charged', width: 14, money: true },
-  { header: 'Voucher Platform', key: 'voucher_platform', width: 15, money: true },
   { header: 'Packing', key: 'packing_cost', width: 11, money: true },
   { header: 'Total Biaya', key: 'total_fees', width: 14, money: true },
   { header: 'Laba Bersih', key: 'net_profit', width: 14, money: true },

@@ -2708,6 +2708,56 @@ async function main() {
   check('produk tanpa katalog tetap bisa dipesan dengan label manual',
     !!orderManual.order);
 
+  // ---------- Struktur biaya order ----------
+  console.log('\n32. Struktur biaya order');
+
+  // Biaya Platform kini diisi sebagai rupiah, bukan persen. Nilai yang dikirim
+  // langsung harus dipakai apa adanya — bukan dihitung ulang dari tarif.
+  const orderBiaya = await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', shop_id: idTokoCari,
+    items: [{ product_id: produkCair.product.id, qty: 4, price: 25000 }],
+    discount: 5000,
+    voucher_platform: 3000,
+    admin_fee: 12500,
+    shipping_extra: 7000,
+    handling_fee: 2500,
+    tax_pct: 1,
+    packing_cost: 1500,
+    other_cost: 1000,
+  });
+  const detBiaya = await call('GET', `/api/sales/${orderBiaya.order.id}`);
+  const ob = detBiaya.order;
+
+  check('Biaya Platform tersimpan sebagai nominal, bukan persentase',
+    near(ob.admin_fee, 12500, 1), `${ob.admin_fee}`);
+  check('Voucher & Subsidi tersimpan', near(ob.voucher_platform, 3000, 1));
+  check('Biaya Gratis Ongkir XTRA tersimpan', near(ob.shipping_extra, 7000, 1));
+  check('Biaya Layanan tersimpan', near(ob.handling_fee, 2500, 1));
+
+  // Pajak tetap persentase, dihitung dari pendapatan bersih.
+  const netHarap = 4 * 25000 - 5000;
+  check('pendapatan bersih = penjualan dikurangi diskon',
+    near(ob.net_revenue, netHarap, 1), `${ob.net_revenue} vs ${netHarap}`);
+  check('pajak dihitung dari persentase terhadap pendapatan bersih',
+    near(ob.tax_amount, netHarap * 0.01, 1), `${ob.tax_amount}`);
+
+  const feeHarap = 12500 + 3000 + 7000 + 2500 + 1500 + 1000 + netHarap * 0.01;
+  check('total biaya = jumlah seluruh potongan',
+    near(ob.total_fees, feeHarap, 1), `${ob.total_fees} vs ${feeHarap}`);
+  check('laba bersih = pendapatan bersih − HPP − total biaya',
+    near(ob.net_profit, ob.net_revenue - ob.cogs - ob.total_fees, 1));
+
+  // Berkas unduhan memakai istilah yang sama dengan layarnya.
+  const csvBiaya = await fetch(
+    `${BASE}/api/sales/export/csv?from=${today}&to=${today}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const kepalaCsv = Buffer.from(await csvBiaya.arrayBuffer()).toString('utf8').split('\r\n')[0];
+  check('kolom unduhan memakai istilah yang sama dengan formulir',
+    ['Voucher & Subsidi', 'Biaya Platform', 'Biaya Gratis Ongkir XTRA', 'Biaya Layanan']
+      .every((k) => kepalaCsv.includes(k)),
+    kepalaCsv.slice(0, 120));
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

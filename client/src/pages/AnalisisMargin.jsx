@@ -8,11 +8,14 @@ import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, TombolEkspor, KotakCari, saringLokal } from '../components/ui';
 import { rupiah, rupiahShort, num, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 
+// Urutan dan namanya mengikuti rincian pencairan marketplace, sama dengan
+// formulir order — supaya angka di analisis ini bisa langsung dicocokkan
+// dengan laporan yang dikeluarkan marketplace.
 const FEE_KEYS = [
-  ['admin_fee', 'Admin Marketplace'],
-  ['handling_fee', 'Handling'],
-  ['shipping_extra', 'Ongkir Extra'],
-  ['voucher_platform', 'Voucher Platform'],
+  ['voucher_platform', 'Voucher & Subsidi'],
+  ['admin_fee', 'Biaya Platform'],
+  ['shipping_extra', 'Biaya Gratis Ongkir XTRA'],
+  ['handling_fee', 'Biaya Layanan'],
   ['tax_amount', 'Pajak'],
   ['packing_cost', 'Packing'],
   ['other_cost', 'Lain-lain'],

@@ -8,11 +8,6 @@ import BarisVarian from '../components/BarisVarian';
 import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
-/** Preset biaya admin tipikal per marketplace — tetap dapat diubah manual. */
-const ADMIN_FEE_PRESET = {
-  SHOPEE: 8, TOKOPEDIA: 6.5, TIKTOK_SHOP: 8, LAZADA: 7, WEBSITE: 2.9, SOCIAL_MEDIA: 0, OFFLINE_WA: 0,
-};
-
 const emptyOrder = () => ({
   order_date: today(),
   channel: 'OFFLINE_WA',
@@ -34,7 +29,7 @@ const emptyOrder = () => ({
   lead_source: '',
   items: [{ product_id: '', qty: 1, price: '' }],
   discount: 0,
-  admin_fee_pct: 0,
+  admin_fee: 0,
   handling_fee: 0,
   shipping_extra: 0,
   voucher_platform: 0,
@@ -103,7 +98,7 @@ export default function Penjualan() {
     const discount = Number(form.discount) || 0;
     const netRevenue = gross - discount;
 
-    const adminFee = (netRevenue * (Number(form.admin_fee_pct) || 0)) / 100;
+    const adminFee = Number(form.admin_fee) || 0;
     const taxAmount = (netRevenue * (Number(form.tax_pct) || 0)) / 100;
     const fees =
       adminFee + taxAmount +
@@ -175,7 +170,7 @@ export default function Penjualan() {
               : {}),
           })),
         discount: Number(form.discount) || 0,
-        admin_fee_pct: Number(form.admin_fee_pct) || 0,
+        admin_fee: Number(form.admin_fee) || 0,
         handling_fee: Number(form.handling_fee) || 0,
         shipping_extra: Number(form.shipping_extra) || 0,
         voucher_platform: Number(form.voucher_platform) || 0,
@@ -457,7 +452,7 @@ export default function Penjualan() {
               <Field label="Channel *">
                 <select
                   className="input" value={form.channel}
-                  onChange={(e) => setForm({ ...form, channel: e.target.value, admin_fee_pct: ADMIN_FEE_PRESET[e.target.value] ?? 0 })}
+                  onChange={(e) => setForm({ ...form, channel: e.target.value })}
                 >
                   {Object.entries(CHANNEL_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
@@ -551,20 +546,25 @@ export default function Penjualan() {
             {/* Struktur biaya */}
             <p className="label">Struktur Biaya Order</p>
             <div className="mb-4 grid gap-3 sm:grid-cols-4">
+              {/* Nama dan urutannya mengikuti rincian yang dikeluarkan
+                  marketplace, supaya angka dari laporan pencairan bisa
+                  disalin baris demi baris tanpa menerjemahkan istilah dulu.
+                  Semuanya rupiah kecuali pajak — potongan marketplace memang
+                  sudah berupa nominal jadi di rincian itu. */}
               <Field label="Diskon Penjual (Rp)">
                 <input type="number" min="0" step="any" className="input" value={form.discount} onChange={(e) => setForm({ ...form, discount: e.target.value })} />
               </Field>
-              <Field label="Biaya Admin (%)" hint={`≈ ${rupiah(calc?.adminFee || 0)}`}>
-                <input type="number" min="0" max="100" step="any" className="input" value={form.admin_fee_pct} onChange={(e) => setForm({ ...form, admin_fee_pct: e.target.value })} />
+              <Field label="Voucher & Subsidi (Rp)">
+                <input type="number" min="0" step="any" className="input" value={form.voucher_platform} onChange={(e) => setForm({ ...form, voucher_platform: e.target.value })} />
               </Field>
-              <Field label="Handling Fee (Rp)">
-                <input type="number" min="0" step="any" className="input" value={form.handling_fee} onChange={(e) => setForm({ ...form, handling_fee: e.target.value })} />
+              <Field label="Biaya Platform (Rp)">
+                <input type="number" min="0" step="any" className="input" value={form.admin_fee} onChange={(e) => setForm({ ...form, admin_fee: e.target.value })} />
               </Field>
-              <Field label="Ongkir Extra (Rp)" hint="Ditanggung penjual">
+              <Field label="Biaya Gratis Ongkir XTRA (Rp)">
                 <input type="number" min="0" step="any" className="input" value={form.shipping_extra} onChange={(e) => setForm({ ...form, shipping_extra: e.target.value })} />
               </Field>
-              <Field label="Voucher Platform (Rp)">
-                <input type="number" min="0" step="any" className="input" value={form.voucher_platform} onChange={(e) => setForm({ ...form, voucher_platform: e.target.value })} />
+              <Field label="Biaya Layanan (Rp)">
+                <input type="number" min="0" step="any" className="input" value={form.handling_fee} onChange={(e) => setForm({ ...form, handling_fee: e.target.value })} />
               </Field>
               <Field label="Pajak (%)" hint={`≈ ${rupiah(calc?.taxAmount || 0)}`}>
                 <input type="number" min="0" max="100" step="any" className="input" value={form.tax_pct} onChange={(e) => setForm({ ...form, tax_pct: e.target.value })} />
@@ -589,7 +589,6 @@ export default function Penjualan() {
                       ...form,
                       shop_id: e.target.value ? Number(e.target.value) : null,
                       channel: sh ? sh.channel : form.channel,
-                      admin_fee_pct: sh ? (ADMIN_FEE_PRESET[sh.channel] ?? form.admin_fee_pct) : form.admin_fee_pct,
                     });
                   }}
                 >
@@ -741,10 +740,10 @@ export default function Penjualan() {
                 <DetailRow label="HPP" value={`− ${rupiah(detail.order.cogs)}`} />
               </dl>
               <dl className="space-y-1 text-sm">
-                <DetailRow label="Admin Marketplace" value={`− ${rupiah(detail.order.admin_fee)}`} />
-                <DetailRow label="Handling" value={`− ${rupiah(detail.order.handling_fee)}`} />
-                <DetailRow label="Ongkir Extra" value={`− ${rupiah(detail.order.shipping_extra)}`} />
-                <DetailRow label="Voucher Platform" value={`− ${rupiah(detail.order.voucher_platform)}`} />
+                <DetailRow label="Voucher & Subsidi" value={`− ${rupiah(detail.order.voucher_platform)}`} />
+                <DetailRow label="Biaya Platform" value={`− ${rupiah(detail.order.admin_fee)}`} />
+                <DetailRow label="Biaya Gratis Ongkir XTRA" value={`− ${rupiah(detail.order.shipping_extra)}`} />
+                <DetailRow label="Biaya Layanan" value={`− ${rupiah(detail.order.handling_fee)}`} />
                 <DetailRow label="Pajak" value={`− ${rupiah(detail.order.tax_amount)}`} />
                 <DetailRow label="Packing" value={`− ${rupiah(detail.order.packing_cost)}`} />
                 <DetailRow label="Biaya Lain" value={`− ${rupiah(detail.order.other_cost)}`} />

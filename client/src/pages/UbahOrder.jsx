@@ -428,12 +428,15 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
               Mengubah angka di bawah ini menghitung ulang laba order dan menulis ulang jurnalnya.
             </div>
             {[
-              ['discount', 'Diskon'],
-              ['admin_fee', 'Biaya Admin Marketplace'],
-              ['handling_fee', 'Biaya Handling'],
-              ['shipping_extra', 'Ongkir Ditanggung Penjual'],
+              // Istilahnya sama persis dengan formulir order baru dan dengan
+              // rincian pencairan marketplace; nama yang berbeda antara membuat
+              // dan mengubah membuat orang ragu apakah keduanya kolom yang sama.
+              ['discount', 'Diskon Penjual'],
+              ['voucher_platform', 'Voucher & Subsidi'],
+              ['admin_fee', 'Biaya Platform'],
+              ['shipping_extra', 'Biaya Gratis Ongkir XTRA'],
+              ['handling_fee', 'Biaya Layanan'],
               ['shipping_charged', 'Ongkir Ditagih ke Pembeli'],
-              ['voucher_platform', 'Voucher Platform'],
               ['packing_cost', 'Biaya Packing'],
               ['other_cost', 'Biaya Lain'],
             ].map(([k, l]) => (
