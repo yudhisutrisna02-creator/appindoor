@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Search, Package } from 'lucide-react';
 import { api } from '../lib/api';
+import KatalogVarian from '../components/KatalogVarian';
 import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, pct } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -247,6 +248,12 @@ export default function Produk() {
                   </span>
                 </span>
               </label>
+
+              {editing.needs_variant && (
+                <div className="mt-3">
+                  <KatalogVarian productId={editing.id} bolehUbah={true} />
+                </div>
+              )}
             </div>
 
             <label className="flex items-center gap-2 text-sm sm:col-span-2">

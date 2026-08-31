@@ -45,7 +45,10 @@ const ubahSchema = z.object({
         // resolveItems supaya aturannya sama persis dengan saat order dibuat.
         variants: z
           .array(z.object({
-            label: z.string().trim().min(1).max(120),
+            // Varian dipilih dari katalog produk induknya; labelnya boleh
+            // dikosongkan bila pembeli tidak minta label sendiri.
+            variant_id: z.number().int().positive().optional().nullable(),
+            label: z.string().trim().max(120).optional().nullable(),
             qty: z.number().positive(),
           }))
           .optional(),
@@ -199,7 +202,7 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
          VALUES (?,?,'OUT',?,?,?,?, 'SALES', ?, ?, ?)`
       );
       const insertVarian = db.prepare(
-        'INSERT INTO sales_item_variants (item_id, label, qty) VALUES (?,?,?)'
+        'INSERT INTO sales_item_variants (item_id, variant_id, variant_nama, label, qty) VALUES (?,?,?,?,?)'
       );
       const sisaStok = new Map();
       for (const it of items) {
@@ -208,7 +211,7 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
         );
         // Baris lama sudah dihapus di atas; variannya ikut terbawa oleh ON
         // DELETE CASCADE, jadi yang tersisa hanya menulis ulang yang baru.
-        for (const v of it.varian || []) insertVarian.run(hasilItem.lastInsertRowid, v.label, v.qty);
+        for (const v of it.varian || []) insertVarian.run(hasilItem.lastInsertRowid, v.variant_id, v.variant_nama, v.label, v.qty);
         const sebelum = sisaStok.has(it.product_id) ? sisaStok.get(it.product_id) : it.product.stock;
         const baru = r2(sebelum - it.qty);
         sisaStok.set(it.product_id, baru);

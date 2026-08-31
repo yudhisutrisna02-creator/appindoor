@@ -2598,6 +2598,116 @@ async function main() {
     tolakUnduh.status === 403, `status ${tolakUnduh.status}`);
   token = adminLap;
 
+  // ---------- Katalog varian produk ----------
+  console.log('\n31. Katalog varian produk');
+
+  const idVar = produkVarian.product.id;
+
+  const kosongVar = await call('GET', `/api/inventory/products/${idVar}/variants`);
+  check('katalog varian produk baru masih kosong', kosongVar.rows.length === 0);
+
+  const v1 = await call('POST', `/api/inventory/products/${idVar}/variants`, { nama: 'Uji- Mangga' });
+  const v2 = await call('POST', `/api/inventory/products/${idVar}/variants`, { nama: 'Uji- Durian' });
+  check('varian bisa ditambahkan ke katalog', !!v1.variant && !!v2.variant);
+
+  let tolakKembar = 0;
+  try {
+    await call('POST', `/api/inventory/products/${idVar}/variants`, { nama: 'Uji- Mangga' });
+  } catch (err) {
+    tolakKembar = err.status;
+  }
+  check('varian bernama sama pada satu produk ditolak', tolakKembar === 409, `status ${tolakKembar}`);
+
+  // Varian TIDAK boleh menjadi produk: stok, HPP, dan riwayatnya tetap milik induk.
+  const produkCek = await call('GET', '/api/inventory/products?limit=2000');
+  check('varian tidak ikut menjadi produk baru',
+    produkCek.products.filter((p) => /Uji- Mangga|Uji- Durian/.test(p.name)).length === 0);
+
+  const stokSblmKat = produkCek.products.find((p) => p.id === idVar).stock;
+
+  // Memesan dengan varian dari katalog.
+  const orderKat = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA',
+    items: [{
+      product_id: idVar, qty: 9, price: 25000,
+      variants: [
+        { variant_id: v1.variant.id, label: 'Tani Makmur', qty: 5 },
+        { variant_id: v2.variant.id, label: null, qty: 4 },
+      ],
+    }],
+  });
+  const detKat = await call('GET', `/api/sales/${orderKat.order.id}`);
+  const varKat = detKat.items[0].variants;
+  check('varian dari katalog tersimpan beserta salinan namanya',
+    varKat.length === 2 &&
+    varKat.some((v) => v.variant_id === v1.variant.id && v.variant_nama === 'Uji- Mangga' && v.label === 'Tani Makmur') &&
+    varKat.some((v) => v.variant_id === v2.variant.id && v.variant_nama === 'Uji- Durian'),
+    JSON.stringify(varKat));
+  check('label boleh dikosongkan bila hanya variannya yang dipilih',
+    varKat.some((v) => !v.label));
+  check('katalog varian ikut dikirim bersama detail pesanan',
+    !!detKat.katalogVarian && Array.isArray(detKat.katalogVarian[idVar]));
+
+  const stokSslhKat = (await call('GET', '/api/inventory/products?limit=2000'))
+    .products.find((p) => p.id === idVar).stock;
+  check('stok tetap berkurang dari produk induk',
+    near(stokSslhKat, stokSblmKat - 9, 0.001), `${stokSblmKat} lalu ${stokSslhKat}`);
+
+  // Varian milik produk lain tidak boleh menempel di sini.
+  const produkLain = await call('POST', '/api/inventory/products', {
+    sku: `NLBL2-${Date.now()}`, name: 'Non Label Kedua', category: 'Uji', unit: 'PCS',
+    cost: 5000, price: 9000, needs_variant: true,
+  });
+  const vLain = await call('POST', `/api/inventory/products/${produkLain.product.id}/variants`, {
+    nama: 'Punya Produk Lain',
+  });
+  let tolakSalahInduk = 0;
+  try {
+    await call('POST', '/api/sales', {
+      order_date: today, channel: 'OFFLINE_WA',
+      items: [{
+        product_id: idVar, qty: 1, price: 25000,
+        variants: [{ variant_id: vLain.variant.id, qty: 1 }],
+      }],
+    });
+  } catch (err) {
+    tolakSalahInduk = err.status;
+  }
+  check('varian milik produk lain ditolak', tolakSalahInduk === 422, `status ${tolakSalahInduk}`);
+
+  // Varian yang sudah dipakai tidak boleh hilang dari riwayat pesanan.
+  const hapusTerpakai = await call('DELETE', `/api/inventory/variants/${v1.variant.id}`);
+  check('varian yang sudah dipakai dinonaktifkan, bukan dihapus',
+    /dinonaktifkan/.test(hapusTerpakai.message), hapusTerpakai.message);
+
+  const masihAda = await call('GET', `/api/sales/${orderKat.order.id}`);
+  check('pesanan lama tetap menyebut nama varian yang dikirim',
+    masihAda.items[0].variants.some((v) => v.variant_nama === 'Uji- Mangga'));
+
+  const hapusBelum = await call('DELETE', `/api/inventory/variants/${vLain.variant.id}`);
+  check('varian yang belum pernah dipakai boleh dihapus',
+    /dihapus/.test(hapusBelum.message), hapusBelum.message);
+
+  // Produk yang belum punya katalog tetap bisa dipesan dengan label manual —
+  // katalog kosong tidak boleh mengunci pekerjaan.
+  const produkTanpaKatalog = await call('POST', '/api/inventory/products', {
+    sku: `NLBL3-${Date.now()}`, name: 'Non Label Tanpa Katalog', category: 'Uji', unit: 'PCS',
+    cost: 5000, price: 9000, needs_variant: true,
+  });
+  await call('POST', '/api/inventory/moves', {
+    product_id: produkTanpaKatalog.product.id, move_date: today, move_type: 'IN',
+    qty: 5, unit_cost: 5000, note: 'Stok uji katalog kosong',
+  });
+  const orderManual = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA',
+    items: [{
+      product_id: produkTanpaKatalog.product.id, qty: 2, price: 9000,
+      variants: [{ label: 'Label Manual Saja', qty: 2 }],
+    }],
+  });
+  check('produk tanpa katalog tetap bisa dipesan dengan label manual',
+    !!orderManual.order);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

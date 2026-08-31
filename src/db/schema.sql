@@ -556,3 +556,22 @@ CREATE TABLE IF NOT EXISTS laporan_terbit (
 );
 
 CREATE INDEX IF NOT EXISTS idx_laporan_jenis ON laporan_terbit(jenis);
+
+-- ---------- KATALOG VARIAN PRODUK ----------
+-- Pilihan varian untuk produk yang dijual tanpa label, misalnya GPN- Mangga di
+-- bawah GREEN POWER NUTRALINDO. Varian BUKAN produk: ia tidak punya stok, HPP,
+-- maupun harga sendiri — stoknya tetap milik produk induknya.
+--
+-- Disimpan sebagai data, bukan daftar di dalam kode, karena variannya bertambah
+-- dan berkurang mengikuti pesanan pembeli.
+CREATE TABLE IF NOT EXISTS product_variants (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  nama       TEXT    NOT NULL,
+  active     INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+
+  UNIQUE (product_id, nama)
+);
+
+CREATE INDEX IF NOT EXISTS idx_varian_produk ON product_variants(product_id);

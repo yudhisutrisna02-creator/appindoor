@@ -109,6 +109,48 @@ function lepasCekKanal(db, tabel, applied) {
 }
 
 /**
+ * Menyemai katalog varian bawaan, sekali saja.
+ *
+ * Penandanya disimpan di tabel settings, bukan diperiksa dari kosong-tidaknya
+ * tabel varian. Kalau yang diperiksa isinya, katalog yang sengaja dikosongkan
+ * pemiliknya akan terisi lagi sendiri pada penyalaan berikutnya.
+ */
+function semaiKatalogVarian(db, applied) {
+  if (!tableExists(db, 'product_variants')) return;
+
+  const sudah = db
+    .prepare("SELECT value FROM settings WHERE key = 'varian_katalog_disemai'")
+    .get();
+  if (sudah) return;
+
+  const { VARIAN_BAWAAN } = require('./varian-bawaan');
+  const cariProduk = db.prepare('SELECT id FROM products WHERE sku = ?');
+  const tandai = db.prepare('UPDATE products SET needs_variant = 1 WHERE id = ?');
+  const tambah = db.prepare(
+    'INSERT INTO product_variants (product_id, nama) VALUES (?,?) ON CONFLICT DO NOTHING'
+  );
+
+  let varian = 0;
+  const hilang = [];
+
+  db.transaction(() => {
+    for (const [sku, daftar] of Object.entries(VARIAN_BAWAAN)) {
+      const p = cariProduk.get(sku);
+      if (!p) {
+        hilang.push(sku);
+        continue;
+      }
+      tandai.run(p.id);
+      for (const nama of daftar) varian += tambah.run(p.id, nama).changes;
+    }
+    db.prepare("INSERT INTO settings (key, value) VALUES ('varian_katalog_disemai', '1')").run();
+  })();
+
+  if (varian) applied.push(varian + ' varian produk disemai');
+  if (hilang.length) applied.push('katalog varian dilewati (SKU tidak ada): ' + hilang.join(', '));
+}
+
+/**
  * Menjalankan seluruh migrasi. Dipanggil sekali saat boot, setelah schema.sql.
  * @returns {string[]} daftar perubahan yang benar-benar diterapkan
  */
@@ -205,6 +247,14 @@ function runMigrations(db) {
     for (const sku of ['GPN', 'B-NLN', 'F-ON-NL', 'BN-SBRNL']) n += tandai.run(sku).changes;
     if (n) applied.push(n + ' produk ditandai butuh label varian');
   }
+
+  // Varian yang dipilih dari katalog, beserta salinan namanya. Salinan itu
+  // yang membuat riwayat pesanan tetap terbaca walau katalognya kemudian
+  // diubah atau varian itu dihapus.
+  addColumn(db, 'sales_item_variants', 'variant_id', 'INTEGER REFERENCES product_variants(id)', applied);
+  addColumn(db, 'sales_item_variants', 'variant_nama', 'TEXT', applied);
+
+  semaiKatalogVarian(db, applied);
 
   // --- Nota pembayaran ke supplier ---
   // Nomor faktur yang dikeluarkan supplier. Berbeda dari po_no yang kita buat

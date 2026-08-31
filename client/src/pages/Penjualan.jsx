@@ -165,8 +165,12 @@ export default function Penjualan() {
             ...(i.variants && i.variants.length
               ? {
                   variants: i.variants
-                    .filter((v) => String(v.label || '').trim())
-                    .map((v) => ({ label: String(v.label).trim(), qty: Number(v.qty) || 0 })),
+                    .filter((v) => v.variant_id || String(v.label || '').trim())
+                    .map((v) => ({
+                      variant_id: v.variant_id ? Number(v.variant_id) : null,
+                      label: String(v.label || '').trim() || null,
+                      qty: Number(v.qty) || 0,
+                    })),
                 }
               : {}),
           })),

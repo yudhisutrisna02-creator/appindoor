@@ -107,6 +107,93 @@ router.put('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
   res.json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id) });
 }));
 
+// ==================================================================
+// KATALOG VARIAN
+//
+// Varian BUKAN produk: ia tidak punya stok, HPP, maupun harga sendiri. Ia
+// hanya pilihan nama di bawah satu produk induk — GPN- Mangga di bawah GREEN
+// POWER NUTRALINDO — dan stoknya tetap milik induknya. Menjadikannya produk
+// tersendiri akan memecah stok dan HPP barang yang sebenarnya sama.
+// ==================================================================
+const varianSchema = z.object({
+  nama: z.string().trim().min(1, 'nama varian wajib diisi').max(120),
+  active: z.boolean().default(true),
+});
+
+function produkAda(id) {
+  const p = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+  if (!p) throw httpError(404, 'Produk tidak ditemukan');
+  return p;
+}
+
+router.get('/products/:id(\\d+)/variants', ah((req, res) => {
+  produkAda(req.params.id);
+  res.json({
+    rows: db
+      .prepare('SELECT * FROM product_variants WHERE product_id = ? ORDER BY nama')
+      .all(req.params.id),
+  });
+}));
+
+router.post('/products/:id(\\d+)/variants', butuhIzin('gudang.produk'), ah((req, res) => {
+  const p = produkAda(req.params.id);
+  const v = parse(varianSchema, req.body);
+
+  const kembar = db
+    .prepare('SELECT id FROM product_variants WHERE product_id = ? AND nama = ?')
+    .get(p.id, v.nama);
+  if (kembar) throw httpError(409, `Varian ${v.nama} sudah ada pada produk ini`);
+
+  const info = db
+    .prepare('INSERT INTO product_variants (product_id, nama, active) VALUES (?,?,?)')
+    .run(p.id, v.nama, v.active ? 1 : 0);
+
+  res.status(201).json({
+    ok: true,
+    message: `Varian ${v.nama} ditambahkan`,
+    variant: db.prepare('SELECT * FROM product_variants WHERE id = ?').get(info.lastInsertRowid),
+  });
+}));
+
+router.put('/variants/:id(\\d+)', butuhIzin('gudang.produk'), ah((req, res) => {
+  const ada = db.prepare('SELECT * FROM product_variants WHERE id = ?').get(req.params.id);
+  if (!ada) throw httpError(404, 'Varian tidak ditemukan');
+  const v = parse(varianSchema, req.body);
+
+  const kembar = db
+    .prepare('SELECT id FROM product_variants WHERE product_id = ? AND nama = ? AND id <> ?')
+    .get(ada.product_id, v.nama, ada.id);
+  if (kembar) throw httpError(409, `Varian ${v.nama} sudah ada pada produk ini`);
+
+  db.prepare('UPDATE product_variants SET nama = ?, active = ? WHERE id = ?')
+    .run(v.nama, v.active ? 1 : 0, ada.id);
+
+  res.json({ ok: true, message: `Varian ${v.nama} disimpan` });
+}));
+
+router.delete('/variants/:id(\\d+)', butuhIzin('gudang.produk'), ah((req, res) => {
+  const ada = db.prepare('SELECT * FROM product_variants WHERE id = ?').get(req.params.id);
+  if (!ada) throw httpError(404, 'Varian tidak ditemukan');
+
+  const terpakai = db
+    .prepare('SELECT COUNT(*) c FROM sales_item_variants WHERE variant_id = ?')
+    .get(ada.id).c;
+
+  // Varian yang sudah pernah dipakai tidak dihapus, hanya dinonaktifkan.
+  // Menghapusnya akan memutus pesanan lama dari katalognya — salinan namanya
+  // memang tetap tersimpan pada pesanan, tetapi jejak ke katalognya hilang.
+  if (terpakai > 0) {
+    db.prepare('UPDATE product_variants SET active = 0 WHERE id = ?').run(ada.id);
+    return res.json({
+      ok: true,
+      message: `Varian ${ada.nama} sudah dipakai ${terpakai} pesanan — dinonaktifkan, bukan dihapus`,
+    });
+  }
+
+  db.prepare('DELETE FROM product_variants WHERE id = ?').run(ada.id);
+  return res.json({ ok: true, message: `Varian ${ada.nama} dihapus` });
+}));
+
 router.delete('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
   const used = db.prepare('SELECT COUNT(*) c FROM sales_items WHERE product_id = ?').get(req.params.id).c;
   if (used > 0) {

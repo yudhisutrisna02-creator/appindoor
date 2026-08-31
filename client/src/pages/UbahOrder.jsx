@@ -23,6 +23,7 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
   // ringkasannya — jadi harus diambil tersendiri saat formulirnya dibuka.
   const [itemAwal, setItemAwal] = useState(null);
   const [memuatItem, setMemuatItem] = useState(false);
+  const [katalogVarian, setKatalogVarian] = useState({});
 
   useEffect(() => {
     if (!order) {
@@ -40,8 +41,13 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
           product_id: String(i.product_id),
           qty: i.qty,
           price: i.price,
-          variants: (i.variants || []).map((v) => ({ label: v.label, qty: v.qty })),
+          variants: (i.variants || []).map((v) => ({
+            variant_id: v.variant_id || '',
+            label: v.label || '',
+            qty: v.qty,
+          })),
         }));
+        setKatalogVarian(d.katalogVarian || {});
         setItemAwal(isi);
         setForm((f) => (f ? { ...f, items: isi.map((x) => ({ ...x })) } : f));
       })
@@ -136,8 +142,12 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
         ...(i.variants && i.variants.length
           ? {
               variants: i.variants
-                .filter((v) => String(v.label || '').trim())
-                .map((v) => ({ label: String(v.label).trim(), qty: Number(v.qty) || 0 })),
+                .filter((v) => v.variant_id || String(v.label || '').trim())
+                .map((v) => ({
+                  variant_id: v.variant_id ? Number(v.variant_id) : null,
+                  label: String(v.label || '').trim() || null,
+                  qty: Number(v.qty) || 0,
+                })),
             }
           : {}),
       }));
@@ -149,7 +159,8 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
       const samaVarian = (a = [], b = []) =>
         a.length === b.length &&
         a.every((v, n) =>
-          String(v.label).trim() === String(b[n].label).trim() &&
+          String(v.variant_id || '') === String(b[n].variant_id || '') &&
+          String(v.label || '').trim() === String(b[n].label || '').trim() &&
           Math.abs(Number(v.qty) - Number(b[n].qty)) < 0.0001);
 
       const sama =
@@ -365,6 +376,7 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
                           varian={it.variants || []}
                           qtyBaris={it.qty}
                           terkunci={batal}
+                          katalogAwal={katalogVarian[p.id]}
                           onUbah={(variants) => {
                             const items = [...form.items];
                             items[i] = { ...items[i], variants };
