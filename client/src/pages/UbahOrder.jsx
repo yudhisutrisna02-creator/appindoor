@@ -39,6 +39,12 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
         // Peladen mengirim items sejajar dengan order, bukan di dalamnya.
         const isi = (d.items || []).map((i) => ({
           product_id: String(i.product_id),
+          // Nama dan SKU ikut dibawa dari pesanan. Daftar produk hanya memuat
+          // yang aktif, jadi barang yang sudah dinonaktifkan tidak akan ada di
+          // sana — tanpa salinan ini, barisnya tampak kosong dan menyimpan
+          // justru menghapus produk yang sebenarnya benar.
+          product_nama: i.product_name || '',
+          product_sku: i.sku || '',
           qty: i.qty,
           price: i.price,
           variants: (i.variants || []).map((v) => ({
@@ -326,6 +332,14 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
                       }}
                     >
                       <option value="">— pilih barang —</option>
+                      {/* Produk baris ini tetap muncul walau sudah nonaktif,
+                          supaya pilihannya tidak terbaca kosong dan tidak
+                          terhapus begitu formulir disimpan. */}
+                      {it.product_id && !p && (
+                        <option value={it.product_id}>
+                          {it.product_nama || 'Produk tidak aktif'} (tidak aktif)
+                        </option>
+                      )}
                       {products.map((x) => (
                         <option key={x.id} value={x.id}>{x.name} (stok {x.stock})</option>
                       ))}

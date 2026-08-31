@@ -697,6 +697,7 @@ export default function Penjualan() {
       <UbahOrder
         order={ubah}
         shops={shops}
+        products={products}
         open={!!ubah}
         onClose={() => setUbah(null)}
         onSaved={() => { load(); refreshProducts(); }}

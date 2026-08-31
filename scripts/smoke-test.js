@@ -2758,6 +2758,91 @@ async function main() {
       .every((k) => kepalaCsv.includes(k)),
     kepalaCsv.slice(0, 120));
 
+  // ---------- Ganti produk pada pesanan yang sudah tersimpan ----------
+  console.log('\n33. Ganti produk pada pesanan tersimpan');
+
+  const pA = await call('POST', '/api/inventory/products', {
+    sku: `SALAH-${Date.now()}`, name: 'Produk Salah Input', category: 'Uji', unit: 'PCS',
+    cost: 8000, price: 20000,
+  });
+  const pB = await call('POST', '/api/inventory/products', {
+    sku: `BENAR-${Date.now()}`, name: 'Produk Yang Benar', category: 'Uji', unit: 'PCS',
+    cost: 11000, price: 26000,
+  });
+  for (const p of [pA, pB]) {
+    await call('POST', '/api/inventory/moves', {
+      product_id: p.product.id, move_date: today, move_type: 'IN',
+      qty: 50, unit_cost: p.product.cost, note: 'Stok uji ganti produk',
+    });
+  }
+  const stokA0 = (await call('GET', '/api/inventory/products?limit=2000'))
+    .products.find((p) => p.id === pA.product.id).stock;
+  const stokB0 = (await call('GET', '/api/inventory/products?limit=2000'))
+    .products.find((p) => p.id === pB.product.id).stock;
+
+  // Salah input: produk A, padahal seharusnya produk B.
+  const orderSalah = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA',
+    items: [{ product_id: pA.product.id, qty: 3, price: 20000 }],
+  });
+
+  // Detail harus membawa nama produknya — itu yang dipakai layar menampilkan
+  // pilihan barang yang sedang terpasang pada baris.
+  const detSalah = await call('GET', `/api/sales/${orderSalah.order.id}`);
+  check('detail pesanan membawa nama produk tiap barisnya',
+    detSalah.items[0].product_name === 'Produk Salah Input' && !!detSalah.items[0].sku,
+    JSON.stringify(detSalah.items[0].product_name));
+
+  // Ganti produknya.
+  await call('PUT', `/api/sales/${orderSalah.order.id}`, {
+    items: [{ product_id: pB.product.id, qty: 3, price: 26000 }],
+  });
+
+  const sesudahGanti = await call('GET', `/api/sales/${orderSalah.order.id}`);
+  check('produk pada pesanan benar-benar terganti',
+    sesudahGanti.items.length === 1 && sesudahGanti.items[0].product_id === pB.product.id,
+    `${sesudahGanti.items[0].product_name}`);
+
+  const stokA1 = (await call('GET', '/api/inventory/products?limit=2000'))
+    .products.find((p) => p.id === pA.product.id).stock;
+  const stokB1 = (await call('GET', '/api/inventory/products?limit=2000'))
+    .products.find((p) => p.id === pB.product.id).stock;
+
+  check('stok produk yang salah dikembalikan seluruhnya',
+    near(stokA1, stokA0, 0.001), `${stokA0} lalu ${stokA1}`);
+  check('stok produk yang benar berkurang',
+    near(stokB1, stokB0 - 3, 0.001), `${stokB0} lalu ${stokB1}`);
+
+  // HPP ikut berpindah ke produk yang benar, bukan tertinggal pada yang salah.
+  check('HPP dihitung ulang dari produk yang baru',
+    near(sesudahGanti.order.cogs, 3 * 11000, 1), `${sesudahGanti.order.cogs}`);
+  check('nilai order mengikuti harga yang baru',
+    near(sesudahGanti.order.gross_sales, 3 * 26000, 1), `${sesudahGanti.order.gross_sales}`);
+
+  const tbGanti = await call('GET',
+    `/api/finance/reports/trial-balance?from=${today.slice(0, 8)}01&to=${today}`);
+  check('pembukuan tetap seimbang setelah produk diganti',
+    near(tbGanti.totalDebit, tbGanti.totalCredit, 1));
+
+  // Produk yang sudah dinonaktifkan tidak muncul di daftar aktif; pesanan lama
+  // tetap harus menyebut namanya, kalau tidak barisnya terbaca kosong di layar
+  // dan terhapus begitu formulir disimpan.
+  await call('PUT', `/api/inventory/products/${pA.product.id}`, {
+    sku: pA.product.sku, name: pA.product.name, category: 'Uji', unit: 'PCS',
+    cost: 8000, price: 20000, active: false,
+  });
+  const daftarAktif = await call('GET', '/api/inventory/products?limit=2000');
+  check('produk nonaktif tidak ikut daftar produk aktif',
+    !daftarAktif.products.some((p) => p.id === pA.product.id));
+
+  const orderLamaA = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA',
+    items: [{ product_id: pB.product.id, qty: 1, price: 26000 }],
+  });
+  const detLamaA = await call('GET', `/api/sales/${orderLamaA.order.id}`);
+  check('detail pesanan tetap menyebut nama produknya walau daftar aktif berubah',
+    !!detLamaA.items[0].product_name);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
