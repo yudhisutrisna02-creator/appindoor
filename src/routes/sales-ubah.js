@@ -18,7 +18,7 @@ const { httpError } = require('../utils/http');
 const { r2, postJournal, deleteJournalsBySource, buildSalesJournalLines } = require('../utils/accounting');
 const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
 
-const STATUS_PESANAN = ['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR', 'BATAL'];
+const STATUS_PESANAN = require('../utils/status-pesanan').SEMUA;
 
 const tanggal = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 

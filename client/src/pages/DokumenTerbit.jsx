@@ -5,7 +5,7 @@ import {
   PageHeader, StatCard, Spinner, EmptyState,
   useToast, TombolEkspor,
 } from '../components/ui';
-import { rupiah, rupiahShort } from '../lib/format';
+import { rupiah } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const STATUS = {
@@ -225,7 +225,7 @@ export default function DokumenTerbit() {
           yang memegang kertasnya. Tokennya acak dan tidak bisa ditebak dari dokumen lain, dan
           tautan yang tersebar ke tangan yang salah bisa dicabut dari sini. Mencabut tidak menghapus
           dokumennya dan tidak menyentuh angkanya; yang berhenti berlaku hanya tautannya.
-          Total nilai dokumen yang beredar saat ini {rupiahShort(
+          Total nilai dokumen yang beredar saat ini {rupiah(
             data.rows.reduce((a, x) => a + (x.nilai || 0), 0)
           )}.
         </p>

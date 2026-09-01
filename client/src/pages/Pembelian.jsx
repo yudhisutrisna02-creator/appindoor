@@ -5,7 +5,7 @@ import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, TombolCetak,
 } from '../components/ui';
-import { rupiah, rupiahShort, dateID, today } from '../lib/format';
+import { rupiah, dateID, today } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const KOSONG = () => ({
@@ -242,7 +242,7 @@ export default function Pembelian() {
           icon={Truck} tone={r.menunggu > 0 ? 'amber' : 'green'}
         />
         <StatCard
-          label="Nilai yang Ditunggu" value={rupiahShort(r.nilaiMenunggu)}
+          label="Nilai yang Ditunggu" value={rupiah(r.nilaiMenunggu)}
           sub="barang dipesan, belum tiba"
           tone={r.nilaiMenunggu > 0 ? 'amber' : 'green'}
         />

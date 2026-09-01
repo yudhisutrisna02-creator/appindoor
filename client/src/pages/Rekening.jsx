@@ -5,7 +5,7 @@ import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   useToast, Field, TombolEkspor,
 } from '../components/ui';
-import { rupiah, rupiahShort, dateID, today } from '../lib/format';
+import { rupiah, dateID, today } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const KOSONG = { code: '', name: '', is_cash: true, active: true };
@@ -94,7 +94,7 @@ export default function Rekening() {
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
         <StatCard label="Jumlah Rekening" value={r.jumlahRekening} icon={Landmark} />
         <StatCard
-          label="Total Saldo" value={rupiahShort(r.total)}
+          label="Total Saldo" value={rupiah(r.total)}
           sub={`per ${dateID(data.asOf)}`}
           tone={r.total >= 0 ? 'brand' : 'red'}
         />
@@ -164,8 +164,8 @@ export default function Rekening() {
                     {a.perSumber.map((s) => (
                       <div key={s.sumber} className="rounded-lg bg-surface px-2.5 py-1.5 text-xs ring-1 ring-slate-200">
                         <span className="font-medium text-slate-700">{s.sumber}</span>
-                        {s.masuk > 0 && <span className="ml-2 text-emerald-600">+{rupiahShort(s.masuk)}</span>}
-                        {s.keluar > 0 && <span className="ml-2 text-rose-600">−{rupiahShort(s.keluar)}</span>}
+                        {s.masuk > 0 && <span className="ml-2 text-emerald-600">+{rupiah(s.masuk)}</span>}
+                        {s.keluar > 0 && <span className="ml-2 text-rose-600">−{rupiah(s.keluar)}</span>}
                       </div>
                     ))}
                   </div>

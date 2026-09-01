@@ -3,7 +3,7 @@ import { Warehouse, FileSpreadsheet, AlertTriangle, PackageX, Coins, RefreshCw }
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, useToast, TombolEkspor } from '../components/ui';
-import { rupiah, rupiahShort, num, CHART_COLORS } from '../lib/format';
+import { rupiah, num, CHART_COLORS } from '../lib/format';
 
 export default function ValuasiStok() {
   const toast = useToast();
@@ -43,12 +43,12 @@ export default function ValuasiStok() {
           icon={Warehouse}
         />
         <StatCard
-          label="Potensi Pendapatan" value={rupiahShort(data.potentialRevenue)}
+          label="Potensi Pendapatan" value={rupiah(data.potentialRevenue)}
           sub="Bila seluruh stok terjual di harga base"
           icon={Coins} tone="green"
         />
         <StatCard
-          label="Potensi Laba Kotor" value={rupiahShort(data.potentialMargin)}
+          label="Potensi Laba Kotor" value={rupiah(data.potentialMargin)}
           sub={`Margin ${data.potentialRevenue ? ((data.potentialMargin / data.potentialRevenue) * 100).toFixed(1) : 0}%`}
           icon={Coins} tone="brand"
         />
@@ -73,7 +73,7 @@ export default function ValuasiStok() {
               <BarChart data={data.byCategory} margin={{ left: -16, right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="category" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiahShort} width={78} />
+                <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={78} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                   {data.byCategory.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}

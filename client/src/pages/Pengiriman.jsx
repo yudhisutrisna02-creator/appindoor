@@ -6,14 +6,22 @@ import {
   DateRangeFilter, defaultRange, useToast, Field,
   KotakCari,
 } from '../components/ui';
-import { rupiah, rupiahShort, dateID, today, STATUS_PESANAN, WARNA_STATUS, CHANNEL_LABEL } from '../lib/format';
+import { rupiah, dateID, today, STATUS_PESANAN, WARNA_STATUS, CHANNEL_LABEL, TAHAP_PAPAN, STATUS_CAIR } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 /** Urutan tahap mengikuti perjalanan pesanan, bukan abjad. */
-const TAHAP = ['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR'];
+const TAHAP = TAHAP_PAPAN;
 
 /** Tahap berikutnya yang lazim — dipakai sebagai usulan tombol cepat. */
-const LANJUT = { DIPROSES: 'DIKIRIM', DIKIRIM: 'SELESAI', SELESAI: 'CAIR' };
+// Langkah berikutnya yang paling lazim dari tiap tahap. Pengiriman kilat
+// punya jalurnya sendiri: dari KILAT dananya cair sebagai KILAT_CAIR, bukan
+// bercampur dengan pencairan pengiriman biasa.
+const LANJUT = {
+  DIPROSES: 'DIKIRIM',
+  DIKIRIM: 'SELESAI',
+  SELESAI: 'CAIR',
+  KILAT: 'KILAT_CAIR',
+};
 
 /**
  * Papan pengiriman.
@@ -85,7 +93,7 @@ export default function Pengiriman() {
     try {
       const isi = { ids: pilih, fulfillment_status: tujuan };
       // Tanggal cair dan status lunas hanya masuk akal saat dananya memang cair.
-      if (tujuan === 'CAIR') {
+      if (STATUS_CAIR.includes(tujuan)) {
         isi.payout_date = tglCair || null;
         if (lunas) isi.payment_status = 'PAID';
       }
@@ -132,7 +140,7 @@ export default function Pengiriman() {
           icon={Clock} tone={r.belumSelesai > 0 ? 'amber' : 'green'}
         />
         <StatCard
-          label="Dana Belum Cair" value={rupiahShort(r.nilaiBelumCair)}
+          label="Dana Belum Cair" value={rupiah(r.nilaiBelumCair)}
           sub="nilai bersih yang belum diterima"
           tone={r.nilaiBelumCair > 0 ? 'amber' : 'green'}
         />
@@ -157,7 +165,7 @@ export default function Pengiriman() {
               {k.orders}
             </p>
             <p className={`text-[11px] ${tahap === k.status ? 'text-brand-100' : 'text-slate-500'}`}>
-              {rupiahShort(k.nilai)}
+              {rupiah(k.nilai)}
               {k.tertua > 0 && ` • tertua ${k.tertua} hari`}
             </p>
           </button>
@@ -183,7 +191,7 @@ export default function Pengiriman() {
               </select>
             </Field>
 
-            {tujuan === 'CAIR' && (
+            {STATUS_CAIR.includes(tujuan) && (
               <>
                 <Field label="Tanggal Cair" className="w-40">
                   <input type="date" className="input" value={tglCair} onChange={(e) => setTglCair(e.target.value)} />
@@ -203,7 +211,7 @@ export default function Pengiriman() {
             </button>
           </div>
 
-          {tujuan === 'CAIR' && lunas && (
+          {STATUS_CAIR.includes(tujuan) && lunas && (
             <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-600">
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
               Menandai lunas memindahkan nilainya dari Piutang Marketplace ke kas/bank, dan jurnal

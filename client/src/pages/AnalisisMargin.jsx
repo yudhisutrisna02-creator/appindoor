@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, TombolEkspor, KotakCari, saringLokal } from '../components/ui';
-import { rupiah, rupiahShort, num, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
+import { rupiah, num, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 
 // Urutan dan namanya mengikuti rincian pencairan marketplace, sama dengan
 // formulir order — supaya angka di analisis ini bisa langsung dicocokkan
@@ -67,16 +67,16 @@ export default function AnalisisMargin() {
       </DateRangeFilter>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Pendapatan Bersih" value={rupiahShort(data.totals.net_revenue || 0)} sub={`${data.totals.orders || 0} order`} icon={Receipt} />
-        <StatCard label="Laba Bersih" value={rupiahShort(data.totals.net_profit || 0)} sub={`Margin ${pct(data.totals.margin_pct || 0)}`} icon={TrendingUp} tone={(data.totals.net_profit || 0) >= 0 ? 'green' : 'red'} />
+        <StatCard label="Pendapatan Bersih" value={rupiah(data.totals.net_revenue || 0)} sub={`${data.totals.orders || 0} order`} icon={Receipt} />
+        <StatCard label="Laba Bersih" value={rupiah(data.totals.net_profit || 0)} sub={`Margin ${pct(data.totals.margin_pct || 0)}`} icon={TrendingUp} tone={(data.totals.net_profit || 0) >= 0 ? 'green' : 'red'} />
         <StatCard
-          label="Beban Channel" value={rupiahShort(data.totals.total_fees || 0)}
+          label="Beban Channel" value={rupiah(data.totals.total_fees || 0)}
           sub={data.totals.net_revenue ? `${((data.totals.total_fees / data.totals.net_revenue) * 100).toFixed(1)}% dari pendapatan` : '-'}
           icon={Percent} tone="amber"
         />
         <StatCard
           label="Channel Terbaik" value={best ? best.label : '-'}
-          sub={best ? `Laba ${rupiahShort(best.net_profit)} • ${pct(best.margin_pct)}` : 'Belum ada data'}
+          sub={best ? `Laba ${rupiah(best.net_profit)} • ${pct(best.margin_pct)}` : 'Belum ada data'}
           icon={Trophy} tone="brand"
         />
       </div>
@@ -92,7 +92,7 @@ export default function AnalisisMargin() {
                 <BarChart data={chartData} margin={{ left: -14, right: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={54} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiahShort} width={76} />
+                  <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={76} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar name="Pendapatan Bersih" dataKey="net_revenue" fill="#93c5fd" radius={[5, 5, 0, 0]} />
@@ -109,7 +109,7 @@ export default function AnalisisMargin() {
                 <LineChart data={data.daily} margin={{ left: -14, right: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis dataKey="order_date" tick={{ fontSize: 11 }} tickFormatter={(d) => d.slice(8)} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiahShort} width={76} />
+                  <YAxis tick={{ fontSize: 11 }} __SUMBU__1__ width={76} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line name="Pendapatan" type="monotone" dataKey="net_revenue" stroke="#1a5cf5" strokeWidth={2} dot={false} />

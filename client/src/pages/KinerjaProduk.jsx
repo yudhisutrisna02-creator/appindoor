@@ -5,7 +5,7 @@ import {
   PageHeader, StatCard, Spinner, EmptyState,
   useToast, DateRangeFilter, defaultRange, TombolEkspor,
 } from '../components/ui';
-import { rupiah, rupiahShort, dateID } from '../lib/format';
+import { rupiah, dateID } from '../lib/format';
 
 /** Warna golongan — merah untuk yang perlu dikerjakan, biru untuk yang wajar. */
 const NADA = {
@@ -100,14 +100,14 @@ export default function KinerjaProduk() {
           sub={`dalam ${data.hariPeriode} hari`}
           icon={PackageSearch}
         />
-        <StatCard label="Nilai Persediaan" value={rupiahShort(r.nilaiStok)} icon={Boxes} />
+        <StatCard label="Nilai Persediaan" value={rupiah(r.nilaiStok)} icon={Boxes} />
         <StatCard
           label="Perlu Restok" value={r.perluRestok}
           sub={r.habis > 0 ? `${r.habis} sudah habis` : 'belum ada yang habis'}
           icon={AlertTriangle} tone={r.perluRestok > 0 ? 'red' : 'green'}
         />
         <StatCard
-          label="Modal Menganggur" value={rupiahShort(r.modalTertahan)}
+          label="Modal Menganggur" value={rupiah(r.modalTertahan)}
           sub={`${r.diam} produk diam`} icon={Snowflake}
           tone={r.modalTertahan > 0 ? 'amber' : 'brand'}
         />
@@ -185,7 +185,7 @@ export default function KinerjaProduk() {
                     <td className={`tabular text-right ${p.stok <= 0 ? 'font-semibold text-rose-600' : ''}`}>
                       {p.stok} {p.unit}
                     </td>
-                    <td className="tabular text-right">{rupiahShort(p.nilai_stok)}</td>
+                    <td className="tabular text-right">{rupiah(p.nilai_stok)}</td>
                     <td className="tabular text-right">
                       {p.qty || '—'}
                       {p.qty > 0 && <span className="block text-xs text-slate-500">{p.orders} order</span>}

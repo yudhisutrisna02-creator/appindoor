@@ -9,7 +9,7 @@ import {
   DateRangeFilter, defaultRange, useToast, Field, TombolEkspor,
   KotakCari, saringLokal,
 } from '../components/ui';
-import { rupiah, rupiahShort, pct, dateID, today, CHANNEL_LABEL } from '../lib/format';
+import { rupiah, pct, dateID, today, CHANNEL_LABEL } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const KOSONG = {
@@ -139,20 +139,20 @@ export default function Iklan() {
         <>
           <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
             <StatCard
-              label="Belanja Iklan" value={rupiahShort(r.totalIklan)}
+              label="Belanja Iklan" value={rupiah(r.totalIklan)}
               sub={`${r.jumlahCatatan} catatan`} icon={Megaphone} tone="amber"
             />
             <StatCard
-              label="Pendapatan Kotor" value={rupiahShort(r.pendapatanKotor)}
+              label="Pendapatan Kotor" value={rupiah(r.pendapatanKotor)}
               sub="Sebelum potongan marketplace"
             />
             <StatCard
-              label="Pendapatan Bersih" value={rupiahShort(r.pendapatanBersih)}
+              label="Pendapatan Bersih" value={rupiah(r.pendapatanBersih)}
               sub="Yang benar-benar diterima" icon={Wallet}
             />
             <StatCard
-              label="Laba Setelah Iklan" value={rupiahShort(r.labaSetelahIklan)}
-              sub={`Sebelum iklan ${rupiahShort(r.labaSebelumIklan)}`}
+              label="Laba Setelah Iklan" value={rupiah(r.labaSetelahIklan)}
+              sub={`Sebelum iklan ${rupiah(r.labaSebelumIklan)}`}
               tone={r.labaSetelahIklan >= 0 ? 'green' : 'red'}
             />
             <StatCard
@@ -175,7 +175,7 @@ export default function Iklan() {
               <ResponsiveContainer width="100%" height={Math.max(200, data.perToko.length * 38)}>
                 <BarChart data={data.perToko} layout="vertical" margin={{ left: 30, right: 16 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={rupiahShort} />
+                  <XAxis type="number" tick={{ fontSize: 11 }} __SUMBU__0__ />
                   <YAxis type="category" dataKey="shop_name" tick={{ fontSize: 11 }} width={140} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Bar dataKey="iklan" name="Belanja Iklan" radius={[0, 6, 6, 0]}>

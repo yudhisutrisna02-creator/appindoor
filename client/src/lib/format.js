@@ -66,19 +66,35 @@ export const CHART_COLORS = ['#1a5cf5', '#0ea5e9', '#10b981', '#f59e0b', '#ef444
 export const STATUS_PESANAN = {
   DIPROSES: 'Diproses',
   DIKIRIM: 'Dikirim',
+  KILAT: 'Pengiriman Kilat',
   SELESAI: 'Selesai',
   CAIR: 'Cair',
+  KILAT_CAIR: 'Pengiriman Kilat Cair',
   RETUR: 'Retur',
+  KILAT_RETUR: 'Retur Pengiriman Kilat',
   BATAL: 'Batal',
 };
+
+/** Tahap yang berarti dananya sudah diterima — jalur biasa maupun kilat. */
+export const STATUS_CAIR = ['CAIR', 'KILAT_CAIR'];
+
+/** Urutan kolom papan pengiriman — sama persis dengan yang dipakai peladen. */
+export const TAHAP_PAPAN = [
+  'DIPROSES', 'DIKIRIM', 'KILAT', 'SELESAI', 'CAIR', 'KILAT_CAIR', 'RETUR', 'KILAT_RETUR',
+];
 
 /** Warna badge tiap tahapan — hijau hanya untuk yang uangnya sudah diterima. */
 export const WARNA_STATUS = {
   DIPROSES: 'badge-slate',
   DIKIRIM: 'badge-amber',
+  // Kilat memakai biru supaya terpisah jelas dari jalur biasa saat menyusuri
+  // ratusan baris — tenggatnya berbeda, jadi tidak boleh tampak serupa.
+  KILAT: 'badge-blue',
   SELESAI: 'badge-amber',
   CAIR: 'badge-green',
+  KILAT_CAIR: 'badge-green',
   RETUR: 'badge-red',
+  KILAT_RETUR: 'badge-red',
   BATAL: 'badge-red',
 };
 

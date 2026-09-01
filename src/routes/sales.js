@@ -7,6 +7,7 @@ const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
+const STATUS = require('../utils/status-pesanan');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -57,7 +58,7 @@ const orderSchema = z.object({
   order_ref: z.string().trim().max(80).optional().nullable(),
   courier: z.string().trim().max(50).optional().nullable(),
   tracking_no: z.string().trim().max(80).optional().nullable(),
-  fulfillment_status: z.enum(['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR', 'BATAL']).default('DIPROSES'),
+  fulfillment_status: z.enum(STATUS.SEMUA).default('DIPROSES'),
   payout_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   shipping_charged: z.number().nonnegative().default(0),
   buyer_name: z.string().trim().max(120).optional().nullable(),
@@ -603,7 +604,7 @@ const statusMassalSchema = z.object({
   // BATAL sengaja tidak diterima di sini. Membatalkan mengembalikan stok dan
   // menghapus jurnal — terlalu berat untuk dijalankan lewat centang massal yang
   // mudah tersenggol.
-  fulfillment_status: z.enum(['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR']),
+  fulfillment_status: z.enum(STATUS.TAHAP_PAPAN),
   payment_status: z.enum(['PAID', 'UNPAID']).optional(),
   payout_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 });
@@ -664,8 +665,7 @@ router.get('/papan', ah((req, res) => {
     )
     .all(...params);
 
-  const TAHAP = ['DIPROSES', 'DIKIRIM', 'SELESAI', 'CAIR', 'RETUR'];
-  const kolom = TAHAP.map((tahap) => {
+  const kolom = STATUS.TAHAP_PAPAN.map((tahap) => {
     const isi = rows.filter((r) => r.fulfillment_status === tahap);
     return {
       status: tahap,
@@ -681,10 +681,10 @@ router.get('/papan', ah((req, res) => {
     from, to, kolom,
     ringkas: {
       total: rows.length,
-      belumSelesai: rows.filter((r) => !['CAIR', 'RETUR'].includes(r.fulfillment_status)).length,
+      belumSelesai: rows.filter((r) => !STATUS.SELESAI_URUSAN.includes(r.fulfillment_status)).length,
       nilaiBelumCair: r2(
         rows
-          .filter((r) => r.fulfillment_status !== 'CAIR' && r.fulfillment_status !== 'RETUR')
+          .filter((r) => !STATUS.SELESAI_URUSAN.includes(r.fulfillment_status))
           .reduce((s, r) => s + r.net_revenue - r.total_fees, 0)
       ),
     },

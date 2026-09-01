@@ -5,7 +5,7 @@ import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   useToast, Field, TombolEkspor, KotakCari, saringLokal,
 } from '../components/ui';
-import { rupiah, rupiahShort, num } from '../lib/format';
+import { rupiah, num } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const bulanIni = () => new Date().toLocaleDateString('sv-SE').slice(0, 7);
@@ -206,14 +206,14 @@ export default function Target() {
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          label="Omzet" value={rupiahShort(p.realisasi.omzet)}
-          sub={p.target.omzet > 0 ? `${p.capai.omzet}% dari ${rupiahShort(p.target.omzet)}` : 'target belum ditetapkan'}
+          label="Omzet" value={rupiah(p.realisasi.omzet)}
+          sub={p.target.omzet > 0 ? `${p.capai.omzet}% dari ${rupiah(p.target.omzet)}` : 'target belum ditetapkan'}
           icon={TrendingUp}
           tone={p.capai.omzet === null ? 'slate' : p.capai.omzet >= 100 ? 'green' : p.capai.omzet >= 70 ? 'amber' : 'red'}
         />
         <StatCard
-          label="Laba Setelah Iklan" value={rupiahShort(p.realisasi.laba)}
-          sub={p.target.laba > 0 ? `${p.capai.laba}% dari ${rupiahShort(p.target.laba)}` : 'target belum ditetapkan'}
+          label="Laba Setelah Iklan" value={rupiah(p.realisasi.laba)}
+          sub={p.target.laba > 0 ? `${p.capai.laba}% dari ${rupiah(p.target.laba)}` : 'target belum ditetapkan'}
           tone={p.capai.laba === null ? 'slate' : p.capai.laba >= 100 ? 'green' : p.capai.laba >= 70 ? 'amber' : 'red'}
         />
         <StatCard
@@ -221,9 +221,9 @@ export default function Target() {
           sub={p.target.orders > 0 ? `${p.capai.orders}% dari ${num(p.target.orders)}` : 'target belum ditetapkan'}
         />
         <StatCard
-          label="Belanja Iklan" value={rupiahShort(p.realisasi.iklan)}
+          label="Belanja Iklan" value={rupiah(p.realisasi.iklan)}
           sub={p.target.budget_iklan > 0
-            ? `${p.capai.iklan}% dari batas ${rupiahShort(p.target.budget_iklan)}`
+            ? `${p.capai.iklan}% dari batas ${rupiah(p.target.budget_iklan)}`
             : 'batas belum ditetapkan'}
           icon={p.iklanLewatBatas ? AlertTriangle : undefined}
           tone={p.iklanLewatBatas ? 'red' : 'brand'}

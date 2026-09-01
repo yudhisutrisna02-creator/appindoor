@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, KotakCari } from '../components/ui';
 import UbahOrder from './UbahOrder';
 import BarisVarian from '../components/BarisVarian';
-import { rupiah, rupiahShort, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel } from '../lib/format';
+import { rupiah, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const emptyOrder = () => ({
@@ -252,38 +252,38 @@ export default function Penjualan() {
           <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard
               label="Jumlah Order" value={num(data.summary.orders)}
-              sub={`AOV ${rupiahShort(data.summary.avgOrderValue)}`}
+              sub={`AOV ${rupiah(data.summary.avgOrderValue)}`}
               icon={ShoppingCart} latar="biru"
             />
             <StatCard
-              label="Pendapatan Kotor" value={rupiahShort(data.summary.netRevenue)}
-              sub={`Penjualan ${rupiahShort(data.summary.grossSales)} − diskon`}
+              label="Pendapatan Kotor" value={rupiah(data.summary.netRevenue)}
+              sub={`Penjualan ${rupiah(data.summary.grossSales)} − diskon`}
               latar="langit"
             />
             <StatCard
-              label="Biaya Channel" value={rupiahShort(data.summary.totalFees)}
+              label="Biaya Channel" value={rupiah(data.summary.totalFees)}
               sub="Admin, ongkir, voucher, packing"
               latar="amber"
             />
             <StatCard
-              label="Pendapatan Bersih" value={rupiahShort(data.summary.netReceived)}
+              label="Pendapatan Bersih" value={rupiah(data.summary.netReceived)}
               sub="Yang benar-benar diterima"
               latar="toska"
             />
 
             <StatCard
-              label="HPP" value={rupiahShort(data.summary.cogs)}
+              label="HPP" value={rupiah(data.summary.cogs)}
               sub="Harga pokok barang terjual"
               latar="ungu"
             />
             <StatCard
-              label="Laba Bersih" value={rupiahShort(data.summary.netProfit)}
+              label="Laba Bersih" value={rupiah(data.summary.netProfit)}
               sub={`Margin ${pct(data.summary.marginPct)} — sebelum iklan`}
               latar={data.summary.netProfit >= 0 ? 'hijau' : 'merah'}
             />
             <StatCard
               label="Biaya Iklan"
-              value={data.iklan.berlaku ? rupiahShort(data.summary.iklan) : '—'}
+              value={data.iklan.berlaku ? rupiah(data.summary.iklan) : '—'}
               sub={
                 data.iklan.berlaku
                   ? `${data.iklan.catatan} catatan belanja iklan`
@@ -293,7 +293,7 @@ export default function Penjualan() {
             />
             <StatCard
               label="Laba Setelah Iklan"
-              value={data.iklan.berlaku ? rupiahShort(data.summary.labaSetelahIklan) : '—'}
+              value={data.iklan.berlaku ? rupiah(data.summary.labaSetelahIklan) : '—'}
               sub={
                 data.iklan.berlaku
                   ? (data.summary.roas ? `ROAS ${data.summary.roas}×` : 'belum ada belanja iklan')
@@ -601,12 +601,12 @@ export default function Penjualan() {
               </Field>
               <Field label="Status Pesanan">
                 <select className="input" value={form.fulfillment_status} onChange={(e) => setForm({ ...form, fulfillment_status: e.target.value })}>
-                  <option value="DIPROSES">Diproses</option>
-                  <option value="DIKIRIM">Dikirim</option>
-                  <option value="SELESAI">Selesai</option>
-                  <option value="CAIR">Cair</option>
-                  <option value="RETUR">Retur</option>
-                  <option value="BATAL">Batal</option>
+                  {/* Diambil dari satu daftar bersama, bukan ditulis ulang di sini —
+                      pilihan yang tertinggal saat tahap baru ditambahkan berarti tim
+                      tidak bisa memilihnya sama sekali. */}
+                  {Object.entries(STATUS_PESANAN).map(([nilai, label]) => (
+                    <option key={nilai} value={nilai}>{label}</option>
+                  ))}
                 </select>
               </Field>
 

@@ -7,7 +7,7 @@ import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, useToast, Field, TombolEkspor,
 } from '../components/ui';
-import { rupiah, rupiahShort, dateID } from '../lib/format';
+import { rupiah, dateID } from '../lib/format';
 
 /**
  * Proyeksi arus kas.
@@ -67,17 +67,17 @@ export default function Proyeksi() {
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Kas Sekarang" value={rupiahShort(r.saldoAwal)} icon={Wallet} />
+        <StatCard label="Kas Sekarang" value={rupiah(r.saldoAwal)} icon={Wallet} />
         <StatCard
-          label="Perkiraan Masuk" value={rupiahShort(r.totalMasuk)}
+          label="Perkiraan Masuk" value={rupiah(r.totalMasuk)}
           sub={`${data.minggu} minggu ke depan`} icon={ArrowUpRight} tone="green"
         />
         <StatCard
-          label="Perkiraan Keluar" value={rupiahShort(r.totalKeluar)}
+          label="Perkiraan Keluar" value={rupiah(r.totalKeluar)}
           icon={ArrowDownRight} tone="amber"
         />
         <StatCard
-          label="Titik Terendah" value={rupiahShort(r.terendah.saldo)}
+          label="Titik Terendah" value={rupiah(r.terendah.saldo)}
           sub={r.terendah.dari ? `pekan ${dateID(r.terendah.dari)}` : 'sekarang'}
           icon={TrendingDown} tone={r.terendah.saldo < 0 ? 'red' : 'brand'}
         />
@@ -107,7 +107,7 @@ export default function Proyeksi() {
             <ComposedChart data={grafik} margin={{ top: 8, right: 8, bottom: 4, left: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis dataKey="nama" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => rupiahShort(v)} width={72} />
+              <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={72} />
               <Tooltip
                 formatter={(v, n) => [rupiah(Math.abs(v)), n]}
                 labelFormatter={(l) => {
@@ -164,7 +164,7 @@ export default function Proyeksi() {
                           key={x.sumber}
                           className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600"
                         >
-                          {x.sumber} {rupiahShort(x.nilai)}
+                          {x.sumber} {rupiah(x.nilai)}
                         </span>
                       ))}
                     </div>

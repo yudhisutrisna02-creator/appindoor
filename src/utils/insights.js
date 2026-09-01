@@ -9,6 +9,7 @@
  */
 const { db } = require('../db');
 const { r2 } = require('./accounting');
+const STATUS = require('./status-pesanan');
 
 const rp = (n) => 'Rp ' + Math.round(n).toLocaleString('id-ID');
 
@@ -101,9 +102,9 @@ function danaTertahan() {
       `SELECT COUNT(*) AS orders, COALESCE(SUM(net_revenue - total_fees), 0) AS nilai
          FROM sales_orders
         WHERE status = 'POSTED'
-          AND fulfillment_status IN ('DIPROSES', 'DIKIRIM', 'SELESAI')`
+          AND fulfillment_status IN (${STATUS.sqlIn(STATUS.BERJALAN)})`
     )
-    .get();
+    .get(...STATUS.BERJALAN);
   return { orders: row.orders, nilai: r2(row.nilai) };
 }
 

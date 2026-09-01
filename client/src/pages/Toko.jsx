@@ -7,7 +7,7 @@ import {
   DateRangeFilter, defaultRange, useToast, Field, TombolEkspor,
   KotakCari, saringLokal,
 } from '../components/ui';
-import { rupiah, rupiahShort, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
+import { rupiah, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const EMPTY = { name: '', channel: 'SHOPEE', note: '', active: true };
@@ -98,11 +98,11 @@ export default function Toko() {
         <>
           <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Jumlah Toko" value={shops.length} sub={`${aktif.length} ada transaksi`} icon={Store} />
-            <StatCard label="Omzet Semua Toko" value={rupiahShort(totalOmzet)} />
-            <StatCard label="Laba Semua Toko" value={rupiahShort(totalLaba)} tone={totalLaba >= 0 ? 'green' : 'red'} />
+            <StatCard label="Omzet Semua Toko" value={rupiah(totalOmzet)} />
+            <StatCard label="Laba Semua Toko" value={rupiah(totalLaba)} tone={totalLaba >= 0 ? 'green' : 'red'} />
             <StatCard
               label="Toko Terbaik" value={terbaik ? terbaik.name : '-'}
-              sub={terbaik ? `${rupiahShort(terbaik.net_profit)} • margin ${pct(terbaik.margin_pct)}` : 'belum ada transaksi'}
+              sub={terbaik ? `${rupiah(terbaik.net_profit)} • margin ${pct(terbaik.margin_pct)}` : 'belum ada transaksi'}
               icon={TrendingUp} tone="brand"
             />
           </div>
@@ -113,7 +113,7 @@ export default function Toko() {
               <ResponsiveContainer width="100%" height={Math.max(220, aktif.length * 40)}>
                 <BarChart data={aktif} layout="vertical" margin={{ left: 34, right: 16 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={rupiahShort} />
+                  <XAxis type="number" tick={{ fontSize: 11 }} __SUMBU__0__ />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Bar dataKey="net_profit" name="Laba Bersih" radius={[0, 6, 6, 0]}>
@@ -160,7 +160,7 @@ export default function Toko() {
                             </span>
                           )}
                         </td>
-                        <td className="tabular text-slate-500">{s.orders ? rupiahShort(s.avg_order_value) : '—'}</td>
+                        <td className="tabular text-slate-500">{s.orders ? rupiah(s.avg_order_value) : '—'}</td>
                         <td>{s.active ? <span className="badge-green">aktif</span> : <span className="badge-slate">nonaktif</span>}</td>
                         {canManage && (
                           <td>

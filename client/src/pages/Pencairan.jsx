@@ -6,7 +6,7 @@ import {
   useToast, Field, DateRangeFilter, defaultRange, TombolEkspor,
   KotakCari, saringLokal,
 } from '../components/ui';
-import { rupiah, rupiahShort, dateID, today } from '../lib/format';
+import { rupiah, dateID, today } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const NADA_EMBER = {
@@ -139,7 +139,7 @@ export default function Pencairan() {
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          label="Belum Cair" value={rupiahShort(r.nilai)}
+          label="Belum Cair" value={rupiah(r.nilai)}
           sub={`${r.orders} order`} icon={Hourglass}
           tone={r.nilai > 0 ? 'amber' : 'green'}
         />
@@ -148,12 +148,12 @@ export default function Pencairan() {
           sub={`tertua ${r.umurTertua} hari`} icon={Clock}
         />
         <StatCard
-          label="Lebih dari 14 Hari" value={rupiahShort(r.nilaiPerluDitanya)}
+          label="Lebih dari 14 Hari" value={rupiah(r.nilaiPerluDitanya)}
           sub={r.perluDitanya > 0 ? `${r.perluDitanya} order — perlu ditanyakan` : 'tidak ada'}
           icon={AlertTriangle} tone={r.perluDitanya > 0 ? 'red' : 'green'}
         />
         <StatCard
-          label="Cair Periode Ini" value={rupiahShort(r.cairNilai)}
+          label="Cair Periode Ini" value={rupiah(r.cairNilai)}
           sub={`${r.cairOrders} order • rata-rata ${r.cairRataHari} hari`}
           icon={CheckCircle2} tone="brand"
         />
@@ -259,7 +259,7 @@ export default function Pencairan() {
                 ember === e.kunci ? 'ring-2' : ''
               }`}
             >
-              {e.label} — {e.orders} order · {rupiahShort(e.nilai)}
+              {e.label} — {e.orders} order · {rupiah(e.nilai)}
             </button>
           ))}
         </div>

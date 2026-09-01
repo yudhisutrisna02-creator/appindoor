@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, DateRangeFilter, defaultRange, useToast, EmptyState } from '../components/ui';
-import { rupiah, rupiahShort, pct, num, timeID, dateID, CHART_COLORS, WORK_TYPE_LABEL } from '../lib/format';
+import { rupiah, pct, num, timeID, dateID, CHART_COLORS, WORK_TYPE_LABEL, STATUS_PESANAN, WARNA_STATUS } from '../lib/format';
 
 /** Selang penyegaran otomatis. Cukup sering untuk terasa hidup, cukup jarang
  *  untuk tidak membebani server bila dashboard dibiarkan terbuka seharian. */
@@ -21,11 +21,6 @@ const TINGKAT = {
   perhatian: { warna: 'bg-amber-50 text-amber-900 ring-amber-200',   icon: AlertTriangle, label: 'Perhatian' },
   peluang:   { warna: 'bg-emerald-50 text-emerald-900 ring-emerald-200', icon: Target,    label: 'Peluang' },
   info:      { warna: 'bg-slate-50 text-slate-800 ring-slate-200',   icon: Lightbulb,     label: 'Info' },
-};
-
-const STATUS_WARNA = {
-  CAIR: 'badge-green', SELESAI: 'badge-blue', DIKIRIM: 'badge-blue',
-  DIPROSES: 'badge-amber', RETUR: 'badge-red', BATAL: 'badge-slate',
 };
 
 export default function Dashboard() {
@@ -83,20 +78,20 @@ export default function Dashboard() {
       {/* ---------- REALTIME HARI INI ---------- */}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard
-          label="Penjualan Hari Ini" value={rupiahShort(penjualan.hariIni.netRevenue)}
+          label="Penjualan Hari Ini" value={rupiah(penjualan.hariIni.netRevenue)}
           sub={`${penjualan.hariIni.orders} order • ${
             selisihHarian >= 0 ? '+' : ''
-          }${rupiahShort(selisihHarian)} vs kemarin`}
+          }${rupiah(selisihHarian)} vs kemarin`}
           icon={ShoppingCart} tone={selisihHarian >= 0 ? 'green' : 'amber'}
         />
         <StatCard
-          label="Laba Hari Ini" value={rupiahShort(penjualan.hariIni.netProfit)}
+          label="Laba Hari Ini" value={rupiah(penjualan.hariIni.netProfit)}
           sub={`Margin ${pct(penjualan.hariIni.marginPct)}`}
           icon={TrendingUp} tone={penjualan.hariIni.netProfit >= 0 ? 'green' : 'red'}
         />
         <StatCard
-          label="Laba Setelah Iklan" value={rupiahShort(penjualan.iklan.labaHariIniSetelahIklan)}
-          sub={`Iklan hari ini ${rupiahShort(penjualan.iklan.hariIni)}`}
+          label="Laba Setelah Iklan" value={rupiah(penjualan.iklan.labaHariIniSetelahIklan)}
+          sub={`Iklan hari ini ${rupiah(penjualan.iklan.hariIni)}`}
           icon={Megaphone}
           tone={penjualan.iklan.labaHariIniSetelahIklan >= 0 ? 'green' : 'red'}
         />
@@ -106,7 +101,7 @@ export default function Dashboard() {
           icon={Users} tone={presensi.hariIni.telat > 0 ? 'amber' : 'green'}
         />
         <StatCard
-          label="Nilai Stok" value={rupiahShort(stok.totalValue)}
+          label="Nilai Stok" value={rupiah(stok.totalValue)}
           sub={`${stok.skuCount} SKU • ${stok.outOfStockCount} habis`}
           icon={Warehouse} tone={stok.outOfStockCount > 0 ? 'amber' : 'brand'}
         />
@@ -187,29 +182,29 @@ function TabPenjualan({ p }) {
       {/* Urutannya mengikuti perjalanan uang: dari yang tercatat di nota,
           dipotong marketplace, dipotong HPP, lalu dipotong iklan. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <StatCard label="Pendapatan Kotor" value={rupiahShort(p.periode.netRevenue)} sub={`${p.periode.orders} order • sebelum potongan`} />
-        <StatCard label="Biaya Channel" value={rupiahShort(p.periode.totalFees)} sub="admin, voucher, ongkir, packing" tone="amber" />
-        <StatCard label="Pendapatan Bersih" value={rupiahShort(p.periode.netReceived)} sub="yang benar-benar diterima" />
+        <StatCard label="Pendapatan Kotor" value={rupiah(p.periode.netRevenue)} sub={`${p.periode.orders} order • sebelum potongan`} />
+        <StatCard label="Biaya Channel" value={rupiah(p.periode.totalFees)} sub="admin, voucher, ongkir, packing" tone="amber" />
+        <StatCard label="Pendapatan Bersih" value={rupiah(p.periode.netReceived)} sub="yang benar-benar diterima" />
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="HPP" value={rupiahShort(p.periode.cogs)} tone="slate" />
-        <StatCard label="Laba Bersih" value={rupiahShort(p.periode.netProfit)} sub={`Margin ${pct(p.periode.marginPct)}`} tone={p.periode.netProfit >= 0 ? 'green' : 'red'} />
+        <StatCard label="HPP" value={rupiah(p.periode.cogs)} tone="slate" />
+        <StatCard label="Laba Bersih" value={rupiah(p.periode.netProfit)} sub={`Margin ${pct(p.periode.marginPct)}`} tone={p.periode.netProfit >= 0 ? 'green' : 'red'} />
         <StatCard
-          label="Biaya Iklan" value={rupiahShort(p.iklan.periode)}
+          label="Biaya Iklan" value={rupiah(p.iklan.periode)}
           sub={p.iklan.roas != null ? `ROAS ${p.iklan.roas.toFixed(2)}× • ${pct(p.iklan.rasioPct)} dari penjualan` : 'belum ada catatan iklan'}
           icon={Megaphone} tone="amber"
         />
         <StatCard
-          label="Laba Setelah Iklan" value={rupiahShort(p.iklan.labaSetelahIklan)}
-          sub={`Sebelum iklan ${rupiahShort(p.periode.netProfit)}`}
+          label="Laba Setelah Iklan" value={rupiah(p.iklan.labaSetelahIklan)}
+          sub={`Sebelum iklan ${rupiah(p.periode.netProfit)}`}
           tone={p.iklan.labaSetelahIklan >= 0 ? 'green' : 'red'}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-3">
         <StatCard
-          label="Dana Belum Cair" value={rupiahShort(p.danaTertahan.nilai)}
+          label="Dana Belum Cair" value={rupiah(p.danaTertahan.nilai)}
           sub={`${p.danaTertahan.orders} order menunggu pencairan`}
           icon={Timer} tone={p.danaTertahan.nilai > 0 ? 'amber' : 'green'}
         />
@@ -233,7 +228,7 @@ function TabPenjualan({ p }) {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => d.slice(8)} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiahShort} width={76} />
+                <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={76} />
                 <Tooltip formatter={(v, n) => [rupiah(v), n === 'revenue' ? 'Pendapatan' : 'Laba Bersih']} />
                 <Area type="monotone" dataKey="revenue" stroke="#1a5cf5" fill="url(#dRev)" strokeWidth={2} />
                 <Area type="monotone" dataKey="profit" stroke="#10b981" fill="url(#dProf)" strokeWidth={2} />
@@ -258,7 +253,7 @@ function TabPenjualan({ p }) {
                 {p.statusPencairan.map((s) => (
                   <div key={s.status} className="flex justify-between">
                     <dt className="text-slate-500">{s.status}</dt>
-                    <dd className="tabular font-medium">{s.orders} • {rupiahShort(s.nilai)}</dd>
+                    <dd className="tabular font-medium">{s.orders} • {rupiah(s.nilai)}</dd>
                   </div>
                 ))}
               </dl>
@@ -277,7 +272,7 @@ function TabPenjualan({ p }) {
             <ResponsiveContainer width="100%" height={Math.max(200, tokoData.length * 38)}>
               <BarChart data={tokoData} layout="vertical" margin={{ left: 34, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={rupiahShort} />
+                <XAxis type="number" tick={{ fontSize: 11 }} __SUMBU__1__ />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={130} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="net_profit" name="Laba Bersih" radius={[0, 6, 6, 0]}>
@@ -316,7 +311,7 @@ function TabPenjualan({ p }) {
               <BarChart data={channelData} margin={{ left: -16, right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={54} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiahShort} width={76} />
+                <YAxis tick={{ fontSize: 11 }} __SUMBU__2__ width={76} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="net_profit" name="Laba" radius={[5, 5, 0, 0]}>
                   {channelData.map((d, i) => <Cell key={i} fill={d.net_profit >= 0 ? CHART_COLORS[i % CHART_COLORS.length] : '#ef4444'} />)}
@@ -367,7 +362,11 @@ function TabPenjualan({ p }) {
                         {o.buyer_name || '-'}
                         {o.buyer_city && <span className="block text-slate-400">{o.buyer_city}</span>}
                       </td>
-                      <td><span className={STATUS_WARNA[o.fulfillment_status] || 'badge-slate'}>{o.fulfillment_status}</span></td>
+                      <td>
+                        <span className={WARNA_STATUS[o.fulfillment_status] || 'badge-slate'}>
+                          {STATUS_PESANAN[o.fulfillment_status] || o.fulfillment_status}
+                        </span>
+                      </td>
                       <td className={`tabular font-semibold ${o.net_profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{rupiah(o.net_profit)}</td>
                     </tr>
                   ))}
@@ -549,7 +548,7 @@ function TabStok({ s }) {
     <div className="grid gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Nilai Persediaan" value={rupiah(s.totalValue)} sub={`${s.skuCount} SKU • ${num(s.totalQty)} unit`} icon={Warehouse} />
-        <StatCard label="Potensi Pendapatan" value={rupiahShort(s.potentialRevenue)} sub="bila semua terjual di harga base" tone="green" />
+        <StatCard label="Potensi Pendapatan" value={rupiah(s.potentialRevenue)} sub="bila semua terjual di harga base" tone="green" />
         <StatCard label="Perlu Restock" value={s.lowStockCount} sub={`${s.outOfStockCount} habis total`} icon={AlertTriangle} tone={s.lowStockCount ? 'amber' : 'green'} />
         <StatCard label="Akan Habis" value={s.akanHabis.length} sub="dalam 14 hari, berdasar laju jual" icon={Timer} tone={s.akanHabis.length ? 'red' : 'green'} />
       </div>
@@ -620,7 +619,7 @@ function TabStok({ s }) {
               <BarChart data={s.nilaiPerKategori} margin={{ left: -16, right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="category" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiahShort} width={76} />
+                <YAxis tick={{ fontSize: 11 }} __SUMBU__3__ width={76} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                   {s.nilaiPerKategori.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
@@ -671,10 +670,10 @@ function TabKeuangan({ k }) {
   return (
     <div className="grid gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Saldo Kas" value={rupiah(k.closingCash)} sub={`Perubahan ${k.netCashChange >= 0 ? '+' : ''}${rupiahShort(k.netCashChange)}`} icon={Wallet} tone={k.closingCash >= 0 ? 'brand' : 'red'} />
+        <StatCard label="Saldo Kas" value={rupiah(k.closingCash)} sub={`Perubahan ${k.netCashChange >= 0 ? '+' : ''}${rupiah(k.netCashChange)}`} icon={Wallet} tone={k.closingCash >= 0 ? 'brand' : 'red'} />
         <StatCard label="Piutang" value={rupiah(k.receivable)} icon={Timer} tone="amber" />
-        <StatCard label="Total Aset" value={rupiahShort(k.totalAssets)} sub={k.balanced ? 'Neraca seimbang ✓' : 'Tidak seimbang'} icon={Scale} tone={k.balanced ? 'green' : 'red'} />
-        <StatCard label="Laba Bersih" value={rupiahShort(k.netProfit)} sub={`Margin ${pct(k.netMarginPct)}`} icon={TrendingUp} tone={k.netProfit >= 0 ? 'green' : 'red'} />
+        <StatCard label="Total Aset" value={rupiah(k.totalAssets)} sub={k.balanced ? 'Neraca seimbang ✓' : 'Tidak seimbang'} icon={Scale} tone={k.balanced ? 'green' : 'red'} />
+        <StatCard label="Laba Bersih" value={rupiah(k.netProfit)} sub={`Margin ${pct(k.netMarginPct)}`} icon={TrendingUp} tone={k.netProfit >= 0 ? 'green' : 'red'} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -684,7 +683,7 @@ function TabKeuangan({ k }) {
             <BarChart data={arusKas} margin={{ left: -16, right: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiahShort} width={76} />
+              <YAxis tick={{ fontSize: 11 }} __SUMBU__4__ width={76} />
               <Tooltip formatter={(v) => rupiah(v)} />
               <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                 {arusKas.map((d, i) => <Cell key={i} fill={d.value >= 0 ? '#10b981' : '#ef4444'} />)}
@@ -714,7 +713,7 @@ function TabKeuangan({ k }) {
             ].map(([l, v]) => (
               <div key={l} className="rounded-xl bg-slate-50 p-2.5">
                 <p className="text-slate-500">{l}</p>
-                <p className="tabular mt-0.5 font-bold text-slate-900">{rupiahShort(v)}</p>
+                <p className="tabular mt-0.5 font-bold text-slate-900">{rupiah(v)}</p>
               </div>
             ))}
           </div>

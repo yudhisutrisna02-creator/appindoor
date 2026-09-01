@@ -809,7 +809,7 @@ async function main() {
 
   const papanAwal = await call('GET', `/api/sales/papan?from=${today}&to=${today}`);
   check('papan mengelompokkan pesanan per tahap',
-    papanAwal.kolom.length === 5 && papanAwal.kolom.every((k) => Array.isArray(k.rows)),
+    papanAwal.kolom.length === 8 && papanAwal.kolom.every((k) => Array.isArray(k.rows)),
     papanAwal.kolom.map((k) => `${k.status}=${k.orders}`).join(' '));
 
   const skuPapan = `PAPAN-${Date.now()}`;
@@ -3084,6 +3084,85 @@ async function main() {
   check('tim tanpa izin pengaturan tidak bisa mengubah latar', tolakIzinLatar === 403,
     `status ${tolakIzinLatar}`);
   token = adminAkun;
+
+  console.log('\n36. Pengiriman kilat');
+
+  const skuKilat = `KILAT-${Date.now()}`;
+  const prodKilat = (await call('POST', '/api/inventory/products', {
+    sku: skuKilat, name: 'Produk Uji Kilat', cost: 10000, price: 40000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodKilat.id, move_date: today, move_type: 'IN',
+    qty: 30, unit_cost: 10000, payment: 'CASH',
+  });
+
+  const buatKilat = async (tahap) => (await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', customer: `Kilat ${tahap}`,
+    items: [{ product_id: prodKilat.id, qty: 1, price: 40000 }],
+    payment_status: 'UNPAID', fulfillment_status: tahap,
+  })).order;
+
+  const oKilat = await buatKilat('KILAT');
+  check('pesanan bisa disimpan sebagai Pengiriman Kilat',
+    oKilat.fulfillment_status === 'KILAT', oKilat.fulfillment_status);
+  const oKilatCair = await buatKilat('KILAT_CAIR');
+  check('Pengiriman Kilat Cair tersimpan', oKilatCair.fulfillment_status === 'KILAT_CAIR');
+  const oKilatRetur = await buatKilat('KILAT_RETUR');
+  check('Retur Pengiriman Kilat tersimpan', oKilatRetur.fulfillment_status === 'KILAT_RETUR');
+
+  const papanKilat = await call('GET', `/api/sales/papan?from=${today}&to=${today}`);
+  const kolomKilat = papanKilat.kolom.find((k) => k.status === 'KILAT');
+  check('Pengiriman Kilat punya kolom sendiri di papan pengiriman',
+    !!kolomKilat && kolomKilat.orders >= 1,
+    papanKilat.kolom.map((k) => k.status).join(' '));
+  check('kedua tahap kilat lain ikut berkolom',
+    papanKilat.kolom.some((k) => k.status === 'KILAT_CAIR')
+    && papanKilat.kolom.some((k) => k.status === 'KILAT_RETUR'));
+
+  // Inti bahayanya: kalau tahap kilat tidak diakui sebagai 'sudah selesai
+  // urusannya', dana yang sudah cair akan terus dihitung sebagai tertahan.
+  const barisKilatCair = papanKilat.kolom
+    .find((k) => k.status === 'KILAT_CAIR').rows.map((r) => r.id);
+  check('pesanan kilat yang sudah cair tidak dihitung belum selesai',
+    !barisKilatCair.some((id) => id === oKilat.id));
+
+  const papanSemua = papanKilat.kolom.reduce((n, k) => n + k.orders, 0);
+  check('papan menghitung seluruh kolom termasuk kilat',
+    papanKilat.ringkas.total === papanSemua,
+    `${papanKilat.ringkas.total} vs ${papanSemua}`);
+
+  // Dana tertahan di dashboard harus ikut menghitung pengiriman kilat yang
+  // masih berjalan — kalau tidak, uang yang benar-benar ditunggu hilang
+  // dari layar tanpa ada yang tahu.
+  const dashKilat = await call('GET', '/api/dashboard');
+  const tertahanIds = await call('GET',
+    `/api/sales?from=${today}&to=${today}&fulfillment_status=KILAT&limit=100`);
+  check('dashboard menghitung dana tertahan termasuk pengiriman kilat',
+    dashKilat.penjualan.danaTertahan.orders >= tertahanIds.rows.length,
+    `tertahan ${dashKilat.penjualan.danaTertahan.orders} order, kilat berjalan ${tertahanIds.rows.length}`);
+
+  // Ubah massal harus menerima tahap kilat, bukan hanya tahap lama.
+  const massalKilat = await call('PATCH', '/api/sales/status-massal', {
+    ids: [oKilat.id], fulfillment_status: 'KILAT_CAIR',
+    payout_date: today, payment_status: 'PAID',
+  });
+  check('ubah massal menerima tahap kilat', massalKilat.ok === true);
+  const setelahMassal = (await call('GET', `/api/sales/${oKilat.id}`)).order;
+  check('tahapnya benar-benar berubah menjadi Pengiriman Kilat Cair',
+    setelahMassal.fulfillment_status === 'KILAT_CAIR', setelahMassal.fulfillment_status);
+
+  let tolakTahapNgawur = 0;
+  try {
+    await call('POST', '/api/sales', {
+      order_date: today, channel: 'SHOPEE', customer: 'Ngawur',
+      items: [{ product_id: prodKilat.id, qty: 1, price: 40000 }],
+      fulfillment_status: 'KILAT_NGAWUR',
+    });
+  } catch (err) {
+    tolakTahapNgawur = err.status;
+  }
+  check('tahap yang tidak dikenal tetap ditolak', tolakTahapNgawur === 400,
+    `status ${tolakTahapNgawur}`);
 
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);

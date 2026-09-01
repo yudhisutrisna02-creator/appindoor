@@ -7,7 +7,7 @@ import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   useToast, Field, TombolEkspor, TombolCetak,
 } from '../components/ui';
-import { rupiah, rupiahShort, dateID } from '../lib/format';
+import { rupiah, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const bulanIni = () => new Date().toLocaleDateString('sv-SE').slice(0, 7);
@@ -189,11 +189,11 @@ export default function Penggajian() {
         </PageHeader>
 
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard label="Gaji Pokok" value={rupiahShort(t.base)} />
-          <StatCard label="Tunjangan + Lembur + Bonus" value={rupiahShort(t.allowance + t.overtime + t.bonus)} />
-          <StatCard label="Potongan" value={rupiahShort(t.deduction)} tone={t.deduction > 0 ? 'amber' : 'slate'} />
+          <StatCard label="Gaji Pokok" value={rupiah(t.base)} />
+          <StatCard label="Tunjangan + Lembur + Bonus" value={rupiah(t.allowance + t.overtime + t.bonus)} />
+          <StatCard label="Potongan" value={rupiah(t.deduction)} tone={t.deduction > 0 ? 'amber' : 'slate'} />
           <StatCard
-            label="Total Dibayarkan" value={rupiahShort(t.net)} icon={Wallet}
+            label="Total Dibayarkan" value={rupiah(t.net)} icon={Wallet}
             sub={buka.terkunci ? 'sudah masuk pembukuan' : 'belum diposting'}
             tone={buka.terkunci ? 'green' : 'brand'}
           />
@@ -270,7 +270,7 @@ export default function Penggajian() {
                     <td className={`tabular text-right ${r.deduction > 0 ? 'text-rose-600' : ''}`}>
                       {r.deduction > 0 ? `−${rupiah(r.deduction)}` : '—'}
                       {r.alpa > 0 && r.deduction === 0 && (
-                        <span className="block text-xs text-amber-600">saran {rupiahShort(r.potongan_saran)}</span>
+                        <span className="block text-xs text-amber-600">saran {rupiah(r.potongan_saran)}</span>
                       )}
                     </td>
                     <td className={`tabular text-right font-semibold ${r.net <= 0 ? 'text-rose-600' : 'text-slate-900'}`}>
@@ -379,7 +379,7 @@ export default function Penggajian() {
         <StatCard label="Periode Tercatat" value={r.daftar} icon={Wallet} />
         <StatCard label="Masih Draft" value={r.draft} tone={r.draft > 0 ? 'amber' : 'green'}
           sub={r.draft > 0 ? 'belum masuk pembukuan' : 'semua sudah diposting'} />
-        <StatCard label="Total Sudah Dibayarkan" value={rupiahShort(r.totalTerbayar)} tone="brand" />
+        <StatCard label="Total Sudah Dibayarkan" value={rupiah(r.totalTerbayar)} tone="brand" />
       </div>
 
       <div className="card">
