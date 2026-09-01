@@ -4,6 +4,7 @@ import { LogoPerusahaan, useBranding } from '../lib/branding';
 import { LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useToast } from '../components/ui';
+import LatarMasuk from '../components/LatarMasuk';
 
 export default function Login() {
   const identitas = useBranding();
@@ -28,17 +29,23 @@ export default function Login() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-gradient-to-br from-ink-900 via-ink-800 to-brand-900 px-4 py-10">
-      <div className="w-full max-w-md">
+    <div className="relative grid min-h-screen place-items-center overflow-hidden px-4 py-10">
+      <LatarMasuk gambar={identitas.latar || []} />
+
+      <div className="relative w-full max-w-md">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 w-fit rounded-2xl shadow-lg">
-            <LogoPerusahaan ukuran={56} className="!rounded-2xl" />
+            <LogoPerusahaan ukuran={72} className="!rounded-2xl" />
           </div>
-          <h1 className="text-2xl font-bold text-white">{identitas.company || NAMA_APP}</h1>
-          <p className="mt-1 text-sm text-slate-300">{identitas.tagline || MODUL_APP}</p>
+          <h1 className="text-2xl font-bold text-white drop-shadow-md">
+            {identitas.company || NAMA_APP}
+          </h1>
+          <p className="mt-1 text-sm text-slate-200 drop-shadow">
+            {identitas.tagline || MODUL_APP}
+          </p>
         </div>
 
-        <form onSubmit={onSubmit} className="rounded-2xl bg-surface p-6 shadow-2xl">
+        <form onSubmit={onSubmit} className="rounded-2xl bg-surface/95 p-6 shadow-2xl backdrop-blur-md">
           <div className="mb-4">
             <label className="label" htmlFor="email">Email</label>
             <input
@@ -72,9 +79,8 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="mt-5 text-center text-xs text-slate-400">
-          Akun awal dibuat otomatis saat server pertama kali dijalankan —
-          lihat log aplikasi atau variabel SEED_ADMIN_EMAIL.
+        <p className="mt-5 text-center text-xs text-slate-200 drop-shadow">
+          Silahkan Hubungi Tim Manajer Jika Anda Belom Memiliki Akun
         </p>
       </div>
     </div>

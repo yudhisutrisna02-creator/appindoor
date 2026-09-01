@@ -14,7 +14,10 @@ const MIME_EXT = {
   'image/jpeg': 'jpg',
   'image/jpg': 'jpg',
   'image/png': 'png',
+  // WebP jauh lebih kecil daripada JPG pada mutu yang sama — pilihan terbaik
+  // untuk latar halaman masuk. GIF diterima agar latar bergerak bisa dipakai.
   'image/webp': 'webp',
+  'image/gif': 'gif',
 };
 
 /**

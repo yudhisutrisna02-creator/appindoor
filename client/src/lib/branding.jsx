@@ -16,6 +16,7 @@ export function BrandingProvider({ children }) {
     company: NAMA_PERUSAHAAN,
     tagline: MODUL_APP,
     logo: null,
+    latar: [],
     dimuat: false,
   });
 
@@ -28,6 +29,7 @@ export function BrandingProvider({ children }) {
         company: d.company || NAMA_PERUSAHAAN,
         tagline: d.tagline || MODUL_APP,
         logo: d.logo || null,
+        latar: Array.isArray(d.latar) ? d.latar : [],
         dimuat: true,
       });
     } catch {
@@ -55,6 +57,7 @@ export function useBranding() {
       company: NAMA_PERUSAHAAN,
       tagline: MODUL_APP,
       logo: null,
+      latar: [],
       namaApp: NAMA_APP,
       dimuat: true,
       muatUlangIdentitas: async () => {},

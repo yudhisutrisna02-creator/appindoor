@@ -96,7 +96,8 @@ function AppSettings({ isAdmin }) {
   const set = (k) => (e) => setSettings({ ...settings, [k]: e.target.value });
 
   return (
-    <form onSubmit={save} className="card grid max-w-3xl gap-4 sm:grid-cols-2">
+    <div className="max-w-3xl space-y-4">
+    <form onSubmit={save} className="card grid gap-4 sm:grid-cols-2">
       <div className="sm:col-span-2">
         <h2 className="card-title mb-3">Identitas Perusahaan</h2>
         <UnggahGambar
@@ -168,6 +169,111 @@ function AppSettings({ isAdmin }) {
         </div>
       )}
     </form>
+
+    {isAdmin && <LatarLogin />}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+/**
+ * Gambar latar halaman masuk.
+ *
+ * Diunggah satu per satu dan berganti sendiri secara perlahan di halaman
+ * masuk. Sengaja dibuat bisa diisi sendiri: pemandangan kebun dan sawah milik
+ * perusahaan jauh lebih berarti bagi tim yang melihatnya tiap pagi daripada
+ * foto bawaan mana pun yang bisa saya pilihkan.
+ */
+function LatarLogin() {
+  const toast = useToast();
+  const { muatUlangIdentitas } = useBranding();
+  const [gambar, setGambar] = useState([]);
+  const [baru, setBaru] = useState(null);
+  const [sibuk, setSibuk] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api.get('/api/branding');
+      setGambar(d.latar || []);
+    } catch {
+      /* hanya mempercantik — kegagalannya tidak perlu mengganggu */
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function tambah() {
+    if (!baru) return;
+    setSibuk(true);
+    try {
+      const res = await api.post('/api/branding/latar', { gambar: baru });
+      toast.success(res.message);
+      setBaru(null);
+      await load();
+      await muatUlangIdentitas();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSibuk(false);
+    }
+  }
+
+  async function hapus(i) {
+    if (!window.confirm('Hapus gambar latar ini dari halaman masuk?')) return;
+    setSibuk(true);
+    try {
+      const res = await api.del(`/api/branding/latar/${i}`);
+      toast.success(res.message);
+      await load();
+      await muatUlangIdentitas();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSibuk(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2 className="card-title mb-1">Latar Halaman Masuk</h2>
+      <p className="mb-3 text-xs leading-relaxed text-slate-500">
+        Gambar berganti sendiri setiap 7 detik dengan gerakan perlahan. Pakai foto melebar
+        (mis. 1920×1080) supaya tidak terpotong di layar lebar. Bila belum ada yang diunggah,
+        halaman masuk memakai latar hijau bawaan. Maksimal 8 gambar.
+      </p>
+
+      {gambar.length > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {gambar.map((src, i) => (
+            <div key={src} className="group relative overflow-hidden rounded-xl ring-1 ring-slate-200">
+              <img src={src} alt={`Latar ${i + 1}`} className="h-24 w-full object-cover" />
+              <button
+                type="button" onClick={() => hapus(i)} disabled={sibuk}
+                className="absolute right-1.5 top-1.5 rounded-lg bg-rose-600/90 p-1.5 text-white opacity-0 transition group-hover:opacity-100 focus:opacity-100"
+                aria-label={`Hapus latar ${i + 1}`}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <UnggahGambar
+        label="Tambah Gambar Latar"
+        nilai={baru}
+        onChange={setBaru}
+        ukuranMaks={1920}
+        hint="JPG, PNG, WebP, atau GIF — maksimal 3 MB. WebP paling ringan untuk foto besar; ubah dulu di ezgif.com/jpg-to-webp bila berkasnya berat. GIF bergerak dikirim apa adanya, jadi jaga ukurannya."
+      />
+
+      <button
+        type="button" className="btn-primary mt-3" onClick={tambah}
+        disabled={!baru || sibuk}
+      >
+        <Plus size={16} /> {sibuk ? 'Menyimpan...' : 'Tambahkan ke Halaman Masuk'}
+      </button>
+    </div>
   );
 }
 

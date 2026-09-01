@@ -3007,6 +3007,84 @@ async function main() {
   check('menu terkunci sampai kata sandi diganti', tertahan.status === 403);
   token = adminAkun;
 
+
+  console.log('\n35. Latar halaman masuk');
+
+  // 1x1 piksel PNG — cukup untuk menguji alurnya tanpa memindahkan foto besar.
+  const gambarUji =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  const latarAwal = await call('GET', '/api/branding');
+  check('daftar latar ikut dikirim ke halaman masuk',
+    Array.isArray(latarAwal.latar), JSON.stringify(latarAwal.latar));
+
+  const tambah1 = await call('POST', '/api/branding/latar', { gambar: gambarUji });
+  const tambah2 = await call('POST', '/api/branding/latar', { gambar: gambarUji });
+  check('gambar latar bisa ditambahkan', tambah2.jumlah === tambah1.jumlah + 1);
+
+  const latarIsi = await call('GET', '/api/branding');
+  check('latar muncul di identitas terbuka', latarIsi.latar.length === tambah2.jumlah);
+
+  // Halaman masuk tampil sebelum siapa pun login, jadi gambarnya harus bisa
+  // diambil tanpa token sama sekali.
+  const latarTanpaToken = await fetch(`${BASE}${latarIsi.latar[0]}`);
+  check('gambar latar bisa diambil tanpa login', latarTanpaToken.status === 200,
+    `status ${latarTanpaToken.status}`);
+
+  let tolakTambah = 0;
+  try {
+    await call('POST', '/api/branding/latar', {});
+  } catch (err) {
+    tolakTambah = err.status;
+  }
+  check('menambah tanpa gambar ditolak', tolakTambah === 400, `status ${tolakTambah}`);
+
+  // WebP dan GIF diterima supaya latar bisa dibuat seringan mungkin, dan GIF
+  // bergerak bisa dipakai apa adanya.
+  const gifUji = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const webpUji =
+    'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==';
+
+  const tambahGif = await call('POST', '/api/branding/latar', { gambar: gifUji });
+  check('GIF diterima sebagai latar', tambahGif.ok === true);
+  const tambahWebp = await call('POST', '/api/branding/latar', { gambar: webpUji });
+  check('WebP diterima sebagai latar', tambahWebp.ok === true);
+
+  let tolakTipe = 0;
+  try {
+    await call('POST', '/api/branding/latar', {
+      gambar: 'data:application/pdf;base64,JVBERi0xLjQK',
+    });
+  } catch (err) {
+    tolakTipe = err.status;
+  }
+  check('berkas yang bukan gambar ditolak', tolakTipe === 400, `status ${tolakTipe}`);
+
+  const hapusLatar = await call('DELETE', '/api/branding/latar/0');
+  check('gambar latar bisa dihapus', hapusLatar.jumlah === tambahWebp.jumlah - 1,
+    `sisa ${hapusLatar.jumlah}`);
+
+  let tolakHapusLatar = 0;
+  try {
+    await call('DELETE', '/api/branding/latar/99');
+  } catch (err) {
+    tolakHapusLatar = err.status;
+  }
+  check('menghapus latar yang tidak ada ditolak', tolakHapusLatar === 404);
+
+  // Mengurus tampilan aplikasi adalah wewenang pengelola, bukan siapa saja
+  // yang kebetulan sudah masuk.
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakIzinLatar = 0;
+  try {
+    await call('POST', '/api/branding/latar', { gambar: gambarUji });
+  } catch (err) {
+    tolakIzinLatar = err.status;
+  }
+  check('tim tanpa izin pengaturan tidak bisa mengubah latar', tolakIzinLatar === 403,
+    `status ${tolakIzinLatar}`);
+  token = adminAkun;
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

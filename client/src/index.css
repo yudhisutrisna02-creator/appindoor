@@ -165,3 +165,31 @@
 .dark .text-amber-600 { color: rgb(251 191 36); }
 .dark .text-amber-700 { color: rgb(251 191 36); }
 .dark .text-brand-600 { color: rgb(138 194 255); }
+
+/* ------------------------------------------------------------------
+   Latar bergerak halaman masuk
+   ------------------------------------------------------------------ */
+
+/* Gerak perlahan menyusur foto (efek Ken Burns), supaya foto diam terasa
+   hidup tanpa mengalihkan perhatian dari kolom yang sedang diisi. */
+@keyframes latarMasukGerak {
+  from { transform: scale(1) translate3d(0, 0, 0); }
+  to   { transform: scale(1.09) translate3d(-1.2%, -1.6%, 0); }
+}
+
+/* Napas lambat untuk pemandangan bawaan yang dibuat dari CSS. */
+@keyframes latarMasukNafas {
+  from { transform: scale(1) translate3d(0, 0, 0); opacity: 0.60; }
+  to   { transform: scale(1.12) translate3d(1.5%, -1.5%, 0); opacity: 0.85; }
+}
+
+/* Sebagian orang merasa pusing oleh gerakan di layar, dan sebagian lagi
+   mematikannya untuk menghemat baterai. Keduanya sudah menyatakannya lewat
+   setelan sistem — halaman masuk cukup mematuhinya. Pergantian gambarnya
+   sendiri tetap berjalan, hanya geraknya yang dihentikan. */
+@media (prefers-reduced-motion: reduce) {
+  [style*='latarMasukGerak'],
+  [style*='latarMasukNafas'] {
+    animation: none !important;
+  }
+}

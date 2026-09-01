@@ -3,7 +3,7 @@ import { Upload, Trash2, ImageIcon } from 'lucide-react';
 import { useToast } from './ui';
 
 const BATAS_BYTE = 3 * 1024 * 1024;
-const TIPE_DIDUKUNG = ['image/jpeg', 'image/png', 'image/webp'];
+const TIPE_DIDUKUNG = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 /**
  * Pemilih gambar yang mengubah berkas menjadi data URL.
@@ -38,12 +38,17 @@ export default function UnggahGambar({
     if (!berkas) return;
 
     if (!TIPE_DIDUKUNG.includes(berkas.type)) {
-      return toast.error('Gunakan berkas JPG, PNG, atau WebP');
+      return toast.error('Gunakan berkas JPG, PNG, WebP, atau GIF');
     }
 
     setSibuk(true);
     try {
-      const kecil = await perkecil(berkas, ukuranMaks);
+      // GIF dikirim apa adanya. Menggambarnya ke kanvas hanya mengambil bingkai
+      // pertama — GIF bergerak akan berubah menjadi gambar diam, justru
+      // menghilangkan satu-satunya alasan orang memilih GIF.
+      const kecil = berkas.type === 'image/gif'
+        ? await bacaApaAdanya(berkas)
+        : await perkecil(berkas, ukuranMaks);
       if (kecil.length * 0.75 > BATAS_BYTE) {
         return toast.error('Gambar masih terlalu besar setelah diperkecil — coba gambar lain');
       }
@@ -86,12 +91,22 @@ export default function UnggahGambar({
         </div>
       </div>
 
-      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={pilih} />
+      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={pilih} />
     </div>
   );
 }
 
 /** Perkecil gambar sampai sisi terpanjangnya `maks` piksel, lalu jadikan data URL. */
+/** Membaca berkas apa adanya menjadi data URL, tanpa diubah sama sekali. */
+function bacaApaAdanya(berkas) {
+  return new Promise((resolve, reject) => {
+    const pembaca = new FileReader();
+    pembaca.onerror = () => reject(new Error('Berkas gagal dibaca'));
+    pembaca.onload = () => resolve(pembaca.result);
+    pembaca.readAsDataURL(berkas);
+  });
+}
+
 function perkecil(berkas, maks) {
   return new Promise((resolve, reject) => {
     const pembaca = new FileReader();
@@ -109,16 +124,25 @@ function perkecil(berkas, maks) {
         kanvas.height = h;
         const ctx = kanvas.getContext('2d');
 
-        // PNG dipertahankan karena logo sering memakai latar tembus pandang,
-        // yang akan berubah jadi hitam bila dipaksa menjadi JPEG.
-        const pakaiPng = berkas.type === 'image/png';
-        if (!pakaiPng) {
+        // Bentuk berkasnya dipertahankan, tidak diseragamkan menjadi JPEG.
+        // PNG sering memakai latar tembus pandang yang akan berubah jadi hitam,
+        // dan WebP yang dipaksa menjadi JPEG justru membengkak — padahal WebP
+        // dipilih justru supaya ringan.
+        const tembusPandang = berkas.type === 'image/png' || berkas.type === 'image/webp';
+        if (!tembusPandang) {
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, w, h);
         }
         ctx.drawImage(img, 0, 0, w, h);
 
-        resolve(pakaiPng ? kanvas.toDataURL('image/png') : kanvas.toDataURL('image/jpeg', 0.85));
+        if (berkas.type === 'image/png') return resolve(kanvas.toDataURL('image/png'));
+        if (berkas.type === 'image/webp') {
+          const webp = kanvas.toDataURL('image/webp', 0.85);
+          // Peramban yang tidak bisa menulis WebP diam-diam mengembalikan PNG.
+          // Kalau begitu, JPEG lebih kecil daripada PNG untuk foto.
+          if (webp.startsWith('data:image/webp')) return resolve(webp);
+        }
+        return resolve(kanvas.toDataURL('image/jpeg', 0.85));
       };
       img.src = pembaca.result;
     };
