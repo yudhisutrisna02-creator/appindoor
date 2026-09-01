@@ -21,7 +21,6 @@ const TABS = [
   { key: 'offices', label: 'Titik Kantor', icon: Building2 },
   { key: 'users', label: 'Data Tim', icon: Users },
   { key: 'peran', label: 'Peran & Hak Akses', icon: ShieldCheck },
-  { key: 'account', label: 'Akun Saya', icon: KeyRound },
 ];
 
 export default function Pengaturan() {
@@ -52,7 +51,6 @@ export default function Pengaturan() {
       {tab === 'offices' && <Offices canManage={canManage} isAdmin={isAdmin} />}
       {tab === 'users' && <UsersTab isAdmin={isAdmin} />}
       {tab === 'peran' && <PeranTab />}
-      {tab === 'account' && <MyAccount />}
     </div>
   );
 }
@@ -376,6 +374,32 @@ function UsersTab({ isAdmin }) {
   const [ringkas, setRingkas] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
+  const [mewajibkan, setMewajibkan] = useState(false);
+
+  // Mengenai seluruh tim sekaligus, jadi ditanyakan dulu — lengkap dengan apa
+  // yang TIDAK terjadi, karena dugaan paling wajar ("kata sandinya diacak")
+  // justru keliru dan akan membuat pengelola ragu menekannya.
+  async function wajibkanGantiSandi() {
+    const lain = users.filter((u) => u.active).length - 1;
+    const ya = window.confirm(
+      `Wajibkan ${lain > 0 ? lain : 'seluruh'} anggota tim mengganti kata sandi saat masuk berikutnya?\n\n` +
+      'Kata sandi lama TIDAK diubah — mereka tetap masuk seperti biasa, ' +
+      'lalu diminta membuat kata sandi baru sebelum bisa membuka menu.\n\n' +
+      'Akun Anda sendiri tidak ikut.'
+    );
+    if (!ya) return;
+
+    setMewajibkan(true);
+    try {
+      const res = await api.post('/api/admin/users/wajib-ganti-sandi', {});
+      toast.success(res.message);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMewajibkan(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -451,6 +475,11 @@ function UsersTab({ isAdmin }) {
         </div>
         <div className="flex gap-2">
           <TombolEkspor path="/api/admin/users" nama="data-tim" kecil />
+          {isAdmin && (
+            <button className="btn-ghost !py-2" onClick={wajibkanGantiSandi} disabled={mewajibkan}>
+              <KeyRound size={16} /> {mewajibkan ? 'Memproses...' : 'Wajibkan Ganti Sandi'}
+            </button>
+          )}
           {isAdmin && (
             <button className="btn-primary !py-2" onClick={() => setEditing({ ...EMPTY_USER })}>
               <Plus size={16} /> Anggota Baru
@@ -649,58 +678,3 @@ function UsersTab({ isAdmin }) {
   );
 }
 
-// ------------------------------------------------------------------
-function MyAccount() {
-  const toast = useToast();
-  const { user } = useAuth();
-  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
-  const [saving, setSaving] = useState(false);
-
-  async function save(e) {
-    e.preventDefault();
-    if (form.newPassword !== form.confirm) return toast.error('Konfirmasi password tidak cocok');
-    setSaving(true);
-    try {
-      const res = await api.post('/api/auth/change-password', {
-        currentPassword: form.currentPassword,
-        newPassword: form.newPassword,
-      });
-      toast.success(res.message);
-      setForm({ currentPassword: '', newPassword: '', confirm: '' });
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
-      <div className="card">
-        <h2 className="card-title mb-3">Profil</h2>
-        <dl className="space-y-2 text-sm">
-          <div className="flex justify-between"><dt className="text-slate-500">Nama</dt><dd className="font-medium">{user.name}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">Email</dt><dd className="font-medium">{user.email}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">Peran</dt><dd className="font-medium capitalize">{user.role}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">Jabatan</dt><dd className="font-medium">{user.position || '-'}</dd></div>
-        </dl>
-      </div>
-
-      <form onSubmit={save} className="card">
-        <h2 className="card-title mb-3">Ganti Password</h2>
-        <Field label="Password Saat Ini *" className="mb-3">
-          <input type="password" className="input" required autoComplete="current-password" value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} />
-        </Field>
-        <Field label="Password Baru *" hint="Minimal 8 karakter" className="mb-3">
-          <input type="password" className="input" required minLength={8} autoComplete="new-password" value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} />
-        </Field>
-        <Field label="Konfirmasi Password Baru *" className="mb-4">
-          <input type="password" className="input" required minLength={8} autoComplete="new-password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} />
-        </Field>
-        <button type="submit" className="btn-primary w-full" disabled={saving}>
-          <KeyRound size={16} /> {saving ? 'Menyimpan...' : 'Perbarui Password'}
-        </button>
-      </form>
-    </div>
-  );
-}

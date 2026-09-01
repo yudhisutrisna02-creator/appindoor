@@ -59,7 +59,7 @@ const KOLOM_TIM = [
 ];
 
 /** Semua kolom pengguna yang boleh dibaca — password_hash tidak pernah ikut. */
-const KOLOM_TAMPIL = `id, name, email, role, role_id, position, phone, active, created_at, photo, ${KOLOM_TIM.join(', ')}`;
+const KOLOM_TAMPIL = `id, name, email, role, role_id, position, phone, active, created_at, photo, password_changed_at, must_change_password, ${KOLOM_TIM.join(', ')}`;
 
 /** Kolom kepegawaian yang berupa angka, bukan teks. */
 const KOLOM_ANGKA = new Set(['base_salary', 'allowance']);
@@ -244,6 +244,39 @@ router.put('/users/:id', butuhIzin('sistem.tim'), ah((req, res) => {
   res.json({
     ok: true,
     user: db.prepare(`SELECT ${KOLOM_TAMPIL} FROM users WHERE id = ?`).get(existing.id),
+  });
+}));
+
+/**
+ * Mewajibkan seluruh tim mengganti kata sandi pada masuk berikutnya.
+ *
+ * Dipakai saat kata sandi tim perlu disegarkan serentak — misalnya setelah
+ * daftar akun sempat dibagikan, atau saat aturan kata sandi baru diberlakukan.
+ * Kata sandinya sendiri tidak diubah: yang lama masih dipakai untuk masuk,
+ * lalu aplikasi menahan di halaman akun sampai diganti. Ini disengaja —
+ * mengacak kata sandi 18 orang sekaligus berarti 18 orang tidak bisa bekerja
+ * sampai ada yang membagikan kata sandi barunya satu per satu.
+ *
+ * Akun yang meminta dikecualikan, supaya pengelola tidak mengunci dirinya
+ * sendiri di tengah pekerjaan.
+ */
+router.post('/users/wajib-ganti-sandi', butuhIzin('sistem.tim'), ah((req, res) => {
+  const sasaran = db
+    .prepare('SELECT id, name FROM users WHERE active = 1 AND id <> ?')
+    .all(req.user.id);
+
+  const tandai = db.prepare('UPDATE users SET must_change_password = 1 WHERE id = ?');
+  db.transaction(() => {
+    for (const u of sasaran) tandai.run(u.id);
+  })();
+
+  res.json({
+    ok: true,
+    jumlah: sasaran.length,
+    nama: sasaran.map((u) => u.name),
+    message:
+      `${sasaran.length} akun wajib mengganti kata sandi saat masuk berikutnya. ` +
+      'Kata sandi lama masih bisa dipakai untuk masuk.',
   });
 }));
 

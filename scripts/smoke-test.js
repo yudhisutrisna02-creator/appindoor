@@ -1251,6 +1251,11 @@ async function main() {
   console.log('\n18. Penggajian');
 
   const periodeGaji = today.slice(0, 7);
+  // Gaji dibayar tanggal 25, jadi pembukuannya diperiksa sampai akhir bulan
+  // itu — bukan sampai hari ini, yang bisa saja masih tanggal 1.
+  const akhirBulanGaji = new Date(Date.UTC(
+    Number(periodeGaji.slice(0, 4)), Number(periodeGaji.slice(5, 7)), 0
+  )).toISOString().slice(0, 10);
   const pegawai = await call('POST', '/api/admin/users', {
     name: 'Uji Gaji', email: `gaji-${Date.now()}@uji.local`, password: 'RahasiaKuat1',
     role: 'staff', position: 'Packing', base_salary: 3000000, allowance: 500000,
@@ -1311,7 +1316,7 @@ async function main() {
   check('potongan yang melebihi gaji ditolak', tolakMinus === 422, `status ${tolakMinus}`);
 
   // Draft belum boleh menyentuh pembukuan sama sekali.
-  const sebelumPosting = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  const sebelumPosting = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${akhirBulanGaji}`);
   const cariAkun = (tb, kode) => {
     const baris = (tb.rows || []).find((x) => x.code === kode);
     return baris ? (baris.debit || 0) - (baris.credit || 0) : 0;
@@ -1324,7 +1329,7 @@ async function main() {
   check('daftar gaji bisa diposting', posting.payroll.status === 'POSTED');
   check('posting membuat jurnal', posting.payroll.jurnal.length === 1);
 
-  const sesudahPosting = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  const sesudahPosting = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${akhirBulanGaji}`);
   check('beban gaji di pembukuan = total gaji bersih',
     near(cariAkun(sesudahPosting, '6100'), totalGaji, 1),
     `${cariAkun(sesudahPosting, '6100')} vs ${totalGaji}`);
@@ -1351,7 +1356,7 @@ async function main() {
 
   const batal = await call('POST', `/api/penggajian/${idGaji}/batal-posting`);
   check('posting bisa dibatalkan', batal.payroll.status === 'DRAFT' && batal.payroll.jurnal.length === 0);
-  const setelahBatal = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  const setelahBatal = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${akhirBulanGaji}`);
   check('membatalkan posting mengembalikan beban gaji ke nol',
     cariAkun(setelahBatal, '6100') === 0, String(cariAkun(setelahBatal, '6100')));
   check('angka gajinya tidak ikut hilang saat posting dibatalkan',
@@ -1360,7 +1365,7 @@ async function main() {
   // Gaji yang belum dibayarkan mendarat di Utang Gaji, bukan mengurangi bank.
   await call('PUT', `/api/penggajian/${idGaji}`, { payment: 'CREDIT' });
   await call('POST', `/api/penggajian/${idGaji}/posting`);
-  const tbUtang = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${today}`);
+  const tbUtang = await call('GET', `/api/finance/reports/trial-balance?from=${today.slice(0,8)}01&to=${akhirBulanGaji}`);
   check('gaji belum dibayar menjadi Utang Gaji, bukan kas keluar',
     near(-cariAkun(tbUtang, '2110'), totalGaji, 1),
     String(cariAkun(tbUtang, '2110')));
@@ -2972,6 +2977,35 @@ async function main() {
   });
   check('kata sandi yang direset pengelola wajib diganti pemiliknya',
     masukSetelahReset.sandi.wajib === true, JSON.stringify(masukSetelahReset.sandi));
+
+
+  // Wajibkan seluruh tim ganti kata sandi serentak.
+  token = adminAkun;
+  const sebelumWajib = await call('POST', '/api/auth/login', {
+    email: emailAkun, password: 'DiresetAdmin#7',
+  });
+  void sebelumWajib;
+
+  const wajibkan = await call('POST', '/api/admin/users/wajib-ganti-sandi', {});
+  check('seluruh tim bisa diwajibkan ganti kata sandi sekaligus', wajibkan.jumlah > 0);
+
+  const daftarSetelah = await call('GET', '/api/admin/users');
+  const sayaSendiri = daftarSetelah.users.find((u) => u.email === 'admin@kebumen.local');
+  check('pengelola yang menekan tidak ikut terkunci',
+    sayaSendiri && !sayaSendiri.must_change_password);
+
+  // Kata sandi lama harus tetap bisa dipakai masuk — kalau ikut diacak,
+  // seluruh tim berhenti bekerja sampai ada yang membagikan yang baru.
+  const masukWajib = await call('POST', '/api/auth/login', {
+    email: emailAkun, password: 'DiresetAdmin#7',
+  });
+  check('kata sandi lama masih bisa dipakai masuk', !!masukWajib.token);
+  check('tetapi wajib diganti sebelum membuka menu', masukWajib.sandi.wajib === true);
+
+  token = masukWajib.token;
+  const tertahan = await cobaAkun('/api/dashboard');
+  check('menu terkunci sampai kata sandi diganti', tertahan.status === 403);
+  token = adminAkun;
 
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
