@@ -3164,6 +3164,79 @@ async function main() {
   check('tahap yang tidak dikenal tetap ditolak', tolakTahapNgawur === 400,
     `status ${tolakTahapNgawur}`);
 
+  console.log('\n37. Membetulkan tanggal order');
+
+  // Persis kejadian nyatanya: order akhir Agustus terlanjur tersimpan
+  // bertanggal awal September, dan baru ketahuan setelah tersimpan.
+  const skuTgl = `TGL-${Date.now()}`;
+  const prodTgl = (await call('POST', '/api/inventory/products', {
+    sku: skuTgl, name: 'Produk Uji Tanggal', cost: 10000, price: 50000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodTgl.id, move_date: '2026-08-01', move_type: 'IN',
+    qty: 20, unit_cost: 10000, payment: 'CASH',
+  });
+
+  const SALAH = '2026-09-01';
+  const BENAR = '2026-08-31';
+
+  const oTgl = (await call('POST', '/api/sales', {
+    order_date: SALAH, channel: 'SHOPEE', customer: 'Salah Tanggal',
+    items: [{ product_id: prodTgl.id, qty: 2, price: 50000 }],
+    payment_status: 'PAID',
+  })).order;
+  check('order tersimpan dengan tanggal yang keliru', oTgl.order_date === SALAH);
+
+  const lrSepSebelum = (await call('GET',
+    '/api/finance/reports/income-statement?from=2026-09-01&to=2026-09-30')).grossSales;
+
+  const betul = await call('PUT', `/api/sales/${oTgl.id}`, { order_date: BENAR });
+  check('tanggal order bisa dibetulkan setelah tersimpan', betul.ok === true);
+
+  const sesudah = (await call('GET', `/api/sales/${oTgl.id}`)).order;
+  check('tanggalnya benar-benar berpindah', sesudah.order_date === BENAR, sesudah.order_date);
+
+  // Inti bahayanya: kalau jurnalnya tertinggal di tanggal lama, laporan
+  // Agustus dan September dua-duanya salah tanpa ada yang tampak keliru.
+  const lrAgustus = await call('GET',
+    '/api/finance/reports/income-statement?from=2026-08-01&to=2026-08-31');
+  const lrSeptember = await call('GET',
+    '/api/finance/reports/income-statement?from=2026-09-01&to=2026-09-30');
+  // Penjualan order ini Rp 100.000. Ia harus muncul di Agustus, dan sama
+  // sekali tidak boleh tertinggal di September.
+  check('penjualannya pindah ke laba rugi bulan yang benar',
+    lrAgustus.grossSales >= 100000,
+    `agustus ${lrAgustus.grossSales}`);
+  check('penjualannya tidak tertinggal di bulan yang salah',
+    lrSepSebelum - lrSeptember.grossSales >= 100000,
+    `september ${lrSepSebelum} -> ${lrSeptember.grossSales}`);
+
+  // Mutasi stoknya juga, supaya kartu stok tidak menunjukkan barang keluar
+  // pada hari yang salah.
+  const kartu = await call('GET',
+    `/api/inventory/moves?product_id=${prodTgl.id}&from=2026-08-01&to=2026-09-30`);
+  const keluar = kartu.rows.filter(
+    (m) => m.source === 'SALES' && m.source_id === oTgl.id
+  );
+  check('tanggal mutasi stok ikut dibetulkan',
+    keluar.length > 0 && keluar.every((m) => m.move_date === BENAR),
+    keluar.map((m) => m.move_date).join(' ') || 'tidak ada mutasi keluar');
+
+  const neracaTgl = await call('GET',
+    '/api/finance/reports/trial-balance?from=2026-08-01&to=2026-09-30');
+  check('neraca tetap seimbang setelah tanggal dibetulkan',
+    Math.abs(neracaTgl.totalDebit - neracaTgl.totalCredit) < 0.01,
+    `${neracaTgl.totalDebit} vs ${neracaTgl.totalCredit}`);
+
+  let tolakTglNgawur = 0;
+  try {
+    await call('PUT', `/api/sales/${oTgl.id}`, { order_date: '31-08-2026' });
+  } catch (err) {
+    tolakTglNgawur = err.status;
+  }
+  check('format tanggal yang salah tetap ditolak', tolakTglNgawur === 400,
+    `status ${tolakTglNgawur}`);
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

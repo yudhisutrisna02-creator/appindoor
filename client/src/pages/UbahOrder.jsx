@@ -69,6 +69,7 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
     if (!order) return setForm(null);
     setForm({
       items: [],
+      order_date: order.order_date || '',
       fulfillment_status: order.fulfillment_status || 'DIPROSES',
       payment_status: order.payment_status || 'UNPAID',
       payout_date: order.payout_date || '',
@@ -220,9 +221,29 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
     <Modal open={open} onClose={onClose} title={`Ubah ${order.order_no}`} wide>
       <form onSubmit={simpan} className="grid gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          {order.order_date} • {CHANNEL_LABEL[order.channel] || order.channel} •
+          {CHANNEL_LABEL[order.channel] || order.channel} •
           {' '}Pendapatan {rupiah(order.net_revenue)} • Laba {rupiah(order.net_profit)}
+          {form.order_date !== order.order_date && (
+            <span className="ml-1 font-semibold text-amber-700">
+              • tanggal diubah dari {order.order_date}
+            </span>
+          )}
         </div>
+
+        {/* Tanggal ditaruh paling awal karena inilah yang paling sering perlu
+            dibetulkan: salah ketik tanggal baru ketahuan berhari-hari kemudian,
+            saat laporan bulanan tidak cocok. Mengubahnya di sini memindahkan
+            jurnal dan tanggal mutasi stoknya sekalian, jadi pembukuan tetap
+            sejalan dengan ordernya. */}
+        <Field
+          label="Tanggal Order *"
+          hint="Membetulkan tanggal ikut memindahkan jurnal & mutasi stoknya"
+        >
+          <input
+            type="date" className="input" required
+            value={form.order_date} onChange={ubah('order_date')}
+          />
+        </Field>
 
         <Field label="Status Pesanan *">
           <select className="input" value={form.fulfillment_status} onChange={ubah('fulfillment_status')}>

@@ -223,6 +223,17 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
       }
     }
 
+    // Bila yang dibetulkan hanya tanggalnya, mutasi stoknya tidak ditulis ulang
+    // di atas — tanggalnya perlu diikutkan di sini. Kalau tertinggal, kartu
+    // stok menunjukkan barang keluar pada hari yang salah, dan valuasi per
+    // tanggal meleset di sekitar pergantian bulan: persis keadaan yang membuat
+    // orang membetulkan tanggalnya sejak awal.
+    if (!badan.items && gabung.order_date !== lama.order_date) {
+      db.prepare(
+        "UPDATE stock_moves SET move_date = ? WHERE source = 'SALES' AND source_id = ?"
+      ).run(gabung.order_date, orderId);
+    }
+
     // ---------- kepala order ----------
     db.prepare(
       `UPDATE sales_orders SET
