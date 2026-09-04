@@ -228,7 +228,7 @@ function TabPenjualan({ p }) {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => d.slice(8)} />
-                <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={76} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
                 <Tooltip formatter={(v, n) => [rupiah(v), n === 'revenue' ? 'Pendapatan' : 'Laba Bersih']} />
                 <Area type="monotone" dataKey="revenue" stroke="#1a5cf5" fill="url(#dRev)" strokeWidth={2} />
                 <Area type="monotone" dataKey="profit" stroke="#10b981" fill="url(#dProf)" strokeWidth={2} />
@@ -272,7 +272,7 @@ function TabPenjualan({ p }) {
             <ResponsiveContainer width="100%" height={Math.max(200, tokoData.length * 38)}>
               <BarChart data={tokoData} layout="vertical" margin={{ left: 34, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 11 }} __SUMBU__1__ />
+                <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={rupiah} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={130} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="net_profit" name="Laba Bersih" radius={[0, 6, 6, 0]}>
@@ -311,7 +311,7 @@ function TabPenjualan({ p }) {
               <BarChart data={channelData} margin={{ left: -16, right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={54} />
-                <YAxis tick={{ fontSize: 11 }} __SUMBU__2__ width={76} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="net_profit" name="Laba" radius={[5, 5, 0, 0]}>
                   {channelData.map((d, i) => <Cell key={i} fill={d.net_profit >= 0 ? CHART_COLORS[i % CHART_COLORS.length] : '#ef4444'} />)}
@@ -619,7 +619,7 @@ function TabStok({ s }) {
               <BarChart data={s.nilaiPerKategori} margin={{ left: -16, right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="category" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} __SUMBU__3__ width={76} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                   {s.nilaiPerKategori.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
@@ -683,7 +683,7 @@ function TabKeuangan({ k }) {
             <BarChart data={arusKas} margin={{ left: -16, right: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} __SUMBU__4__ width={76} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
               <Tooltip formatter={(v) => rupiah(v)} />
               <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                 {arusKas.map((d, i) => <Cell key={i} fill={d.value >= 0 ? '#10b981' : '#ef4444'} />)}

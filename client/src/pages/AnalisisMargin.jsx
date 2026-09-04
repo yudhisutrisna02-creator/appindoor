@@ -92,7 +92,7 @@ export default function AnalisisMargin() {
                 <BarChart data={chartData} margin={{ left: -14, right: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={54} />
-                  <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={76} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar name="Pendapatan Bersih" dataKey="net_revenue" fill="#93c5fd" radius={[5, 5, 0, 0]} />
@@ -109,7 +109,7 @@ export default function AnalisisMargin() {
                 <LineChart data={data.daily} margin={{ left: -14, right: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis dataKey="order_date" tick={{ fontSize: 11 }} tickFormatter={(d) => d.slice(8)} />
-                  <YAxis tick={{ fontSize: 11 }} __SUMBU__1__ width={76} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line name="Pendapatan" type="monotone" dataKey="net_revenue" stroke="#1a5cf5" strokeWidth={2} dot={false} />

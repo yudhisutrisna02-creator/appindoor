@@ -113,7 +113,7 @@ export default function Toko() {
               <ResponsiveContainer width="100%" height={Math.max(220, aktif.length * 40)}>
                 <BarChart data={aktif} layout="vertical" margin={{ left: 34, right: 16 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11 }} __SUMBU__0__ />
+                  <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={rupiah} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Bar dataKey="net_profit" name="Laba Bersih" radius={[0, 6, 6, 0]}>

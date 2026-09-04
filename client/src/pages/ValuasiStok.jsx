@@ -73,7 +73,7 @@ export default function ValuasiStok() {
               <BarChart data={data.byCategory} margin={{ left: -16, right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="category" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={78} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
                 <Tooltip formatter={(v) => rupiah(v)} />
                 <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                   {data.byCategory.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}

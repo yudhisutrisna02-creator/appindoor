@@ -27,9 +27,9 @@ export default function KoreksiStok({ produk, onSelesai }) {
   const [alasan, setAlasan] = useState('');
   const [kirim, setKirim] = useState(false);
 
-  // Koreksi stok memindahkan nilai persediaan di neraca, jadi wewenangnya
-  // disamakan dengan stok opname — bukan sekadar boleh mengubah data produk.
-  if (!punya('gudang.opname')) return null;
+  // Siapa pun yang boleh mengurus data barang juga boleh membetulkan angka
+  // stoknya — keduanya pekerjaan yang sama-sama muncul saat merapikan gudang.
+  if (!punya('gudang.produk')) return null;
 
   const lama = Number(produk.stock) || 0;
   const baru = Number(stok);

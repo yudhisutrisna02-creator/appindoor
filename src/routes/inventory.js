@@ -125,13 +125,19 @@ const koreksiStokSchema = z.object({
  * tidak bisa menjelaskan dari mana angka barunya datang, dan membuat neraca
  * berbeda dari valuasi gudang tanpa ada tanda apa pun.
  *
+ * Wewenangnya memakai izin gudang.produk: siapa pun yang boleh mengurus data
+ * barang juga boleh membetulkan angka stoknya, karena keduanya pekerjaan yang
+ * sama-sama muncul saat merapikan gudang. Yang menjaga agar ini tidak menjadi
+ * pintu belakang bukan izinnya, melainkan jejaknya — setiap koreksi wajib
+ * beralasan, tercatat di kartu stok, dan meninggalkan jurnal.
+ *
  * Jadi koreksinya dicatat seperti koreksi opname: satu mutasi ADJ yang
  * menjelaskan selisihnya, dan satu jurnal yang memindahkan selisih nilainya
  * antara Persediaan dan akun Selisih Stok. Alasannya wajib diisi — angka stok
  * yang berubah tanpa keterangan adalah hal pertama yang dipertanyakan saat
  * ada yang menghitung ulang gudang.
  */
-router.post('/products/:id(\\d+)/koreksi-stok', butuhIzin('gudang.opname'), ah((req, res) => {
+router.post('/products/:id(\\d+)/koreksi-stok', butuhIzin('gudang.produk'), ah((req, res) => {
   const body = parse(koreksiStokSchema, req.body);
   const tanggal = body.move_date || todayLocal();
 

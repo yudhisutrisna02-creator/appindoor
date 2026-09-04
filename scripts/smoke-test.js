@@ -3488,7 +3488,9 @@ async function main() {
     prodSetelahPut && prodSetelahPut.stock === 95,
     prodSetelahPut ? String(prodSetelahPut.stock) : 'produk tidak ketemu');
 
-  // Wewenangnya disamakan dengan stok opname, bukan sekadar boleh ubah produk.
+  // Wewenangnya mengikuti izin mengurus produk. Akun berperan sempit yang tidak
+  // memegang gudang.produk tetap harus ditolak — layar boleh menyembunyikan
+  // tombolnya, tetapi yang benar-benar menjaga adalah peladen.
   token = await masukSebagai(akunSempit.user.email, 'RahasiaKuat1');
   let tolakIzinKor = 0;
   try {
@@ -3496,7 +3498,7 @@ async function main() {
       stock: 10, note: 'coba tanpa izin',
     });
   } catch (err) { tolakIzinKor = err.status; }
-  check('tim tanpa izin opname tidak bisa mengoreksi stok', tolakIzinKor === 403,
+  check('tim tanpa izin produk tidak bisa mengoreksi stok', tolakIzinKor === 403,
     `status ${tolakIzinKor}`);
   token = adminAkun;
 

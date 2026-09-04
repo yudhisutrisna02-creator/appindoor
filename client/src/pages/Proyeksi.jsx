@@ -107,7 +107,7 @@ export default function Proyeksi() {
             <ComposedChart data={grafik} margin={{ top: 8, right: 8, bottom: 4, left: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis dataKey="nama" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} __SUMBU__0__ width={72} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={rupiah} width={116} />
               <Tooltip
                 formatter={(v, n) => [rupiah(Math.abs(v)), n]}
                 labelFormatter={(l) => {

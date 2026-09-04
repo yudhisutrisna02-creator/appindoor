@@ -7,8 +7,8 @@ keputusan yang lahir dari kesalahan nyata di aplikasi berjalan — bagian itulah
 yang paling menentukan apakah hasil duplikasinya bisa dipakai bertahun-tahun
 atau berantakan dalam tiga bulan. Jangan dilewati.
 
-**Versi acuan:** 2 September 2026 · 34.615 baris kode · 31 tabel · 39 izin ·
-39 akun COA · 37 halaman · 482 uji otomatis.
+**Versi acuan:** 4 September 2026 · 35.572 baris kode · 31 tabel · 39 izin ·
+40 akun COA · 38 halaman · 522 uji otomatis.
 
 ---
 
@@ -32,7 +32,7 @@ diisi manual lewat layar setelah aplikasi berdiri:
 | Saldo awal kas/modal | Keuangan → Buku Besar & Jurnal |
 
 Yang **disemai otomatis** hanya kerangka yang sama untuk semua bisnis:
-39 akun COA, 5 peran bawaan beserta izinnya, dan satu akun admin pertama.
+40 akun COA, 5 peran bawaan beserta izinnya, dan satu akun admin pertama.
 
 ### Cara menjalankan promptnya
 
@@ -100,7 +100,7 @@ Ini bukan saran — pernah terjadi.
 
 ## 3. Aturan Arsitektur yang Tidak Boleh Dilanggar
 
-Sembilan aturan berikut lahir dari kesalahan nyata. Masing-masing pernah
+Sepuluh aturan berikut lahir dari kesalahan nyata. Masing-masing pernah
 menyebabkan angka salah atau data hilang di aplikasi berjalan.
 
 ### 3.1 Satu pintu untuk pembukuan
@@ -194,14 +194,43 @@ dicari — yang ada di luar batas itu — tidak akan pernah ketemu, dan pemakain
 menyimpulkan datanya hilang. Semua pencarian memakai `LIKE ... ESCAPE '\'` di
 peladen, dengan karakter `%` dan `_` yang diketik pengguna di-escape.
 
-### 3.9 Angka rupiah ditulis penuh
+### 3.9 Angka yang berubah wajib meninggalkan jejak
+
+Stok, saldo rekening, dan angka apa pun yang muncul di neraca **tidak boleh
+ditimpa begitu saja**, bahkan ketika yang diminta pengguna memang "ubah
+angkanya langsung".
+
+Stok dijelaskan oleh kartu stok dan muncul sebagai Persediaan di neraca.
+Menimpanya diam-diam membuat kartu stok tidak bisa menjelaskan dari mana angka
+barunya datang, dan membuat neraca berbeda dari valuasi gudang **tanpa tanda
+apa pun** — selisih yang baru ketahuan berbulan-bulan kemudian, saat sudah
+tidak bisa ditelusuri lagi.
+
+Jalannya: sediakan layarnya seperti yang diminta, tetapi di belakangnya catat
+sebagai penyesuaian bernomor lengkap dengan alasan wajib, mutasi, dan jurnalnya.
+Pengguna mendapat kemudahan yang diminta; pembukuan tetap utuh.
+
+```js
+// SALAH — angka berubah, tidak ada yang bisa menjelaskan kenapa
+db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(baru, id);
+
+// BENAR — stok berubah, kartu stok menjelaskan, neraca ikut menyesuaikan
+db.transaction(() => {
+  db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(baru, id);
+  catatMutasiADJ({ selisih, alasan });
+  postJournal({ ... }); // Persediaan lawan Selisih Stok
+})();
+```
+
+### 3.10 Angka rupiah ditulis penuh
 
 Di seluruh kartu, tabel, dan daftar: `Rp 2.018.000`, bukan `Rp 2,02 jt`.
 Pemilik usaha membaca angka ini untuk mengambil keputusan, dan pembulatan
 menyembunyikan selisih yang justru sedang dicari.
 
-Satu-satunya pengecualian: label sumbu grafik, karena angka penuh berulang di
-tiap garis sumbu menutupi bentuk datanya. Nilai penuh tetap muncul di tooltip.
+Termasuk label sumbu grafik. Sumbunya diperlebar (116px, bukan 76px) supaya
+"Rp 12.500.000" muat utuh — sumbu yang terpotong lebih buruk daripada sumbu
+yang ringkas.
 
 ---
 
@@ -281,7 +310,7 @@ dan API-nya juga menolak — bukan sekadar disembunyikan.
 
 ### Gudang
 - **Valuasi Stok** — nilai persediaan, potensi pendapatan & laba
-- **Master Produk** — CRUD produk + katalog varian
+- **Master Produk** — CRUD produk + katalog varian + koreksi stok langsung dari layar produk
 - **Mutasi Stok** — kartu stok masuk/keluar/penyesuaian
 - **Stok Opname** — hitung fisik, selisih, penyesuaian otomatis
 - **Kinerja Produk** — laku/tidak, modal menganggur, margin per produk
@@ -302,6 +331,7 @@ dan API-nya juga menolak — bukan sekadar disembunyikan.
 ### Keuangan
 - **Rekening Kas & Bank** — saldo per rekening, rincian pergerakan
 - **Kas Masuk & Keluar**
+- **Pindah Saldo** — memindahkan uang antar rekening sendiri (bank ke kas tunai, kas ke bank, antar bank)
 - **Proyeksi Arus Kas**
 - **Utang & Piutang**
 - **Laporan Keuangan** — neraca, laba rugi, arus kas, neraca saldo
@@ -385,7 +415,7 @@ keluar dari fitur yang baru saja dipasang.
 
 ---
 
-## 7. Chart of Accounts (39 Akun)
+## 7. Chart of Accounts (40 Akun)
 
 Kolom: kode, nama, tipe, arus kas, saldo normal (D/K).
 
@@ -401,7 +431,9 @@ Kolom: kode, nama, tipe, arus kas, saldo normal (D/K).
 | 1500 | Peralatan & Inventaris | ASSET | - | D |
 | … | *(31 akun lainnya: kewajiban, ekuitas, pendapatan, beban)* | | | |
 
-Ringkasan: **10 aset · 5 kewajiban · 3 ekuitas · 4 pendapatan · 17 beban**.
+| 4300 | Pendapatan Ongkir Non-Marketplace | REVENUE | OTHER_INCOME | K |
+
+Ringkasan: **10 aset · 5 kewajiban · 3 ekuitas · 5 pendapatan · 17 beban**.
 
 Akun bertanda `is_system = 1` tidak bisa dihapus — dipakai jurnal otomatis.
 Pemilik boleh menambah akun sendiri lewat menu Chart of Accounts.
@@ -429,6 +461,47 @@ Diskon Penjual (Rp) · Voucher & Subsidi · Biaya Platform
 Biaya Gratis Ongkir XTRA · Biaya Layanan · Pajak (%)
 Biaya Packing (Rp) · Biaya Lain (Rp)
 ```
+
+### Ongkir yang ditagih di luar marketplace
+
+Untuk penjualan offline/WA, ongkir sering ditagih ke pembeli dan **ikut
+ditransfer bersama nilai ordernya**. Uang ini harus dipisahkan dari omzet:
+
+| | Ikut ongkir? | Alasan |
+|---|---|---|
+| Omzet (penjualan kotor & bersih) | **tidak** | bukan hasil menjual barang |
+| Laba order | **tidak** | uangnya diteruskan ke ekspedisi |
+| Uang masuk rekening | **ya** | memang ikut ditransfer pembeli |
+
+Di jurnal, ongkir dikreditkan ke **akun pendapatannya sendiri** (4300), bukan
+digabung ke akun Penjualan. Menggabungnya membuat omzet di laporan keuangan
+tampak lebih besar daripada barang yang benar-benar terjual, dan setelah
+tercampur tidak bisa dipisahkan lagi.
+
+### Pindah saldo antar rekening
+
+Menarik tunai dari bank, menyetor tunai, atau memindahkan antar bank **bukan
+pemasukan dan bukan pengeluaran** — uangnya tidak bertambah dan tidak berkurang,
+hanya berpindah tempat.
+
+Dicatat sebagai dua entri terpisah di Kas Masuk dan Kas Keluar, total pemasukan
+dan pengeluaran bulan itu tampak membengkak padahal tidak ada uang yang
+benar-benar mengalir keluar masuk. Jadi keduanya harus menjadi **satu jurnal**:
+debit rekening tujuan, kredit rekening asal. Arus kas bersihnya nol dengan
+sendirinya dan tidak bisa tercatat separuh.
+
+Catatan teknis: jurnal pemindahan tidak punya dokumen induk, sehingga
+`source_id`-nya kosong. Menghapusnya lewat `deleteJournalsBySource` akan
+**menyapu seluruh pemindahan sekaligus** — sediakan `deleteJournalById(id)`
+dengan pemeriksaan kunci periode yang sama.
+
+### Koreksi stok
+
+Membetulkan angka stok yang keliru tanpa mengarang mutasi masuk/keluar yang
+tidak pernah terjadi. Diperlakukan persis seperti selisih stok opname: satu
+mutasi ADJ beserta alasan wajibnya, dan satu jurnal Persediaan lawan Selisih
+Stok. Dua jalan menuju hal yang sama tidak boleh menghasilkan angka berbeda
+di neraca.
 
 ### Kunci periode
 Tutup buku mengunci satu bulan. Setelah dikunci, `postJournal()` dan
@@ -669,6 +742,12 @@ Modul gudang:
    jurnalnya.
 5. Valuasi Stok — nilai persediaan, potensi pendapatan & laba, daftar stok menipis.
 6. Kinerja Produk — laku/tidak laku, modal menganggur, margin per produk.
+7. Koreksi Stok langsung dari layar Ubah Produk — membetulkan angka stok yang
+   keliru tanpa mengarang mutasi masuk/keluar. JANGAN menimpa products.stock
+   begitu saja: catat sebagai mutasi ADJ dengan alasan WAJIB, plus jurnal
+   Persediaan lawan Selisih Stok, sama seperti selisih opname. Menimpanya
+   diam-diam membuat kartu stok tidak bisa menjelaskan angka barunya dan
+   membuat neraca berbeda dari valuasi gudang tanpa tanda apa pun.
 
 Nilai persediaan di neraca WAJIB sama dengan valuasi stok gudang. Tulis uji
 yang membandingkan keduanya.
@@ -686,7 +765,15 @@ Modul penjualan multi-kanal:
    Toko, Nama pembeli, No. pesanan, Resi/kode booking, lalu detail pesanan.
 4. Struktur biaya order (semua rupiah, HANYA pajak yang persen):
    Diskon Penjual (Rp), Voucher & Subsidi, Biaya Platform, Biaya Gratis Ongkir
-   XTRA, Biaya Layanan, Pajak (%), Biaya Packing (Rp), Biaya Lain (Rp).
+   XTRA, Biaya Layanan, Pajak (%), Biaya Packing (Rp), Biaya Kirim Non MP (Rp),
+   Biaya Lain (Rp).
+   PERHATIAN pada Biaya Kirim Non MP: namanya "biaya" mengikuti sebutan tim
+   sehari-hari, tetapi perlakuannya KEBALIKANNYA. Ini ongkir yang ditagih ke
+   pembeli di luar marketplace dan ikut ditransfer ke rekening bersama nilai
+   ordernya, jadi ia MENAMBAH penerimaan. Ia TIDAK boleh masuk omzet (bukan
+   hasil menjual barang) dan TIDAK boleh masuk laba (uangnya diteruskan ke
+   ekspedisi). Di jurnal dikreditkan ke akun pendapatannya sendiri, bukan
+   digabung ke akun Penjualan.
 5. Status pesanan di SATU berkas bersama (src/utils/status-pesanan.js), beserta
    KELOMPOKNYA: mana yang berarti dananya sudah masuk, mana barangnya kembali,
    mana masih berjalan. Semua pemeriksaan "sudah selesai belum" memakai
@@ -744,6 +831,13 @@ setelah order dibuat, diubah, dan dibatalkan; pembatalan mengembalikan stok.
 4. Target & Pencapaian — target omzet, laba, batas belanja iklan, beserta
    persentase pencapaiannya.
 5. Rekening Kas & Bank, Kas Masuk & Keluar, Utang & Piutang, Proyeksi Arus Kas.
+6. Pindah Saldo antar rekening sendiri — bank ke kas tunai, kas ke bank, antar
+   bank. WAJIB satu jurnal (debit tujuan, kredit asal), bukan dua entri terpisah
+   di Kas Masuk dan Kas Keluar: dua entri membuat total pemasukan dan pengeluaran
+   bulan itu membengkak padahal tidak ada uang yang benar-benar mengalir keluar
+   masuk. Sediakan juga deleteJournalById() — jurnal pemindahan tidak punya
+   dokumen induk, jadi menghapusnya lewat source_id yang kosong akan menyapu
+   SELURUH pemindahan sekaligus.
 ```
 
 ---
@@ -757,8 +851,8 @@ setelah order dibuat, diubah, dan dibatalkan; pembatalan mengembalikan stok.
 2. Pusat Perhatian — hal yang perlu ditindak: stok menipis, dana lama belum
    cair, faktur jatuh tempo, modal menganggur, kejanggalan data.
 3. SEMUA angka rupiah ditulis PENUH: "Rp 2.018.000", BUKAN "Rp 2,02 jt".
-   Satu-satunya pengecualian: label sumbu grafik, karena angka penuh berulang
-   di tiap garis sumbu menutupi bentuk datanya. Tooltip tetap penuh.
+   Termasuk label sumbu grafik — lebarkan sumbunya (116px, bukan 76px) supaya
+   angkanya muat utuh.
 ```
 
 ---
@@ -858,6 +952,8 @@ valuasi stok gudang.
 - [ ] Supplier & pelanggan dimasukkan
 - [ ] Stok awal dimasukkan lewat Mutasi Stok (tipe IN)
 - [ ] Saldo awal kas & modal dimasukkan lewat Jurnal
+      (JANGAN dilewati: tanpa saldo awal, setiap pembayaran tampak keluar dari
+      nol dan saldo rekening menjadi minus meski uangnya sebenarnya ada)
 - [ ] Neraca diperiksa: **seimbang**
 - [ ] Nilai persediaan di neraca cocok dengan valuasi stok gudang
 - [ ] Pencadangan otomatis menyala dan berkasnya benar-benar terbentuk
@@ -884,9 +980,13 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Widget unggah menyeragamkan semua gambar jadi JPEG | WebP membengkak, GIF bergerak kehilangan animasi |
 | Uji dijalankan dua kali di database yang sama | Uji berbasis nilai mutlak gagal karena data menumpuk — terlihat seperti bug |
 | Jendela laporan uji berakhir di "hari ini" | Uji penggajian gagal tiap tanggal 1, karena gaji jatuh tempo tanggal 25 |
+| Menghapus jurnal tanpa dokumen induk lewat `source_id` yang kosong | Satu klik "batal" menghapus SELURUH catatan sejenis |
+| Ongkir non-marketplace digabung ke akun Penjualan | Omzet menggelembung dan tidak bisa dipisahkan lagi |
+| Skrip pengganti massal memakai penanda sementara | Penanda tidak terpulihkan karena backslash regex termakan shell; sumbu grafik kehilangan formatternya dan menampilkan angka mentah — lolos build karena JSX menerima atribut apa pun |
+| Saldo awal tidak pernah dimasukkan | Semua rekening minus meski uangnya ada; setiap pembayaran tampak keluar dari nol |
 
 ---
 
-*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 2 September 2026.
+*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 4 September 2026.
 Saat aplikasinya berkembang, perbarui dokumen ini bersamaan — panduan duplikasi
 yang tertinggal dari kenyataan lebih menyesatkan daripada tidak ada panduan.*

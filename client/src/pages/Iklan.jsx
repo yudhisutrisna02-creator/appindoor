@@ -175,7 +175,7 @@ export default function Iklan() {
               <ResponsiveContainer width="100%" height={Math.max(200, data.perToko.length * 38)}>
                 <BarChart data={data.perToko} layout="vertical" margin={{ left: 30, right: 16 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11 }} __SUMBU__0__ />
+                  <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={rupiah} />
                   <YAxis type="category" dataKey="shop_name" tick={{ fontSize: 11 }} width={140} />
                   <Tooltip formatter={(v) => rupiah(v)} />
                   <Bar dataKey="iklan" name="Belanja Iklan" radius={[0, 6, 6, 0]}>
