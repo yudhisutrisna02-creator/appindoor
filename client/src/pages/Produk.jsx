@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Search, Package } from 'lucide-react';
 import { api } from '../lib/api';
 import KatalogVarian from '../components/KatalogVarian';
+import KoreksiStok from '../components/KoreksiStok';
 import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, pct } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -232,6 +233,16 @@ export default function Produk() {
             <Field label="Harga Jual Base (Rp)">
               <input type="number" min="0" step="any" className="input" value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value })} />
             </Field>
+            {/* Hanya pada produk yang sudah tersimpan: produk baru belum punya
+                stok untuk dikoreksi, dan stok awalnya dimasukkan lewat mutasi
+                masuk supaya nilai persediaannya ikut tercatat di pembukuan. */}
+            {editing.id && (
+              <KoreksiStok
+                produk={editing}
+                onSelesai={(baru) => { setEditing({ ...editing, stock: baru.stock }); load(); }}
+              />
+            )}
+
             <div className="sm:col-span-2">
               <label className="flex items-start gap-2 rounded-xl bg-amber-50/70 px-3 py-2 text-sm text-slate-700 ring-1 ring-amber-200 dark:bg-amber-400/10">
                 <input

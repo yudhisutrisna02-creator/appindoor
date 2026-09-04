@@ -107,6 +107,103 @@ router.put('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
   res.json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id) });
 }));
 
+const koreksiStokSchema = z.object({
+  stock: z.number().nonnegative('stok tidak boleh minus'),
+  move_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  note: z.string().trim().min(1, 'alasan koreksi wajib diisi').max(200),
+});
+
+/**
+ * POST /api/inventory/products/:id/koreksi-stok
+ *
+ * Membetulkan angka stok yang keliru langsung dari layar produk, tanpa perlu
+ * mengarang mutasi masuk atau keluar yang tidak pernah benar-benar terjadi.
+ *
+ * Yang TIDAK dilakukan di sini: menimpa products.stock begitu saja. Stok bukan
+ * angka yang berdiri sendiri — ia dijelaskan oleh kartu stok, dan nilainya
+ * muncul sebagai Persediaan di neraca. Menimpanya diam-diam membuat kartu stok
+ * tidak bisa menjelaskan dari mana angka barunya datang, dan membuat neraca
+ * berbeda dari valuasi gudang tanpa ada tanda apa pun.
+ *
+ * Jadi koreksinya dicatat seperti koreksi opname: satu mutasi ADJ yang
+ * menjelaskan selisihnya, dan satu jurnal yang memindahkan selisih nilainya
+ * antara Persediaan dan akun Selisih Stok. Alasannya wajib diisi — angka stok
+ * yang berubah tanpa keterangan adalah hal pertama yang dipertanyakan saat
+ * ada yang menghitung ulang gudang.
+ */
+router.post('/products/:id(\\d+)/koreksi-stok', butuhIzin('gudang.opname'), ah((req, res) => {
+  const body = parse(koreksiStokSchema, req.body);
+  const tanggal = body.move_date || todayLocal();
+
+  const hasil = db.transaction(() => {
+    const produk = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+    if (!produk) throw httpError(404, 'Produk tidak ditemukan');
+
+    const stokLama = r2(produk.stock);
+    const stokBaru = r2(body.stock);
+    const selisih = r2(stokBaru - stokLama);
+
+    if (selisih === 0) {
+      throw httpError(422, `Stok ${produk.name} sudah ${stokLama} ${produk.unit} — tidak ada yang perlu dikoreksi`);
+    }
+
+    const nilaiSelisih = r2(selisih * produk.cost);
+
+    db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(stokBaru, produk.id);
+
+    db.prepare(
+      `INSERT INTO stock_moves
+         (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, source_id, note, user_id)
+       VALUES (?,?,'ADJ',?,?,?,?,'KOREKSI',?,?,?)`
+    ).run(
+      produk.id, tanggal, Math.abs(selisih), produk.cost, stokBaru,
+      `KOREKSI/${produk.sku}`, produk.id,
+      `Koreksi stok ${stokLama} → ${stokBaru} ${produk.unit}: ${body.note}`,
+      req.user.id
+    );
+
+    // Jurnal selisihnya: stok bertambah menambah persediaan, stok berkurang
+    // membebankan kerugiannya — sama persis dengan perlakuan selisih opname,
+    // supaya dua jalan menuju hal yang sama tidak pernah menghasilkan angka
+    // yang berbeda di neraca.
+    if (Math.abs(nilaiSelisih) > 0.004) {
+      const nilai = Math.abs(nilaiSelisih);
+      const lines = nilaiSelisih > 0
+        ? [
+            { code: ACC.INVENTORY, debit: nilai, credit: 0, memo: 'Koreksi stok — selisih lebih' },
+            { code: ACC.STOCK_VARIANCE, debit: 0, credit: nilai, memo: `Koreksi ${produk.sku}` },
+          ]
+        : [
+            { code: ACC.STOCK_VARIANCE, debit: nilai, credit: 0, memo: `Koreksi ${produk.sku}` },
+            { code: ACC.INVENTORY, debit: 0, credit: nilai, memo: 'Koreksi stok — selisih kurang' },
+          ];
+
+      postJournal({
+        date: tanggal,
+        description: `Koreksi Stok — ${produk.name} (${stokLama} → ${stokBaru} ${produk.unit})`,
+        lines,
+        source: 'KOREKSI',
+        sourceId: produk.id,
+        userId: req.user.id,
+      });
+    }
+
+    return { produk, stokLama, stokBaru, selisih, nilaiSelisih };
+  })();
+
+  res.json({
+    ok: true,
+    message:
+      `Stok ${hasil.produk.name} dikoreksi dari ${hasil.stokLama} menjadi ${hasil.stokBaru} ${hasil.produk.unit} ` +
+      `(${hasil.selisih > 0 ? '+' : ''}${hasil.selisih})`,
+    stokLama: hasil.stokLama,
+    stokBaru: hasil.stokBaru,
+    selisih: hasil.selisih,
+    nilaiSelisih: hasil.nilaiSelisih,
+    product: db.prepare('SELECT * FROM products WHERE id = ?').get(hasil.produk.id),
+  });
+}));
+
 // ==================================================================
 // KATALOG VARIAN
 //

@@ -3389,6 +3389,118 @@ async function main() {
     Math.abs(neracaOng2.totalDebit - neracaOng2.totalCredit) < 0.01);
 
 
+  console.log('\n40. Koreksi stok dari layar produk');
+
+  const skuKor = `KOR-${Date.now()}`;
+  const prodKor = (await call('POST', '/api/inventory/products', {
+    sku: skuKor, name: 'Produk Uji Koreksi', cost: 15000, price: 40000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodKor.id, move_date: today, move_type: 'IN',
+    qty: 100, unit_cost: 15000, payment: 'CASH',
+  });
+
+  // Stok berkurang: mis. terlanjur tercatat 100 padahal fisiknya 88.
+  const kurang = await call('POST', `/api/inventory/products/${prodKor.id}/koreksi-stok`, {
+    stock: 88, move_date: today, note: 'Salah input saat barang masuk',
+  });
+  check('stok bisa dikoreksi langsung dari produk', kurang.ok === true);
+  check('stok produk benar-benar berubah', kurang.product.stock === 88,
+    String(kurang.product.stock));
+  check('selisihnya dihitung benar', kurang.selisih === -12, String(kurang.selisih));
+
+  // Inti bahayanya: kalau angkanya ditimpa tanpa mutasi, kartu stok tidak bisa
+  // menjelaskan dari mana angka barunya datang.
+  const kartuKor = await call('GET',
+    `/api/inventory/moves?product_id=${prodKor.id}&from=${today}&to=${today}`);
+  const adj = kartuKor.rows.filter((m) => m.move_type === 'ADJ');
+  check('koreksi tercatat di kartu stok sebagai penyesuaian', adj.length === 1,
+    `${adj.length} baris ADJ`);
+  check('kartu stok memuat alasan koreksinya',
+    adj.length === 1 && /Salah input saat barang masuk/.test(adj[0].note || ''),
+    adj[0] ? String(adj[0].note) : '-');
+  check('saldo kartu stok sama dengan stok produk',
+    adj.length === 1 && adj[0].balance_after === 88,
+    adj[0] ? String(adj[0].balance_after) : '-');
+
+  // Dan yang paling menentukan: neraca harus tetap cocok dengan gudang.
+  const valuasiKor = await call('GET', '/api/inventory/valuation');
+  const neracaKor = await call('GET',
+    `/api/finance/reports/balance-sheet?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang setelah koreksi stok',
+    neracaKor.balanced === true || Math.abs(neracaKor.totalAssets
+      - (neracaKor.totalLiabilities + neracaKor.totalEquity)) < 0.01);
+
+  const tbKor = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca saldo tetap seimbang setelah koreksi',
+    Math.abs(tbKor.totalDebit - tbKor.totalCredit) < 0.01,
+    `${tbKor.totalDebit} vs ${tbKor.totalCredit}`);
+  void valuasiKor;
+
+  // Stok bertambah: koreksi ke arah sebaliknya juga harus jalan.
+  const tambah = await call('POST', `/api/inventory/products/${prodKor.id}/koreksi-stok`, {
+    stock: 95, move_date: today, note: 'Ditemukan sisa di rak belakang',
+  });
+  check('koreksi menambah stok juga bisa', tambah.product.stock === 95,
+    String(tambah.product.stock));
+  check('selisih naik dihitung benar', tambah.selisih === 7, String(tambah.selisih));
+
+  const tbKor2 = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang setelah koreksi naik',
+    Math.abs(tbKor2.totalDebit - tbKor2.totalCredit) < 0.01);
+
+  // Penjagaan.
+  let tolakSamaKor = 0;
+  try {
+    await call('POST', `/api/inventory/products/${prodKor.id}/koreksi-stok`, {
+      stock: 95, note: 'tidak ada yang berubah',
+    });
+  } catch (err) { tolakSamaKor = err.status; }
+  check('koreksi ke angka yang sama ditolak', tolakSamaKor === 422,
+    `status ${tolakSamaKor}`);
+
+  let tolakTanpaAlasan = 0;
+  try {
+    await call('POST', `/api/inventory/products/${prodKor.id}/koreksi-stok`, { stock: 50 });
+  } catch (err) { tolakTanpaAlasan = err.status; }
+  check('koreksi tanpa alasan ditolak', tolakTanpaAlasan === 400,
+    `status ${tolakTanpaAlasan}`);
+
+  let tolakMinusKor = 0;
+  try {
+    await call('POST', `/api/inventory/products/${prodKor.id}/koreksi-stok`, {
+      stock: -5, note: 'stok minus',
+    });
+  } catch (err) { tolakMinusKor = err.status; }
+  check('stok minus ditolak', tolakMinusKor === 400, `status ${tolakMinusKor}`);
+
+  // Mengubah data produk lewat jalur biasa tidak boleh menyentuh stok — kalau
+  // bisa, satu kali menyimpan formulir akan menggeser nilai persediaan tanpa
+  // catatan apa pun.
+  await call('PUT', `/api/inventory/products/${prodKor.id}`, {
+    sku: skuKor, name: 'Produk Uji Koreksi', cost: 15000, price: 40000, stock: 999,
+  });
+  const prodSetelahPut = (await call('GET', `/api/inventory/products?q=${skuKor}`)).products
+    .find((r) => r.sku === skuKor);
+  check('menyimpan data produk tidak menggeser stok',
+    prodSetelahPut && prodSetelahPut.stock === 95,
+    prodSetelahPut ? String(prodSetelahPut.stock) : 'produk tidak ketemu');
+
+  // Wewenangnya disamakan dengan stok opname, bukan sekadar boleh ubah produk.
+  token = await masukSebagai(akunSempit.user.email, 'RahasiaKuat1');
+  let tolakIzinKor = 0;
+  try {
+    await call('POST', `/api/inventory/products/${prodKor.id}/koreksi-stok`, {
+      stock: 10, note: 'coba tanpa izin',
+    });
+  } catch (err) { tolakIzinKor = err.status; }
+  check('tim tanpa izin opname tidak bisa mengoreksi stok', tolakIzinKor === 403,
+    `status ${tolakIzinKor}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
