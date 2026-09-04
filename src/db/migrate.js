@@ -194,6 +194,11 @@ function runMigrations(db) {
 
   // --- Jatuh tempo ---
   addColumn(db, 'sales_orders', 'due_date', 'TEXT', applied);
+
+  // Ongkir yang ditagih ke pembeli di luar marketplace. Uang ini ikut masuk ke
+  // rekening bersama nilai ordernya, jadi ia menambah penerimaan — bukan biaya,
+  // meski tim menyebutnya begitu dalam percakapan sehari-hari.
+  addColumn(db, 'sales_orders', 'shipping_non_mp', 'REAL NOT NULL DEFAULT 0', applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
   // --- Data tim yang lebih lengkap ---

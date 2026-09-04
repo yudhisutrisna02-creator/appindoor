@@ -67,6 +67,7 @@ const ubahSchema = z.object({
   tax_amount: z.number().nonnegative().optional(),
   packing_cost: z.number().nonnegative().optional(),
   other_cost: z.number().nonnegative().optional(),
+  shipping_non_mp: z.number().nonnegative().optional(),
 
   shop_id: z.number().int().positive().optional().nullable(),
   order_ref: z.string().trim().max(80).optional().nullable(),
@@ -98,6 +99,7 @@ const KOLOM_KETERANGAN = [
 const KOLOM_UANG = [
   'discount', 'admin_fee_pct', 'admin_fee', 'handling_fee', 'shipping_extra',
   'voucher_platform', 'tax_pct', 'tax_amount', 'packing_cost', 'other_cost',
+  'shipping_non_mp',
 ];
 
 /**
@@ -186,6 +188,7 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
               : gabung.tax_amount,
         packing_cost: gabung.packing_cost,
         other_cost: gabung.other_cost,
+        shipping_non_mp: gabung.shipping_non_mp,
       },
       items
     );
@@ -245,7 +248,8 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
          payment_status = ?, note = ?, partner_id = ?, due_date = ?,
          shop_id = ?, order_ref = ?, courier = ?, tracking_no = ?, fulfillment_status = ?,
          payout_date = ?, shipping_charged = ?, buyer_name = ?, buyer_account = ?,
-         buyer_phone = ?, buyer_address = ?, buyer_city = ?, lead_source = ?
+         buyer_phone = ?, buyer_address = ?, buyer_city = ?, lead_source = ?,
+         shipping_non_mp = ?
        WHERE id = ?`
     ).run(
       gabung.order_date, gabung.channel, gabung.customer || null, gabung.marketplace_ref || null,
@@ -259,7 +263,7 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
       gabung.tracking_no || null, gabung.fulfillment_status, gabung.payout_date || null,
       r2(gabung.shipping_charged), gabung.buyer_name || null, gabung.buyer_account || null,
       gabung.buyer_phone || null, gabung.buyer_address || null, gabung.buyer_city || null,
-      gabung.lead_source || null,
+      gabung.lead_source || null, hitung.shipping_non_mp,
       orderId
     );
 

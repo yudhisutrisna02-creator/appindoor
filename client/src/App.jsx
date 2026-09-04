@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -28,6 +28,7 @@ import ChartOfAccounts from './pages/ChartOfAccounts';
 import LaporanKeuangan from './pages/LaporanKeuangan';
 import Pengaturan from './pages/Pengaturan';
 import KasMasukKeluar from './pages/KasMasukKeluar';
+import PindahSaldo from './pages/PindahSaldo';
 import UtangPiutang from './pages/UtangPiutang';
 import Mitra from './pages/Mitra';
 import Retur from './pages/Retur';
@@ -110,6 +111,7 @@ const NAV = [
     items: [
       { to: '/keuangan/rekening', label: 'Rekening Kas & Bank', icon: Landmark, izin: 'keuangan.lihat' },
       { to: '/keuangan/kas', label: 'Kas Masuk & Keluar', icon: Wallet, izin: 'keuangan.kas' },
+      { to: '/keuangan/pindah', label: 'Pindah Saldo', icon: ArrowRightLeft, izin: 'keuangan.kas' },
       { to: '/keuangan/proyeksi', label: 'Proyeksi Arus Kas', icon: TrendingDown, izin: 'keuangan.lihat' },
       { to: '/keuangan/utang-piutang', label: 'Utang & Piutang', icon: HandCoins, izin: 'keuangan.lihat' },
       { to: '/keuangan/laporan', label: 'Laporan Keuangan', icon: FileBarChart2, izin: 'keuangan.lihat' },
@@ -461,6 +463,7 @@ export default function App() {
         <Route path="/gudang/kinerja" element={<Dijaga izin="gudang.kinerja"><KinerjaProduk /></Dijaga>} />
         <Route path="/keuangan/rekening" element={<Dijaga izin="keuangan.lihat"><Rekening /></Dijaga>} />
         <Route path="/keuangan/kas" element={<Dijaga izin="keuangan.kas"><KasMasukKeluar /></Dijaga>} />
+        <Route path="/keuangan/pindah" element={<Dijaga izin="keuangan.kas"><PindahSaldo /></Dijaga>} />
         <Route path="/keuangan/utang-piutang" element={<Dijaga izin="keuangan.lihat"><UtangPiutang /></Dijaga>} />
         <Route path="/keuangan/laporan" element={<Dijaga izin="keuangan.lihat"><LaporanKeuangan /></Dijaga>} />
         <Route path="/keuangan/jurnal" element={<Dijaga izin="keuangan.lihat"><Jurnal /></Dijaga>} />

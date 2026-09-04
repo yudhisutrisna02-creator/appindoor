@@ -3237,6 +3237,158 @@ async function main() {
   check('format tanggal yang salah tetap ditolak', tolakTglNgawur === 400,
     `status ${tolakTglNgawur}`);
 
+  console.log('\n38. Pindah saldo antar rekening');
+
+  const tbSebelumPindah = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  const barisAkun = (tb, kode) => (tb.rows || []).find((r) => r.code === kode) || {};
+  const kasAwal = barisAkun(tbSebelumPindah, '1000');
+  const bankAwal = barisAkun(tbSebelumPindah, '1010');
+
+  const pindah = await call('POST', '/api/cashflow/pindah', {
+    entry_date: today, from_code: '1010', to_code: '1000',
+    amount: 500000, note: 'Tarik tunai untuk operasional',
+  });
+  check('saldo bisa dipindahkan antar rekening', pindah.ok === true);
+
+  const tbSesudahPindah = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang setelah pindah saldo',
+    Math.abs(tbSesudahPindah.totalDebit - tbSesudahPindah.totalCredit) < 0.01);
+
+  const kasBaru = barisAkun(tbSesudahPindah, '1000');
+  const bankBaru = barisAkun(tbSesudahPindah, '1010');
+  const naikKas = (kasBaru.debit || 0) - (kasAwal.debit || 0);
+  const turunBank = (bankBaru.credit || 0) - (bankAwal.credit || 0);
+  check('kas tunai bertambah sebesar yang dipindahkan',
+    Math.abs(naikKas - 500000) < 0.01, `naik ${naikKas}`);
+  check('rekening bank berkurang sebesar yang sama',
+    Math.abs(turunBank - 500000) < 0.01, `turun ${turunBank}`);
+
+  const daftarPindah = await call('GET', `/api/cashflow/pindah?from=${bulanIni}&to=${today}`);
+  check('pemindahan muncul di riwayat', daftarPindah.rows.length >= 1);
+  check('riwayat menyebut rekening asal dan tujuan',
+    daftarPindah.rows.some((r) => r.dari && r.ke),
+    JSON.stringify(daftarPindah.rows[0] || {}).slice(0, 120));
+  check('daftar rekening ikut dikirim untuk pilihan',
+    Array.isArray(daftarPindah.rekening) && daftarPindah.rekening.length >= 2);
+
+  let tolakSamaRek = 0;
+  try {
+    await call('POST', '/api/cashflow/pindah', {
+      entry_date: today, from_code: '1000', to_code: '1000', amount: 1000,
+    });
+  } catch (err) { tolakSamaRek = err.status; }
+  check('rekening asal sama dengan tujuan ditolak', tolakSamaRek === 422,
+    `status ${tolakSamaRek}`);
+
+  let tolakTujuanBukanKas = 0;
+  try {
+    await call('POST', '/api/cashflow/pindah', {
+      entry_date: today, from_code: '1010', to_code: '4000', amount: 1000,
+    });
+  } catch (err) { tolakTujuanBukanKas = err.status; }
+  check('akun yang bukan kas/bank ditolak sebagai tujuan', tolakTujuanBukanKas === 422,
+    `status ${tolakTujuanBukanKas}`);
+
+  let tolakNolPindah = 0;
+  try {
+    await call('POST', '/api/cashflow/pindah', {
+      entry_date: today, from_code: '1010', to_code: '1000', amount: 0,
+    });
+  } catch (err) { tolakNolPindah = err.status; }
+  check('nominal nol ditolak', tolakNolPindah === 400 || tolakNolPindah === 422,
+    `status ${tolakNolPindah}`);
+
+  // Membatalkan satu pemindahan tidak boleh menyapu pemindahan lain. Jurnal
+  // pemindahan tidak punya dokumen induk, jadi menghapusnya lewat source_id
+  // yang kosong akan menghapus SELURUH pemindahan sekaligus.
+  await call('POST', '/api/cashflow/pindah', {
+    entry_date: today, from_code: '1000', to_code: '1010', amount: 25000,
+  });
+  const sebelumHapus = (await call('GET', `/api/cashflow/pindah?from=${bulanIni}&to=${today}`)).rows;
+  await call('DELETE', `/api/cashflow/pindah/${sebelumHapus[0].id}`);
+  const sesudahHapus = (await call('GET', `/api/cashflow/pindah?from=${bulanIni}&to=${today}`)).rows;
+  check('membatalkan satu pemindahan hanya menghapus satu baris',
+    sesudahHapus.length === sebelumHapus.length - 1,
+    `${sebelumHapus.length} -> ${sesudahHapus.length}`);
+
+  const tbAkhirPindah = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang setelah pembatalan',
+    Math.abs(tbAkhirPindah.totalDebit - tbAkhirPindah.totalCredit) < 0.01);
+
+  console.log('\n39. Biaya Kirim Non MP');
+
+  const skuOng = `ONG-${Date.now()}`;
+  const prodOng = (await call('POST', '/api/inventory/products', {
+    sku: skuOng, name: 'Produk Uji Ongkir', cost: 20000, price: 100000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodOng.id, move_date: today, move_type: 'IN',
+    qty: 20, unit_cost: 20000, payment: 'CASH',
+  });
+
+  const ONGKIR = 25000;
+  const oOng = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Pembeli Ongkir',
+    items: [{ product_id: prodOng.id, qty: 1, price: 100000 }],
+    shipping_non_mp: ONGKIR, payment_status: 'PAID',
+  })).order;
+  check('biaya kirim non MP tersimpan pada order',
+    Math.abs(oOng.shipping_non_mp - ONGKIR) < 0.01, String(oOng.shipping_non_mp));
+
+  // Inti pemisahannya: ongkir TIDAK boleh menggelembungkan omzet maupun laba.
+  check('ongkir tidak menambah penjualan kotor',
+    Math.abs(oOng.gross_sales - 100000) < 0.01, String(oOng.gross_sales));
+  check('ongkir tidak menambah pendapatan kotor',
+    Math.abs(oOng.net_revenue - 100000) < 0.01, String(oOng.net_revenue));
+  check('ongkir tidak menggelembungkan laba',
+    Math.abs(oOng.net_profit - 80000) < 0.01, String(oOng.net_profit));
+
+  const detailOng = await call('GET', `/api/sales/${oOng.id}`);
+  check('order tersimpan dengan biaya kirim non MP-nya',
+    Math.abs(detailOng.order.shipping_non_mp - ONGKIR) < 0.01);
+
+  // Yang diminta: total order + ongkir itulah yang masuk rekening.
+  const ringkasOng = await call('GET',
+    `/api/sales?from=${today}&to=${today}&channel=OFFLINE_WA`);
+  check('ongkir non MP punya totalnya sendiri di ringkasan',
+    ringkasOng.summary.ongkirNonMp >= ONGKIR,
+    String(ringkasOng.summary.ongkirNonMp));
+  check('uang masuk rekening = omzet - biaya + ongkir non MP',
+    Math.abs(ringkasOng.summary.netReceived
+      - (ringkasOng.summary.netRevenue - ringkasOng.summary.totalFees
+         + ringkasOng.summary.ongkirNonMp)) < 0.01,
+    String(ringkasOng.summary.netReceived));
+
+  const neracaOng = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang dengan ongkir non MP',
+    Math.abs(neracaOng.totalDebit - neracaOng.totalCredit) < 0.01,
+    `${neracaOng.totalDebit} vs ${neracaOng.totalCredit}`);
+
+  // Ongkir masuk akun pendapatannya sendiri, bukan dicampur ke Penjualan —
+  // kalau digabung, omzet di laporan keuangan ikut menggelembung.
+  const barisOngkir = (neracaOng.rows || []).find((r) => r.code === '4300');
+  check('ongkir dicatat di akun pendapatan tersendiri (4300)',
+    !!barisOngkir && barisOngkir.credit >= ONGKIR,
+    barisOngkir ? String(barisOngkir.credit) : 'akun 4300 tidak ada');
+
+  // Bisa dibetulkan setelah tersimpan, seperti kolom biaya lainnya.
+  await call('PUT', `/api/sales/${oOng.id}`, { shipping_non_mp: 40000 });
+  const oOngBaru = (await call('GET', `/api/sales/${oOng.id}`)).order;
+  check('biaya kirim non MP bisa dibetulkan setelah tersimpan',
+    Math.abs(oOngBaru.shipping_non_mp - 40000) < 0.01, String(oOngBaru.shipping_non_mp));
+  check('omzetnya tetap tidak berubah saat ongkir dibetulkan',
+    Math.abs(oOngBaru.net_revenue - 100000) < 0.01, String(oOngBaru.net_revenue));
+
+  const neracaOng2 = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang setelah ongkir dibetulkan',
+    Math.abs(neracaOng2.totalDebit - neracaOng2.totalCredit) < 0.01);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

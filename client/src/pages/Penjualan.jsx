@@ -36,6 +36,7 @@ const emptyOrder = () => ({
   tax_pct: 0,
   packing_cost: 0,
   other_cost: 0,
+  shipping_non_mp: 0,
   payment_status: 'PAID',
   note: '',
 });
@@ -109,10 +110,17 @@ export default function Penjualan() {
     const grossProfit = netRevenue - cogs;
     const netProfit = grossProfit - fees;
 
+    // Ongkir non-marketplace tidak masuk omzet maupun laba: uangnya diteruskan
+    // ke ekspedisi, bukan hasil menjual barang. Ia hanya menambah uang yang
+    // masuk rekening.
+    const ongkirNonMp = Number(form.shipping_non_mp) || 0;
+
     return {
       gross, cogs, discount, netRevenue, adminFee, taxAmount, fees, grossProfit, netProfit,
-      // Yang benar-benar diterima setelah seluruh potongan marketplace.
-      netReceived: netRevenue - fees,
+      ongkirNonMp,
+      // Yang benar-benar masuk rekening: omzet dikurangi potongan, ditambah
+      // ongkir yang ikut ditransfer pembeli.
+      netReceived: netRevenue - fees + ongkirNonMp,
       marginPct: netRevenue ? (netProfit / netRevenue) * 100 : 0,
     };
   }, [form, products]);
@@ -177,6 +185,7 @@ export default function Penjualan() {
         tax_pct: Number(form.tax_pct) || 0,
         packing_cost: Number(form.packing_cost) || 0,
         other_cost: Number(form.other_cost) || 0,
+        shipping_non_mp: Number(form.shipping_non_mp) || 0,
       };
       if (payload.items.length === 0) throw new Error('Tambahkan minimal satu item produk');
 
@@ -572,6 +581,12 @@ export default function Penjualan() {
               <Field label="Biaya Packing (Rp)">
                 <input type="number" min="0" step="any" className="input" value={form.packing_cost} onChange={(e) => setForm({ ...form, packing_cost: e.target.value })} />
               </Field>
+              <Field
+                label="Biaya Kirim Non MP (Rp)"
+                hint="Ongkir yang ditagih pembeli di luar marketplace — ikut masuk rekening, MENAMBAH penerimaan"
+              >
+                <input type="number" min="0" step="any" className="input" value={form.shipping_non_mp} onChange={(e) => setForm({ ...form, shipping_non_mp: e.target.value })} />
+              </Field>
               <Field label="Biaya Lain (Rp)">
                 <input type="number" min="0" step="any" className="input" value={form.other_cost} onChange={(e) => setForm({ ...form, other_cost: e.target.value })} />
               </Field>
@@ -748,6 +763,12 @@ export default function Penjualan() {
                 <DetailRow label="Pajak" value={`− ${rupiah(detail.order.tax_amount)}`} />
                 <DetailRow label="Packing" value={`− ${rupiah(detail.order.packing_cost)}`} />
                 <DetailRow label="Biaya Lain" value={`− ${rupiah(detail.order.other_cost)}`} />
+                {detail.order.shipping_non_mp > 0 && (
+                  <DetailRow
+                    label="Biaya Kirim Non MP"
+                    value={`+ ${rupiah(detail.order.shipping_non_mp)}`}
+                  />
+                )}
                 <DetailRow label="Total Biaya" value={`− ${rupiah(detail.order.total_fees)}`} bold />
               </dl>
             </div>

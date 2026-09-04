@@ -13,7 +13,7 @@ const { z } = require('zod');
 const { db } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, ACC, postJournal, deleteJournalsBySource, accountByCode } = require('../utils/accounting');
+const { r2, ACC, postJournal, deleteJournalsBySource, deleteJournalById, accountByCode } = require('../utils/accounting');
 const { todayLocal } = require('../utils/time');
 
 const router = express.Router();
@@ -122,6 +122,103 @@ router.post('/entries', butuhIzin('keuangan.kas'), ah((req, res) => {
   });
 }));
 
+const pindahSchema = z.object({
+  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  from_code: z.string().min(1),
+  to_code: z.string().min(1),
+  amount: z.number().positive('nominal harus lebih dari nol'),
+  note: z.string().trim().max(200).optional().nullable(),
+});
+
+/**
+ * POST /api/cashflow/pindah — memindahkan saldo antar rekening sendiri.
+ *
+ * Menarik tunai dari bank, menyetor tunai ke bank, atau memindahkan antar bank
+ * bukan pemasukan dan bukan pengeluaran: uangnya tidak bertambah dan tidak
+ * berkurang, hanya berpindah tempat. Sebelum ada menu ini, satu-satunya cara
+ * mencatatnya adalah dua entri terpisah — kas keluar di satu sisi dan kas masuk
+ * di sisi lain — yang membuat total pemasukan dan pengeluaran bulan itu tampak
+ * membengkak padahal tidak ada uang yang benar-benar mengalir keluar masuk.
+ *
+ * Di sini keduanya menjadi satu jurnal, sehingga arus kas bersihnya nol dengan
+ * sendirinya dan tidak bisa dicatat separuh.
+ */
+router.post('/pindah', butuhIzin('keuangan.kas'), ah((req, res) => {
+  const body = parse(pindahSchema, req.body);
+
+  const asal = accountByCode(body.from_code);
+  const tujuan = accountByCode(body.to_code);
+
+  if (!asal.is_cash) throw httpError(422, `${asal.code} · ${asal.name} bukan rekening kas/bank`);
+  if (!tujuan.is_cash) throw httpError(422, `${tujuan.code} · ${tujuan.name} bukan rekening kas/bank`);
+  if (asal.code === tujuan.code) {
+    throw httpError(422, 'Rekening asal dan tujuan tidak boleh sama');
+  }
+
+  const nilai = r2(body.amount);
+  const keterangan = body.note
+    ? `${asal.name} → ${tujuan.name} — ${body.note}`
+    : `${asal.name} → ${tujuan.name}`;
+
+  const journal = postJournal({
+    date: body.entry_date,
+    description: `Pindah Saldo — ${keterangan}`,
+    lines: [
+      { code: tujuan.code, debit: nilai, credit: 0, memo: `Masuk dari ${asal.name}` },
+      { code: asal.code, debit: 0, credit: nilai, memo: `Pindah ke ${tujuan.name}` },
+    ],
+    source: 'TRANSFER',
+    userId: req.user.id,
+  });
+
+  res.status(201).json({
+    ok: true,
+    message:
+      `Rp ${nilai.toLocaleString('id-ID')} dipindahkan dari ${asal.name} ke ${tujuan.name} (${journal.entry_no})`,
+    journal,
+  });
+}));
+
+/** GET /api/cashflow/pindah — riwayat pemindahan saldo. */
+router.get('/pindah', ah((req, res) => {
+  const { from, to } = dateRange(req.query);
+
+  const rows = db
+    .prepare(
+      `SELECT j.id, j.entry_no, j.entry_date AS date, j.description,
+              (SELECT a.name FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+                WHERE l.journal_id = j.id AND l.credit > 0 LIMIT 1) AS dari,
+              (SELECT a.name FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+                WHERE l.journal_id = j.id AND l.debit > 0 LIMIT 1)  AS ke,
+              (SELECT SUM(l.debit) FROM journal_lines l WHERE l.journal_id = j.id) AS nilai
+         FROM journals j
+        WHERE j.source = 'TRANSFER' AND j.entry_date BETWEEN ? AND ?
+        ORDER BY j.entry_date DESC, j.id DESC
+        LIMIT 200`
+    )
+    .all(from, to);
+
+  res.json({
+    from, to, rows,
+    total: r2(rows.reduce((n, r) => n + (r.nilai || 0), 0)),
+    rekening: cashAccounts(),
+  });
+}));
+
+/** DELETE /api/cashflow/pindah/:id — membatalkan satu pemindahan. */
+router.delete('/pindah/:id(\\d+)', butuhIzin('keuangan.kas'), ah((req, res) => {
+  const j = db
+    .prepare("SELECT id, entry_no FROM journals WHERE id = ? AND source = 'TRANSFER'")
+    .get(req.params.id);
+  if (!j) throw httpError(404, 'Pemindahan saldo tidak ditemukan');
+
+  // Lewat pintu yang sama dengan penghapusan jurnal lain, supaya kunci periode
+  // tetap berlaku: pemindahan di bulan yang sudah ditutup tidak bisa dihapus.
+  deleteJournalById(j.id);
+
+  res.json({ ok: true, message: `Pemindahan ${j.entry_no} dibatalkan` });
+}));
+
 /** Dari mana sebuah pergerakan kas berasal, dalam bahasa yang dikenali pemakai. */
 const LABEL_SUMBER = {
   CASH: 'Catatan Kas',
@@ -129,6 +226,7 @@ const LABEL_SUMBER = {
   SALES: 'Penjualan',
   STOCK: 'Barang Masuk',
   SETTLEMENT: 'Pelunasan Utang/Piutang',
+  TRANSFER: 'Pindah Saldo',
   OPNAME: 'Stok Opname',
   MANUAL: 'Jurnal Manual',
 };

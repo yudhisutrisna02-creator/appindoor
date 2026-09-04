@@ -93,6 +93,7 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
       voucher_platform: order.voucher_platform ?? 0,
       packing_cost: order.packing_cost ?? 0,
       other_cost: order.other_cost ?? 0,
+      shipping_non_mp: order.shipping_non_mp ?? 0,
     });
     setBukaBiaya(false);
   }, [order]);
@@ -113,6 +114,7 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
     const angka = new Set([
       'discount', 'admin_fee', 'handling_fee', 'shipping_extra',
       'shipping_charged', 'voucher_platform', 'packing_cost', 'other_cost',
+      'shipping_non_mp',
     ]);
 
     for (const [k, v] of Object.entries(form)) {
@@ -474,6 +476,7 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
               ['shipping_charged', 'Ongkir Ditagih ke Pembeli'],
               ['packing_cost', 'Biaya Packing'],
               ['other_cost', 'Biaya Lain'],
+              ['shipping_non_mp', 'Biaya Kirim Non MP'],
             ].map(([k, l]) => (
               <Field key={k} label={l}>
                 <input type="number" min="0" className="input" value={form[k]} onChange={ubah(k)} />

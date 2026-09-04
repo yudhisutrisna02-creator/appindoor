@@ -39,6 +39,10 @@ const COA = [
   ['4000', 'Penjualan',                      'REVENUE', 'SALES',          'K', 'OCF', 0],
   ['4100', 'Retur Penjualan',                'REVENUE', 'SALES_RETURN',   'D', 'OCF', 0],
   ['4200', 'Diskon Penjualan',               'REVENUE', 'SALES_DISCOUNT', 'D', 'OCF', 0],
+  // Ongkir yang ditagih ke pembeli di luar marketplace ikut ditransfer ke
+  // rekening bersama nilai ordernya. Ia uang masuk, tetapi bukan penjualan
+  // barang — dicatat terpisah supaya omzet tetap bisa dibaca sebagai omzet.
+  ['4300', 'Pendapatan Ongkir Non-Marketplace', 'REVENUE', 'OTHER_INCOME', 'K', 'OCF', 0],
   ['4900', 'Pendapatan Lain-lain',           'REVENUE', 'OTHER_INCOME',   'K', 'OCF', 0],
 
   // ---------- HARGA POKOK ----------
@@ -81,6 +85,7 @@ const ACC = {
   SALES: '4000',
   SALES_RETURN: '4100',
   SALES_DISCOUNT: '4200',
+  SHIPPING_INCOME: '4300',
   COGS: '5000',
   FEE_ADMIN: '6000',
   FEE_HANDLING: '6010',

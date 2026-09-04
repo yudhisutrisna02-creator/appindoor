@@ -61,6 +61,9 @@ const orderSchema = z.object({
   fulfillment_status: z.enum(STATUS.SEMUA).default('DIPROSES'),
   payout_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   shipping_charged: z.number().nonnegative().default(0),
+  // Ongkir yang ditagih ke pembeli di luar marketplace. Ikut ditransfer ke
+  // rekening bersama nilai ordernya, jadi ia menambah penerimaan.
+  shipping_non_mp: z.number().nonnegative().default(0),
   buyer_name: z.string().trim().max(120).optional().nullable(),
   buyer_account: z.string().trim().max(120).optional().nullable(),
   buyer_phone: z.string().trim().max(30).optional().nullable(),
@@ -104,15 +107,25 @@ function computeOrder(input, items) {
   const net_profit = r2(gross_profit - total_fees);
   const margin_pct = net_revenue ? r2((net_profit / net_revenue) * 100) : 0;
 
+  // Ongkir non-marketplace sengaja TIDAK masuk omzet maupun laba.
+  //
+  // Uangnya memang ikut ditransfer ke rekening, jadi ia menambah penerimaan.
+  // Tetapi ia diteruskan ke ekspedisi, bukan hasil menjual barang: memasukkannya
+  // ke omzet membuat penjualan tampak lebih besar daripada barang yang benar-
+  // benar keluar, dan memasukkannya ke laba membuat untung tampak lebih besar
+  // daripada yang benar-benar tinggal. Ongkirnya berdiri sendiri supaya ketiga
+  // angka itu bisa dibaca terpisah.
+  const shipping_non_mp = r2(input.shipping_non_mp);
+
   // Uang yang benar-benar diterima setelah seluruh potongan marketplace.
-  // Tidak disimpan sebagai kolom karena selalu bisa diturunkan dari dua kolom
-  // yang sudah ada — menyimpannya hanya menciptakan angka kedua yang bisa
-  // berbeda bila salah satunya diperbarui sendirian.
-  const net_received = r2(net_revenue - total_fees);
+  // Tidak disimpan sebagai kolom karena selalu bisa diturunkan dari kolom yang
+  // sudah ada — menyimpannya hanya menciptakan angka kedua yang bisa berbeda
+  // bila salah satunya diperbarui sendirian.
+  const net_received = r2(net_revenue - total_fees + shipping_non_mp);
 
   return {
     gross_sales, cogs, discount, net_revenue, admin_fee, tax_amount, total_fees,
-    net_received, gross_profit, net_profit, margin_pct,
+    shipping_non_mp, net_received, gross_profit, net_profit, margin_pct,
   };
 }
 
@@ -256,9 +269,9 @@ const createOrder = db.transaction((body, userId) => {
          payment_status, status, note, user_id, partner_id, due_date,
          shop_id, order_ref, courier, tracking_no, fulfillment_status, payout_date,
          shipping_charged, buyer_name, buyer_account, buyer_phone, buyer_address,
-         buyer_city, lead_source
+         buyer_city, lead_source, shipping_non_mp
        ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, 'POSTED', ?, ?, ?, ?,
-                 ?,?,?,?,?,?, ?,?,?,?,?, ?,?)`
+                 ?,?,?,?,?,?, ?,?,?,?,?, ?,?, ?)`
     )
     .run(
       orderNo, body.order_date, body.channel, body.customer || null, body.marketplace_ref || null,
@@ -272,7 +285,7 @@ const createOrder = db.transaction((body, userId) => {
       body.tracking_no || null, body.fulfillment_status, body.payout_date || null,
       r2(body.shipping_charged), body.buyer_name || null, body.buyer_account || null,
       body.buyer_phone || null, body.buyer_address || null,
-      body.buyer_city || null, body.lead_source || null
+      body.buyer_city || null, body.lead_source || null, calc.shipping_non_mp
     );
 
   const orderId = info.lastInsertRowid;
@@ -473,7 +486,8 @@ router.get('/', ah((req, res) => {
               COALESCE(SUM(o.cogs), 0)         AS cogs,
               COALESCE(SUM(o.total_fees), 0)   AS total_fees,
               COALESCE(SUM(o.gross_profit), 0) AS gross_profit,
-              COALESCE(SUM(o.net_profit), 0)   AS net_profit
+              COALESCE(SUM(o.net_profit), 0)   AS net_profit,
+              COALESCE(SUM(o.shipping_non_mp), 0) AS shipping_non_mp
          FROM sales_orders o
          LEFT JOIN shops sh ON sh.id = o.shop_id
          ${where}`
@@ -498,8 +512,12 @@ router.get('/', ah((req, res) => {
       // Di layar disebut Pendapatan Kotor: uang sebesar itu tidak pernah
       // benar-benar masuk rekening, karena marketplace memotong lebih dulu.
       netRevenue: r2(total.net_revenue),
-      // Yang benar-benar diterima setelah seluruh potongan.
-      netReceived: r2(total.net_revenue - total.total_fees),
+      // Ongkir non-marketplace: uang masuk yang bukan hasil menjual barang.
+      // Berdiri sendiri supaya omzet, ongkir, dan potongan bisa dibaca terpisah.
+      ongkirNonMp: r2(total.shipping_non_mp),
+      // Yang benar-benar masuk rekening: omzet dikurangi potongan, ditambah
+      // ongkir yang ikut ditransfer pembeli.
+      netReceived: r2(total.net_revenue - total.total_fees + total.shipping_non_mp),
       cogs: r2(total.cogs),
       totalFees: r2(total.total_fees),
       grossProfit: r2(total.gross_profit),
@@ -837,6 +855,7 @@ const KOLOM_ORDER = [
   { header: 'Biaya Gratis Ongkir XTRA', key: 'shipping_extra', width: 20, money: true },
   { header: 'Biaya Layanan', key: 'handling_fee', width: 15, money: true },
   { header: 'Ongkir Ditagih', key: 'shipping_charged', width: 14, money: true },
+  { header: 'Biaya Kirim Non MP', key: 'shipping_non_mp', width: 18, money: true },
   { header: 'Packing', key: 'packing_cost', width: 11, money: true },
   { header: 'Total Biaya', key: 'total_fees', width: 14, money: true },
   { header: 'Laba Bersih', key: 'net_profit', width: 14, money: true },

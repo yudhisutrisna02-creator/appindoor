@@ -153,6 +153,36 @@ function deleteJournalsBySource(source, sourceId) {
 }
 
 /**
+ * Menghapus satu jurnal berdasarkan id-nya sendiri.
+ *
+ * Dipakai catatan yang berdiri sendiri tanpa dokumen induk — pemindahan saldo
+ * antar rekening, misalnya. Menghapusnya lewat deleteJournalsBySource tidak
+ * bisa: source_id-nya kosong, sehingga satu penghapusan akan menyapu seluruh
+ * catatan sejenis sekaligus.
+ *
+ * Pemeriksaan kunci periodenya tetap sama, supaya jalur ini tidak menjadi
+ * celah untuk mengubah bulan yang sudah ditutup.
+ */
+function deleteJournalById(id) {
+  const j = db.prepare('SELECT id, entry_no, entry_date FROM journals WHERE id = ?').get(id);
+  if (!j) return 0;
+
+  const terkunci = db
+    .prepare('SELECT period FROM period_locks WHERE period = ?')
+    .get(j.entry_date.slice(0, 7));
+
+  if (terkunci) {
+    throw ruleError(
+      `${j.entry_no} tercatat pada bulan ${terkunci.period} yang sudah ditutup, jadi tidak bisa dihapus. ` +
+        'Buka kembali tutup bukunya bila perubahan ini memang diperlukan.',
+      409
+    );
+  }
+
+  return db.prepare('DELETE FROM journals WHERE id = ?').run(id).changes;
+}
+
+/**
  * Membangun baris jurnal untuk satu order penjualan.
  * Struktur (semua nominal positif):
  *   D  Kas/Bank atau Piutang Marketplace   (net_revenue - total_fees)
@@ -168,7 +198,10 @@ function buildSalesJournalLines(o) {
     ? (CHANNEL_MARKETPLACE.includes(o.channel) ? ACC.BANK : ACC.CASH)
     : ACC.AR_MARKETPLACE;
 
-  const settlement = r2(o.net_revenue - o.total_fees);
+  // Ongkir non-marketplace ikut masuk ke rekening bersama nilai ordernya,
+  // jadi ia menambah uang yang diterima — bukan mengurangi seperti biaya.
+  const ongkirNonMp = r2(o.shipping_non_mp || 0);
+  const settlement = r2(o.net_revenue - o.total_fees + ongkirNonMp);
 
   if (settlement >= 0) {
     lines.push({
@@ -198,6 +231,15 @@ function buildSalesJournalLines(o) {
 
   lines.push({ code: ACC.SALES, debit: 0, credit: r2(o.gross_sales), memo: 'Penjualan' });
 
+  // Dikreditkan ke akunnya sendiri, bukan digabung ke Penjualan: menggabungnya
+  // membuat omzet tampak lebih besar daripada barang yang benar-benar terjual.
+  if (ongkirNonMp > 0) {
+    lines.push({
+      code: ACC.SHIPPING_INCOME, debit: 0, credit: ongkirNonMp,
+      memo: 'Ongkir ditagih ke pembeli (non-marketplace)',
+    });
+  }
+
   if (r2(o.cogs) > 0) {
     lines.push({ code: ACC.COGS, debit: r2(o.cogs), credit: 0, memo: 'Harga pokok penjualan' });
     lines.push({ code: ACC.INVENTORY, debit: 0, credit: r2(o.cogs), memo: 'Pengurangan persediaan' });
@@ -214,6 +256,7 @@ module.exports = {
   accountById,
   postJournal,
   deleteJournalsBySource,
+  deleteJournalById,
   buildSalesJournalLines,
   pastikanTerbuka,
 };
