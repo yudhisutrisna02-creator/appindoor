@@ -43,6 +43,8 @@ export default function MutasiStok() {
       move_date: today(),
       qty: '',
       unit_cost: '',
+      batch_kode: '',
+      batch_kadaluarsa: '',
       payment: 'CASH',
       partner_id: '',
       ref: '',
@@ -66,6 +68,12 @@ export default function MutasiStok() {
         note: form.note || null,
       };
       if (form.move_type === 'IN' && form.unit_cost !== '') payload.unit_cost = Number(form.unit_cost);
+      // Hanya dikirim untuk produk yang memang dilacak per batch; peladen
+      // mengabaikannya untuk produk lain.
+      if (form.move_type === 'IN' && selected?.lacak_batch) {
+        payload.batch_kode = form.batch_kode || null;
+        payload.batch_kadaluarsa = form.batch_kadaluarsa || null;
+      }
 
       await api.post('/api/inventory/moves', payload);
       toast.success(`Mutasi stok ${TYPE_LABEL[form.move_type].toLowerCase()} tersimpan & jurnal terbentuk`);
@@ -185,6 +193,34 @@ export default function MutasiStok() {
               <Field label="HPP Terpakai">
                 <input className="input bg-slate-50" readOnly value={selected ? rupiah(selected.cost) : '-'} />
               </Field>
+            )}
+
+            {form.move_type === 'IN' && selected?.lacak_batch && (
+              <>
+                <Field
+                  label="Kode Batch *"
+                  hint="Wajib untuk produk berbatch — tanpa ini barangnya tidak bisa ditelusuri saat ada keluhan"
+                >
+                  <input
+                    className="input" required maxLength={60} placeholder="mis. B-2609-01"
+                    value={form.batch_kode}
+                    onChange={(e) => setForm({ ...form, batch_kode: e.target.value })}
+                  />
+                </Field>
+                <Field label="Tanggal Kadaluarsa" hint="Boleh dilengkapi menyusul di Master Produk">
+                  <input
+                    type="date" className="input" value={form.batch_kadaluarsa}
+                    onChange={(e) => setForm({ ...form, batch_kadaluarsa: e.target.value })}
+                  />
+                </Field>
+              </>
+            )}
+
+            {form.move_type === 'OUT' && selected?.lacak_batch && (
+              <p className="sm:col-span-2 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                Produk ini dilacak per batch. Barang diambil otomatis dari batch yang paling
+                dekat kedaluwarsa, jadi tidak perlu memilih batch-nya sendiri.
+              </p>
             )}
 
             {form.move_type === 'IN' && (

@@ -17,6 +17,7 @@ const { db } = require('../db');
 const { httpError } = require('../utils/http');
 const { r2, postJournal, deleteJournalsBySource, buildSalesJournalLines } = require('../utils/accounting');
 const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
+const BATCH = require('../utils/batch');
 
 const STATUS_PESANAN = require('../utils/status-pesanan').SEMUA;
 
@@ -138,6 +139,10 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
         const p = db.prepare('SELECT stock FROM products WHERE id = ?').get(it.product_id);
         db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(r2(p.stock + it.qty), it.product_id);
       }
+      // Batch dikembalikan bersama stoknya, lalu dipotong ulang di bawah
+      // mengikuti isi pesanan yang baru.
+      BATCH.kembalikan({ source: 'SALES', sourceId: orderId, tanggal: lama.order_date });
+
       db.prepare('DELETE FROM sales_items WHERE order_id = ?').run(orderId);
       db.prepare("DELETE FROM stock_moves WHERE source = 'SALES' AND source_id = ?").run(orderId);
 
@@ -219,6 +224,10 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
         const baru = r2(sebelum - it.qty);
         sisaStok.set(it.product_id, baru);
         db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(baru, it.product_id);
+        BATCH.keluar({
+          product_id: it.product_id, qty: it.qty, tanggal: gabung.order_date,
+          source: 'SALES', sourceId: orderId, note: `Order ${lama.order_no} (diubah)`, userId,
+        });
         insertMove.run(
           it.product_id, gabung.order_date, it.qty, it.cost, baru, lama.order_no, orderId,
           `Penjualan ${CHANNEL_LABEL[gabung.channel] || gabung.channel} (diubah)`, userId

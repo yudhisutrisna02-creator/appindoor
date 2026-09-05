@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Search, Package } from 'lucide-react';
 import { api } from '../lib/api';
 import KatalogVarian from '../components/KatalogVarian';
 import KoreksiStok from '../components/KoreksiStok';
+import PanelBatch from '../components/PanelBatch';
 import { PageHeader, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, pct } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -10,6 +11,7 @@ import { useAuth } from '../lib/auth';
 const EMPTY = {
   sku: '', name: '', category: 'Umum', unit: 'PCS',
   cost: 0, price: 0, min_stock: 0, supplier_id: null, active: true, needs_variant: false,
+  lacak_batch: false,
 };
 
 export default function Produk() {
@@ -53,6 +55,7 @@ export default function Produk() {
       price: Number(editing.price),
       min_stock: Number(editing.min_stock),
       needs_variant: !!editing.needs_variant,
+      lacak_batch: !!editing.lacak_batch,
       supplier_id: editing.supplier_id ? Number(editing.supplier_id) : null,
     };
     try {
@@ -266,6 +269,35 @@ export default function Produk() {
                 </div>
               )}
             </div>
+
+            {/* Pelacakan batch: hanya masuk akal untuk barang yang memang punya
+                masa aktif. Menyalakannya pada semua produk hanya menambah
+                pekerjaan mengetik kode batch tanpa manfaat apa pun. */}
+            <div className="sm:col-span-2">
+              <label className="flex items-start gap-2 rounded-xl bg-sky-50/70 px-3 py-2 text-sm text-slate-700 ring-1 ring-sky-200 dark:bg-sky-400/10">
+                <input
+                  type="checkbox" className="mt-0.5"
+                  checked={!!editing.lacak_batch}
+                  disabled={!!editing.id && !!editing.lacak_batch}
+                  onChange={(e) => setEditing({ ...editing, lacak_batch: e.target.checked })}
+                />
+                <span>
+                  <span className="font-medium text-slate-900">Lacak batch & tanggal kadaluarsa</span>
+                  <span className="block text-xs text-slate-600">
+                    Untuk produk yang punya masa aktif. Barang masuk wajib menyebut kode batch,
+                    dan yang lebih dulu kedaluwarsa otomatis keluar lebih dulu saat terjual.
+                    {editing.id && !editing.lacak_batch
+                      ? ' Stok yang ada sekarang akan menjadi batch pembuka.'
+                      : ''}
+                    {editing.id && editing.lacak_batch
+                      ? ' Sudah menyala — tidak bisa dimatikan agar riwayat batch pada order lama tidak hilang.'
+                      : ''}
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            {editing.id && editing.lacak_batch && <PanelBatch produk={editing} />}
 
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input type="checkbox" className="h-4 w-4 rounded" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} />

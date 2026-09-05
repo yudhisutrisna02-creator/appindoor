@@ -7,6 +7,7 @@ const { ah, parse, httpError, dateRange } = require('../utils/http');
 const { r2, ACC, postJournal, accountByCode } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
+const BATCH = require('../utils/batch');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -24,6 +25,11 @@ const productSchema = z.object({
   min_stock: z.number().nonnegative().default(0),
   // Produk yang dijual tanpa label dan baru diberi label pesanan pembeli.
   needs_variant: z.boolean().default(false),
+  // Menyalakan pelacakan batch. Sekali menyala tidak dimatikan lewat sini:
+  // mematikannya berarti membuang riwayat batch yang sudah terlanjur dipakai
+  // pada order-order lama, dan itu keputusan yang tidak boleh terjadi hanya
+  // karena satu centang tersenggol.
+  lacak_batch: z.boolean().optional(),
   supplier_id: z.number().int().positive().optional().nullable(),
   active: z.boolean().default(true),
 });
@@ -104,6 +110,13 @@ router.put('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
   ).run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock,
     p.supplier_id || null, p.active ? 1 : 0, p.needs_variant ? 1 : 0, existing.id);
 
+  // Menyalakan pelacakan sekaligus memasukkan stok yang sudah ada sebagai batch
+  // pembuka. Tanpa itu, sisa batch nol sementara stoknya ratusan, dan penjualan
+  // pertama langsung ditolak karena batch dianggap kosong.
+  if (p.lacak_batch && !existing.lacak_batch) {
+    BATCH.nyalakanPelacakan({ product_id: existing.id, tanggal: todayLocal(), userId: req.user.id });
+  }
+
   res.json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id) });
 }));
 
@@ -157,6 +170,14 @@ router.post('/products/:id(\\d+)/koreksi-stok', butuhIzin('gudang.produk'), ah((
 
     db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(stokBaru, produk.id);
 
+    // Batch ikut disesuaikan supaya sisanya tidak lebih besar daripada stok
+    // yang sebenarnya ada — kalau tidak, laporan kadaluarsa memperingatkan
+    // barang yang sudah tidak ada.
+    BATCH.sesuaikan({
+      product_id: produk.id, selisih, tanggal, source: 'KOREKSI', sourceId: produk.id,
+      note: body.note, userId: req.user.id,
+    });
+
     db.prepare(
       `INSERT INTO stock_moves
          (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, source_id, note, user_id)
@@ -209,6 +230,159 @@ router.post('/products/:id(\\d+)/koreksi-stok', butuhIzin('gudang.produk'), ah((
     product: db.prepare('SELECT * FROM products WHERE id = ?').get(hasil.produk.id),
   });
 }));
+
+// ==================================================================
+// BATCH & TANGGAL KADALUARSA
+// ==================================================================
+const batchSchema = z.object({
+  kode: z.string().trim().min(1, 'kode batch wajib diisi').max(60),
+  tanggal_kadaluarsa: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  tanggal_produksi: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  catatan: z.string().trim().max(200).optional().nullable(),
+});
+
+/** GET /api/inventory/products/:id/batch — daftar batch satu produk. */
+router.get('/products/:id(\\d+)/batch', ah((req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT * FROM product_batches
+        WHERE product_id = ?
+        ORDER BY CASE WHEN tanggal_kadaluarsa IS NULL THEN 1 ELSE 0 END,
+                 tanggal_kadaluarsa ASC, id ASC`
+    )
+    .all(req.params.id);
+
+  const produk = db.prepare('SELECT id, name, unit, stock, lacak_batch FROM products WHERE id = ?')
+    .get(req.params.id);
+
+  res.json({
+    produk,
+    rows,
+    sisaBatch: BATCH.sisaBatch(req.params.id),
+    // Ditampilkan supaya selisih antara stok dan sisa batch ketahuan langsung
+    // di layar, bukan baru saat penjualan ditolak.
+    cocok: !produk || !produk.lacak_batch
+      || Math.abs(BATCH.sisaBatch(req.params.id) - r2(produk.stock)) < 0.01,
+  });
+}));
+
+/**
+ * PUT /api/inventory/batch/:id — melengkapi keterangan batch.
+ *
+ * Yang boleh diubah hanya keterangannya: kode, tanggal produksi, tanggal
+ * kadaluarsa, catatan. Jumlahnya TIDAK, karena jumlah batch dibentuk oleh
+ * pergerakan barang — mengetiknya langsung akan membuat sisa batch berbeda
+ * dari stok produknya tanpa ada mutasi yang menjelaskan.
+ */
+router.put('/batch/:id(\\d+)', butuhIzin('gudang.produk'), ah((req, res) => {
+  const b = parse(batchSchema, req.body);
+  const ada = db.prepare('SELECT * FROM product_batches WHERE id = ?').get(req.params.id);
+  if (!ada) throw httpError(404, 'Batch tidak ditemukan');
+
+  const kembar = db
+    .prepare('SELECT id FROM product_batches WHERE product_id = ? AND kode = ? AND id <> ?')
+    .get(ada.product_id, b.kode, ada.id);
+  if (kembar) throw httpError(409, `Kode batch ${b.kode} sudah dipakai pada produk ini`);
+
+  db.prepare(
+    `UPDATE product_batches
+        SET kode = ?, tanggal_kadaluarsa = ?, tanggal_produksi = ?, catatan = ?
+      WHERE id = ?`
+  ).run(b.kode, b.tanggal_kadaluarsa || null, b.tanggal_produksi || null, b.catatan || null, ada.id);
+
+  res.json({ ok: true, batch: db.prepare('SELECT * FROM product_batches WHERE id = ?').get(ada.id) });
+}));
+
+/** GET /api/inventory/batch/:id/kartu — riwayat pergerakan satu batch. */
+router.get('/batch/:id(\\d+)/kartu', ah((req, res) => {
+  const batch = db.prepare('SELECT * FROM product_batches WHERE id = ?').get(req.params.id);
+  if (!batch) throw httpError(404, 'Batch tidak ditemukan');
+
+  const rows = db
+    .prepare(
+      `SELECT m.*, u.name AS user_name
+         FROM batch_moves m LEFT JOIN users u ON u.id = m.user_id
+        WHERE m.batch_id = ? ORDER BY m.move_date, m.id`
+    )
+    .all(req.params.id);
+
+  res.json({ batch, rows });
+}));
+
+/**
+ * Pengambil daftar kadaluarsa — dipakai layar, Pusat Perhatian, dan unduhan.
+ *
+ * Batang ukurnya hari, bukan bulan: pupuk hayati yang tinggal tiga minggu perlu
+ * diperlakukan berbeda dari yang tinggal tiga bulan, dan pembulatan ke bulan
+ * menyembunyikan bedanya.
+ */
+function ambilKadaluarsa(req) {
+  const ambang = Number((req && req.query && req.query.hari) || 90);
+
+  const rows = db
+    .prepare(
+      `SELECT b.*, p.sku, p.name AS product_name, p.unit,
+              CAST(julianday(b.tanggal_kadaluarsa) - julianday('now') AS INTEGER) AS sisa_hari
+         FROM product_batches b
+         JOIN products p ON p.id = b.product_id
+        WHERE b.qty_sisa > 0 AND p.active = 1
+        ORDER BY CASE WHEN b.tanggal_kadaluarsa IS NULL THEN 1 ELSE 0 END,
+                 b.tanggal_kadaluarsa ASC`
+    )
+    .all()
+    .map((b) => ({
+      ...b,
+      nilai: r2(b.qty_sisa * b.unit_cost),
+      status: b.tanggal_kadaluarsa === null
+        ? 'TANPA_TANGGAL'
+        : b.sisa_hari < 0 ? 'KEDALUWARSA'
+          : b.sisa_hari <= ambang ? 'MENDEKATI' : 'AMAN',
+    }));
+
+  const per = (st) => rows.filter((b) => b.status === st);
+  const nilai = (arr) => r2(arr.reduce((s, b) => s + b.nilai, 0));
+
+  return {
+    ambangHari: ambang,
+    rows,
+    ringkas: {
+      kedaluwarsa: { batch: per('KEDALUWARSA').length, nilai: nilai(per('KEDALUWARSA')) },
+      mendekati: { batch: per('MENDEKATI').length, nilai: nilai(per('MENDEKATI')) },
+      tanpaTanggal: { batch: per('TANPA_TANGGAL').length, nilai: nilai(per('TANPA_TANGGAL')) },
+      aman: { batch: per('AMAN').length, nilai: nilai(per('AMAN')) },
+    },
+  };
+}
+
+router.get('/kadaluarsa', ah((req, res) => res.json(ambilKadaluarsa(req))));
+
+daftarkanEkspor(router, {
+  path: '/kadaluarsa',
+  judul: 'Batch Mendekati Kadaluarsa',
+  kolom: [
+    { header: 'SKU', key: 'sku', width: 16 },
+    { header: 'Produk', key: 'product_name', width: 34 },
+    { header: 'Kode Batch', key: 'kode', width: 18 },
+    { header: 'Kadaluarsa', key: 'tanggal_kadaluarsa', width: 14 },
+    { header: 'Sisa Hari', key: 'sisa_hari', width: 11 },
+    { header: 'Sisa Qty', key: 'qty_sisa', width: 11 },
+    { header: 'Satuan', key: 'unit', width: 9 },
+    { header: 'Nilai', key: 'nilai', width: 16, money: true },
+    { header: 'Status', key: 'status', width: 15 },
+  ],
+  ambil: (req) => {
+    const d = ambilKadaluarsa(req);
+    return {
+      rows: d.rows,
+      subtitle: `Batch yang masih bersisa, diurutkan dari yang paling dekat kedaluwarsa`,
+      meta: [
+        ['Sudah kedaluwarsa', `${d.ringkas.kedaluwarsa.batch} batch`],
+        ['Mendekati kadaluarsa', `${d.ringkas.mendekati.batch} batch`],
+        ['Belum ada tanggal', `${d.ringkas.tanpaTanggal.batch} batch`],
+      ],
+    };
+  },
+});
 
 // ==================================================================
 // KATALOG VARIAN
@@ -315,6 +489,10 @@ const moveSchema = z.object({
   product_id: z.number().int().positive(),
   move_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),
   move_type: z.enum(['IN', 'OUT']),
+  // Hanya dipakai produk yang dilacak per batch; diabaikan untuk yang tidak.
+  batch_kode: z.string().trim().max(60).optional().nullable(),
+  batch_kadaluarsa: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  batch_produksi: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   qty: z.number().positive('jumlah harus lebih dari 0'),
   unit_cost: z.number().nonnegative().optional(),
   // Sumber dana pembelian (khusus IN) / akun beban (khusus OUT)
@@ -351,6 +529,12 @@ const applyMove = db.transaction((body, userId) => {
     const inValue = qty * unitCost;
     const avgCost = newStock > 0 ? r2((oldValue + inValue) / newStock) : unitCost;
     db.prepare('UPDATE products SET stock = ?, cost = ? WHERE id = ?').run(newStock, avgCost, product.id);
+
+    BATCH.masuk({
+      product_id: product.id, qty, unit_cost: unitCost, tanggal: body.move_date,
+      kode: body.batch_kode, kadaluarsa: body.batch_kadaluarsa, produksi: body.batch_produksi,
+      catatan: body.note, source: 'STOCK', userId,
+    });
   } else {
     unitCost = product.cost;
     if (qty > product.stock) {
@@ -358,6 +542,11 @@ const applyMove = db.transaction((body, userId) => {
     }
     newStock = r2(product.stock - qty);
     db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, product.id);
+
+    BATCH.keluar({
+      product_id: product.id, qty, tanggal: body.move_date,
+      source: 'STOCK', note: body.note, userId,
+    });
   }
 
   const info = db
@@ -707,6 +896,10 @@ const createOpname = db.transaction((body, userId) => {
 
     if (diffQty !== 0) {
       db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(physicalQty, product.id);
+      BATCH.sesuaikan({
+        product_id: product.id, selisih: diffQty, tanggal: body.opname_date,
+        source: 'OPNAME', sourceId: opnameId, note: line.note || 'Selisih opname', userId,
+      });
       db.prepare(
         `INSERT INTO stock_moves
            (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, source_id, note, user_id)
@@ -788,3 +981,6 @@ router.get('/opname/:id', ah((req, res) => {
 // diterima — stok, HPP rata-rata, dan jurnalnya tidak boleh punya versi kedua.
 module.exports = router;
 module.exports.applyMove = applyMove;
+// Dipakai Pusat Perhatian supaya peringatan kadaluarsa dan halamannya
+// menghitung dari fungsi yang sama, bukan dua query yang bisa berbeda.
+module.exports.ambilKadaluarsa = ambilKadaluarsa;

@@ -8,6 +8,7 @@ const { r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines } =
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 const STATUS = require('../utils/status-pesanan');
+const BATCH = require('../utils/batch');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -319,6 +320,12 @@ const createOrder = db.transaction((body, userId) => {
     const newStock = r2(sebelum - it.qty);
     sisaStok.set(it.product_id, newStock);
     db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, it.product_id);
+
+    // Batch dipotong FEFO — yang lebih dulu kedaluwarsa keluar lebih dulu.
+    BATCH.keluar({
+      product_id: it.product_id, qty: it.qty, tanggal: body.order_date,
+      source: 'SALES', sourceId: orderId, note: `Order ${orderNo}`, userId,
+    });
     insertMove.run(
       it.product_id, body.order_date, it.qty, it.cost, newStock, orderNo, orderId,
       `Penjualan ${CHANNEL_LABEL[body.channel]}`, userId
@@ -590,6 +597,11 @@ const cancelOrder = db.transaction((orderId) => {
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(it.product_id);
     db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(r2(product.stock + it.qty), it.product_id);
   }
+
+  // Dikembalikan ke batch asalnya lewat catatan batch_moves, bukan ke batch
+  // yang kebetulan paling dekat kedaluwarsanya — menebak akan membuat barang
+  // "pindah" batch hanya karena ordernya dibatalkan.
+  BATCH.kembalikan({ source: 'SALES', sourceId: orderId, tanggal: order.order_date });
 
   db.prepare("DELETE FROM stock_moves WHERE source = 'SALES' AND source_id = ?").run(orderId);
   deleteJournalsBySource('SALES', orderId);
@@ -978,6 +990,15 @@ const createReturn = db.transaction((body, userId) => {
       `INSERT INTO stock_moves (product_id, move_date, move_type, qty, unit_cost, balance_after, ref, source, source_id, note, user_id)
        VALUES (?,?,'IN',?,?,?,?, 'RETURN', ?, 'Retur masuk gudang', ?)`
     ).run(product.id, body.return_date, qty, product.cost, newStock, returnNo, info.lastInsertRowid, userId);
+
+    // Barang retur masuk ke batch tersendiri: ia sudah pernah keluar gudang,
+    // dan mencampurnya ke batch asal membuat riwayat "pernah dikirim ke
+    // pembeli" hilang tepat pada barang yang paling perlu diperiksa.
+    BATCH.masuk({
+      product_id: product.id, qty, unit_cost: product.cost, tanggal: body.return_date,
+      kode: `RETUR-${returnNo}`, catatan: 'Barang retur dari pembeli',
+      source: 'RETURN', sourceId: info.lastInsertRowid, userId,
+    });
 
     // Barang kembali ke gudang → HPP dibalik
     lines.push({ code: ACC.INVENTORY, debit: costValue, credit: 0, memo: 'Persediaan kembali' });

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -29,6 +29,7 @@ import LaporanKeuangan from './pages/LaporanKeuangan';
 import Pengaturan from './pages/Pengaturan';
 import KasMasukKeluar from './pages/KasMasukKeluar';
 import PindahSaldo from './pages/PindahSaldo';
+import Kadaluarsa from './pages/Kadaluarsa';
 import UtangPiutang from './pages/UtangPiutang';
 import Mitra from './pages/Mitra';
 import Retur from './pages/Retur';
@@ -81,6 +82,7 @@ const NAV = [
       { to: '/gudang/produk', label: 'Master Produk', icon: Package, izin: 'gudang.lihat' },
       { to: '/gudang/mutasi', label: 'Mutasi Stok', icon: ArrowLeftRight, izin: 'gudang.lihat' },
       { to: '/gudang/opname', label: 'Stok Opname', icon: ClipboardCheck, izin: 'gudang.opname' },
+      { to: '/gudang/kadaluarsa', label: 'Batch & Kadaluarsa', icon: CalendarX2, izin: 'gudang.lihat' },
       { to: '/gudang/kinerja', label: 'Kinerja Produk', icon: PackageSearch, izin: 'gudang.kinerja' },
     ],
   },
@@ -464,6 +466,7 @@ export default function App() {
         <Route path="/keuangan/rekening" element={<Dijaga izin="keuangan.lihat"><Rekening /></Dijaga>} />
         <Route path="/keuangan/kas" element={<Dijaga izin="keuangan.kas"><KasMasukKeluar /></Dijaga>} />
         <Route path="/keuangan/pindah" element={<Dijaga izin="keuangan.kas"><PindahSaldo /></Dijaga>} />
+        <Route path="/gudang/kadaluarsa" element={<Dijaga izin="gudang.lihat"><Kadaluarsa /></Dijaga>} />
         <Route path="/keuangan/utang-piutang" element={<Dijaga izin="keuangan.lihat"><UtangPiutang /></Dijaga>} />
         <Route path="/keuangan/laporan" element={<Dijaga izin="keuangan.lihat"><LaporanKeuangan /></Dijaga>} />
         <Route path="/keuangan/jurnal" element={<Dijaga izin="keuangan.lihat"><Jurnal /></Dijaga>} />

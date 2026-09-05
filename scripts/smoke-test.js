@@ -3608,6 +3608,164 @@ async function main() {
     tolakUtangUsaha === 422, `status ${tolakUtangUsaha}`);
 
 
+  console.log('\n42. Batch & tanggal kadaluarsa');
+
+  const skuBat = `BAT-${Date.now()}`;
+  const prodBat = (await call('POST', '/api/inventory/products', {
+    sku: skuBat, name: 'Hayati Uji Batch', cost: 10000, price: 30000, unit: 'BOTOL',
+  })).product;
+
+  // Stok masuk lebih dulu, baru pelacakan dinyalakan — persis keadaan nyatanya:
+  // produk sudah dipakai berbulan-bulan sebelum batch mulai dilacak.
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodBat.id, move_date: today, move_type: 'IN',
+    qty: 20, unit_cost: 10000, payment: 'CASH',
+  });
+
+  const nyala = await call('PUT', `/api/inventory/products/${prodBat.id}`, {
+    sku: skuBat, name: 'Hayati Uji Batch', cost: 10000, price: 30000, unit: 'BOTOL',
+    lacak_batch: true,
+  });
+  check('pelacakan batch bisa dinyalakan per produk', nyala.product.lacak_batch === 1);
+
+  const bat1 = await call('GET', `/api/inventory/products/${prodBat.id}/batch`);
+  check('stok yang sudah ada jadi batch pembuka, bukan nol',
+    bat1.rows.length === 1 && bat1.rows[0].qty_sisa === 20,
+    JSON.stringify(bat1.rows.map((b) => [b.kode, b.qty_sisa])));
+  check('sisa batch cocok dengan stok produk', bat1.cocok === true,
+    `stok ${bat1.produk.stock} vs batch ${bat1.sisaBatch}`);
+
+  // Dua batch baru dengan kadaluarsa berbeda — yang datang BELAKANGAN justru
+  // lebih cepat kedaluwarsa, supaya terbukti FEFO dipakai, bukan FIFO.
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodBat.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 10000, payment: 'CASH',
+    batch_kode: 'B-LAMBAT', batch_kadaluarsa: '2027-12-31',
+  });
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodBat.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 10000, payment: 'CASH',
+    batch_kode: 'B-CEPAT', batch_kadaluarsa: '2026-10-01',
+  });
+
+  const bat2 = await call('GET', `/api/inventory/products/${prodBat.id}/batch`);
+  check('batch baru tercatat beserta tanggal kadaluarsanya', bat2.rows.length === 3);
+  check('batch diurutkan dari yang paling dekat kedaluwarsa',
+    bat2.rows[0].kode === 'B-CEPAT',
+    bat2.rows.map((b) => b.kode).join(' > '));
+
+  let tolakTanpaKode = 0;
+  try {
+    await call('POST', '/api/inventory/moves', {
+      product_id: prodBat.id, move_date: today, move_type: 'IN',
+      qty: 5, unit_cost: 10000, payment: 'CASH',
+    });
+  } catch (err) { tolakTanpaKode = err.status; }
+  check('barang masuk tanpa kode batch ditolak untuk produk terlacak',
+    tolakTanpaKode === 422, `status ${tolakTanpaKode}`);
+
+  // Inti fiturnya: penjualan memotong batch yang lebih dulu kedaluwarsa.
+  const oBat = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Pembeli Batch',
+    items: [{ product_id: prodBat.id, qty: 12, price: 30000 }],
+    payment_status: 'PAID',
+  })).order;
+
+  const bat3 = await call('GET', `/api/inventory/products/${prodBat.id}/batch`);
+  const cari = (kode) => bat3.rows.find((b) => b.kode === kode) || {};
+  check('batch paling dekat kedaluwarsa dipotong lebih dulu (FEFO)',
+    cari('B-CEPAT').qty_sisa === 0,
+    `B-CEPAT sisa ${cari('B-CEPAT').qty_sisa}`);
+  check('sisanya diambil dari batch bertanggal berikutnya',
+    cari('B-LAMBAT').qty_sisa === 8,
+    `B-LAMBAT sisa ${cari('B-LAMBAT').qty_sisa}`);
+  check('batch tanpa tanggal kadaluarsa disisakan paling akhir',
+    cari('AWAL').qty_sisa === 20,
+    `AWAL sisa ${cari('AWAL').qty_sisa}`);
+  check('sisa batch tetap cocok dengan stok setelah penjualan', bat3.cocok === true,
+    `stok ${bat3.produk.stock} vs batch ${bat3.sisaBatch}`);
+
+  // Pembatalan harus mengembalikan ke batch ASALNYA, bukan menebak.
+  await call('DELETE', `/api/sales/${oBat.id}`);
+  const bat4 = await call('GET', `/api/inventory/products/${prodBat.id}/batch`);
+  const cari4 = (kode) => bat4.rows.find((b) => b.kode === kode) || {};
+  check('pembatalan mengembalikan barang ke batch asalnya',
+    cari4('B-CEPAT').qty_sisa === 10 && cari4('B-LAMBAT').qty_sisa === 10,
+    `B-CEPAT ${cari4('B-CEPAT').qty_sisa}, B-LAMBAT ${cari4('B-LAMBAT').qty_sisa}`);
+  check('sisa batch cocok lagi dengan stok setelah pembatalan', bat4.cocok === true,
+    `stok ${bat4.produk.stock} vs batch ${bat4.sisaBatch}`);
+
+  // Koreksi stok juga harus menyeret batch, kalau tidak laporan kadaluarsa
+  // memperingatkan barang yang sudah tidak ada.
+  await call('POST', `/api/inventory/products/${prodBat.id}/koreksi-stok`, {
+    stock: 35, move_date: today, note: 'Uji koreksi pada produk terlacak batch',
+  });
+  const bat5 = await call('GET', `/api/inventory/products/${prodBat.id}/batch`);
+  check('koreksi stok ikut menyesuaikan batch', bat5.cocok === true,
+    `stok ${bat5.produk.stock} vs batch ${bat5.sisaBatch}`);
+
+  // Melengkapi keterangan batch.
+  const idAwal = bat5.rows.find((b) => b.kode === 'AWAL').id;
+  const lengkapi = await call('PUT', `/api/inventory/batch/${idAwal}`, {
+    kode: 'AWAL-2026', tanggal_kadaluarsa: '2026-09-20',
+    catatan: 'Dilengkapi setelah dicek fisik',
+  });
+  check('keterangan batch bisa dilengkapi',
+    lengkapi.batch.kode === 'AWAL-2026' && lengkapi.batch.tanggal_kadaluarsa === '2026-09-20');
+
+  // Diperiksa pada batch yang benar-benar keluar-masuk: masuk, dipotong
+  // penjualan, lalu dikembalikan saat order dibatalkan.
+  const idCepat = bat5.rows.find((b) => b.kode === 'B-CEPAT').id;
+  const kartuBatch = await call('GET', `/api/inventory/batch/${idCepat}/kartu`);
+  check('setiap pergerakan batch punya riwayatnya', kartuBatch.rows.length >= 3,
+    `${kartuBatch.rows.length} baris: ${kartuBatch.rows.map((r) => r.qty).join(' ')}`);
+  check('riwayat batch mencatat arah pergerakannya',
+    kartuBatch.rows.some((r) => r.qty > 0) && kartuBatch.rows.some((r) => r.qty < 0));
+
+  // Pemantauan kadaluarsa.
+  const exp = await call('GET', '/api/inventory/kadaluarsa?hari=90');
+  const baris = exp.rows.filter((b) => b.sku === skuBat);
+  check('batch muncul di pemantauan kadaluarsa', baris.length >= 2,
+    `${baris.length} batch`);
+  check('status kadaluarsa dihitung dari sisa hari',
+    baris.some((b) => ['MENDEKATI', 'KEDALUWARSA'].includes(b.status)),
+    baris.map((b) => `${b.kode}=${b.status}(${b.sisa_hari}h)`).join(' '));
+  check('ringkasan kadaluarsa memuat nilai rupiahnya',
+    typeof exp.ringkas.mendekati.nilai === 'number'
+    && typeof exp.ringkas.kedaluwarsa.nilai === 'number');
+
+  const unduhExp = await fetch(
+    `${BASE}/api/inventory/kadaluarsa/export/excel`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  check('daftar kadaluarsa bisa diunduh', unduhExp.status === 200,
+    `status ${unduhExp.status}`);
+
+  // Produk yang TIDAK dilacak sama sekali tidak boleh terpengaruh.
+  const skuBiasa = `NOB-${Date.now()}`;
+  const prodBiasa = (await call('POST', '/api/inventory/products', {
+    sku: skuBiasa, name: 'Produk Tanpa Batch', cost: 5000, price: 15000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodBiasa.id, move_date: today, move_type: 'IN',
+    qty: 50, unit_cost: 5000, payment: 'CASH',
+  });
+  const oBiasa = await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', customer: 'Tanpa Batch',
+    items: [{ product_id: prodBiasa.id, qty: 5, price: 15000 }],
+  });
+  check('produk tanpa pelacakan batch tetap bisa dijual seperti biasa',
+    oBiasa.ok === true);
+  const batBiasa = await call('GET', `/api/inventory/products/${prodBiasa.id}/batch`);
+  check('produk tanpa pelacakan tidak dibuatkan batch', batBiasa.rows.length === 0);
+
+  const neracaBat = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang setelah seluruh alur batch',
+    Math.abs(neracaBat.totalDebit - neracaBat.totalCredit) < 0.01,
+    `${neracaBat.totalDebit} vs ${neracaBat.totalCredit}`);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

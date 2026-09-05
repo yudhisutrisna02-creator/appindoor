@@ -151,6 +151,53 @@ function semaiKatalogVarian(db, applied) {
 }
 
 /**
+ * Tabel batch produk beserta kartu pergerakannya.
+ *
+ * qty_sisa disimpan, bukan dihitung ulang dari batch_moves setiap kali dibaca —
+ * mengikuti pola yang sama dengan products.stock. batch_moves-lah yang
+ * menjelaskan bagaimana angka itu terbentuk, sehingga selisih di antara
+ * keduanya selalu bisa ditelusuri.
+ */
+function buatTabelBatch(db, applied) {
+  if (tableExists(db, 'product_batches')) return;
+
+  db.exec(`
+    CREATE TABLE product_batches (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id         INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      kode               TEXT NOT NULL,
+      tanggal_produksi   TEXT,
+      tanggal_kadaluarsa TEXT,
+      qty_awal           REAL NOT NULL DEFAULT 0,
+      qty_sisa           REAL NOT NULL DEFAULT 0,
+      unit_cost          REAL NOT NULL DEFAULT 0,
+      catatan            TEXT,
+      created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(product_id, kode)
+    );
+    CREATE INDEX idx_batch_produk ON product_batches(product_id);
+    CREATE INDEX idx_batch_exp    ON product_batches(tanggal_kadaluarsa);
+
+    CREATE TABLE batch_moves (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id   INTEGER NOT NULL REFERENCES product_batches(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL,
+      move_date  TEXT NOT NULL,
+      qty        REAL NOT NULL,
+      source     TEXT NOT NULL DEFAULT 'MANUAL',
+      source_id  INTEGER,
+      note       TEXT,
+      user_id    INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_bmove_batch  ON batch_moves(batch_id);
+    CREATE INDEX idx_bmove_sumber ON batch_moves(source, source_id);
+  `);
+
+  applied.push('tabel product_batches & batch_moves');
+}
+
+/**
  * Menjalankan seluruh migrasi. Dipanggil sekali saat boot, setelah schema.sql.
  * @returns {string[]} daftar perubahan yang benar-benar diterapkan
  */
@@ -199,6 +246,14 @@ function runMigrations(db) {
   // rekening bersama nilai ordernya, jadi ia menambah penerimaan — bukan biaya,
   // meski tim menyebutnya begitu dalam percakapan sehari-hari.
   addColumn(db, 'sales_orders', 'shipping_non_mp', 'REAL NOT NULL DEFAULT 0', applied);
+
+  // --- Batch & tanggal kadaluarsa ---
+  // Produk hayati punya masa aktif: stok yang cuma satu angka tidak bisa
+  // menjawab 'mana yang mau kedaluwarsa'. Pelacakannya dinyalakan per produk,
+  // bukan menyeluruh, supaya produk yang memang tidak kedaluwarsa tidak
+  // dibebani pencatatan batch yang tidak berguna baginya.
+  addColumn(db, 'products', 'lacak_batch', 'INTEGER NOT NULL DEFAULT 0', applied);
+  buatTabelBatch(db, applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
   // --- Data tim yang lebih lengkap ---

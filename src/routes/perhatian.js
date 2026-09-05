@@ -28,6 +28,7 @@ const { ambilPencairan } = require('./pencairan');
 const { ambilKinerja } = require('./kinerja');
 const { rekeningKas } = require('./cashflow');
 const { ambilPencapaian } = require('./target');
+const { ambilKadaluarsa } = require('./inventory');
 const { daftar: daftarPembelian } = require('./pembelian');
 const { daftarCadangan } = require('../utils/cadangan');
 
@@ -244,6 +245,46 @@ function kumpulkan(req) {
   });
 
   // ---- Pembelian ----
+  // ---- Batch mendekati kadaluarsa ----
+  // Ditaruh di sini, bukan hanya di halamannya sendiri: barang kedaluwarsa
+  // adalah kerugian yang sudah terjadi dan tidak bisa ditarik kembali, jadi ia
+  // harus menghampiri orangnya — bukan menunggu ada yang ingat membukanya.
+  coba('kadaluarsa', () => {
+    if (!boleh('gudang.lihat')) return;
+    const d = ambilKadaluarsa({ query: { hari: 60 } });
+
+    if (d.ringkas.kedaluwarsa.batch > 0) {
+      tambah({
+        kunci: 'batch-kedaluwarsa',
+        tingkat: 'mendesak',
+        judul: `${d.ringkas.kedaluwarsa.batch} batch sudah kedaluwarsa`,
+        rincian:
+          `Senilai ${d.ringkas.kedaluwarsa.nilai.toLocaleString('id-ID')} rupiah masih tercatat sebagai stok. ` +
+          'Barang ini tidak boleh dijual — keluarkan lewat koreksi stok agar nilainya tidak ikut terhitung.',
+        jumlah: d.ringkas.kedaluwarsa.batch,
+        tautan: '/gudang/kadaluarsa',
+        tombol: 'Lihat',
+        izin: 'gudang.lihat',
+      });
+    }
+
+    if (d.ringkas.mendekati.batch > 0) {
+      const terdekat = d.rows.filter((b) => b.status === 'MENDEKATI').slice(0, 3);
+      tambah({
+        kunci: 'batch-mendekati',
+        tingkat: 'perhatian',
+        judul: `${d.ringkas.mendekati.batch} batch kedaluwarsa dalam 60 hari`,
+        rincian:
+          `Senilai ${d.ringkas.mendekati.nilai.toLocaleString('id-ID')} rupiah. Dahulukan menjualnya: ` +
+          terdekat.map((b) => `${b.product_name} (${b.sisa_hari} hari)`).join(', '),
+        jumlah: d.ringkas.mendekati.batch,
+        tautan: '/gudang/kadaluarsa',
+        tombol: 'Lihat',
+        izin: 'gudang.lihat',
+      });
+    }
+  });
+
   coba('pembelian', () => {
     if (!boleh('pembelian.lihat')) return;
     const d = daftarPembelian(permintaan(req, { from: '2000-01-01', to: '2999-12-31' }));
