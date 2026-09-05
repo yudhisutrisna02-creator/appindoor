@@ -198,6 +198,50 @@ function buatTabelBatch(db, applied) {
 }
 
 /**
+ * Tabel rekening koran untuk rekonsiliasi bank.
+ *
+ * Baris rekening koran disimpan apa adanya, termasuk yang tidak cocok dengan
+ * catatan mana pun. Membuang yang tidak cocok berarti membuang justru bukti
+ * yang paling dibutuhkan — selisih antara bank dan catatan hanya bisa
+ * dijelaskan kalau kedua sisinya masih utuh.
+ */
+function buatTabelRekonsiliasi(db, applied) {
+  if (tableExists(db, 'bank_statements')) return;
+
+  db.exec(`
+    CREATE TABLE bank_statements (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_code TEXT NOT NULL,
+      nama_berkas  TEXT,
+      periode_dari TEXT NOT NULL,
+      periode_sampai TEXT NOT NULL,
+      saldo_akhir  REAL,
+      catatan      TEXT,
+      user_id      INTEGER REFERENCES users(id),
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE bank_statement_lines (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      statement_id INTEGER NOT NULL REFERENCES bank_statements(id) ON DELETE CASCADE,
+      tanggal      TEXT NOT NULL,
+      keterangan   TEXT,
+      masuk        REAL NOT NULL DEFAULT 0,
+      keluar       REAL NOT NULL DEFAULT 0,
+      -- Baris jurnal yang dianggap sepadan. NULL berarti belum ketemu
+      -- pasangannya, dan itu justru informasi yang dicari.
+      journal_line_id INTEGER REFERENCES journal_lines(id) ON DELETE SET NULL,
+      cara_cocok   TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_bsl_statement ON bank_statement_lines(statement_id);
+    CREATE INDEX idx_bsl_jurnal    ON bank_statement_lines(journal_line_id);
+  `);
+
+  applied.push('tabel bank_statements & bank_statement_lines');
+}
+
+/**
  * Menjalankan seluruh migrasi. Dipanggil sekali saat boot, setelah schema.sql.
  * @returns {string[]} daftar perubahan yang benar-benar diterapkan
  */
@@ -254,6 +298,7 @@ function runMigrations(db) {
   // dibebani pencatatan batch yang tidak berguna baginya.
   addColumn(db, 'products', 'lacak_batch', 'INTEGER NOT NULL DEFAULT 0', applied);
   buatTabelBatch(db, applied);
+  buatTabelRekonsiliasi(db, applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
   // --- Data tim yang lebih lengkap ---

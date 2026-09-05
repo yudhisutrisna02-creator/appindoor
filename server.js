@@ -160,6 +160,7 @@ app.use('/api/pembelian', halaman('pembelian.lihat'), require('./src/routes/pemb
 app.use('/api/partners', halaman('mitra.lihat'), require('./src/routes/partners').router);
 app.use('/api/cashflow', halaman('keuangan.lihat'), require('./src/routes/cashflow'));
 app.use('/api/proyeksi', halaman('keuangan.lihat'), require('./src/routes/proyeksi'));
+app.use('/api/rekonsiliasi', halaman('keuangan.kas'), require('./src/routes/rekonsiliasi'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/peran', require('./src/routes/peran'));
 // Identitas perusahaan boleh dibaca sebelum masuk — halaman login perlu logonya.

@@ -59,6 +59,8 @@ async function masukSebagai(email, sandiAwal) {
   token = simpan;
   return lagi.token;
 }
+const r2Uji = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 function check(label, condition, detail = '') {
   if (condition) {
     passed += 1;
@@ -3764,6 +3766,137 @@ async function main() {
   check('neraca tetap seimbang setelah seluruh alur batch',
     Math.abs(neracaBat.totalDebit - neracaBat.totalCredit) < 0.01,
     `${neracaBat.totalDebit} vs ${neracaBat.totalCredit}`);
+
+
+  console.log('\n43. Rekonsiliasi bank');
+
+  // Tiga catatan kas di rekening bank, jadi ada yang bisa dicocokkan.
+  const hariRek = today;
+  for (const [nilai, ket] of [[750000, 'Uji rekon A'], [1250000, 'Uji rekon B']]) {
+    await call('POST', '/api/cashflow/entries', {
+      entry_date: hariRek, direction: 'IN', category_code: '4900', cash_code: '1010',
+      amount: nilai, description: ket,
+    });
+  }
+  await call('POST', '/api/cashflow/entries', {
+    entry_date: hariRek, direction: 'OUT', category_code: '6120', cash_code: '1010',
+    amount: 333000, description: 'Uji rekon listrik',
+  });
+
+  const impor = await call('POST', '/api/rekonsiliasi/impor', {
+    account_code: '1010', nama_berkas: 'rekening-koran-uji.csv',
+    rows: [
+      { tanggal: hariRek, keterangan: 'TRANSFER MASUK A', masuk: 750000, keluar: 0 },
+      { tanggal: hariRek, keterangan: 'TRANSFER MASUK B', masuk: 1250000, keluar: 0 },
+      { tanggal: hariRek, keterangan: 'BEBAN LISTRIK', masuk: 0, keluar: 333000 },
+      // Ada di bank, belum ada di catatan — inilah yang dicari.
+      { tanggal: hariRek, keterangan: 'BIAYA ADM BANK', masuk: 0, keluar: 17500 },
+    ],
+  });
+  check('rekening koran bisa diimpor', impor.ok === true && impor.total === 4);
+  check('baris yang sepadan cocok otomatis', impor.cocok === 3,
+    `${impor.cocok} dari ${impor.total} cocok`);
+
+  const hasilRek = await call('GET', `/api/rekonsiliasi/${impor.statementId}`);
+  check('yang belum berpasangan disisakan untuk ditindak',
+    hasilRek.bankSaja.length === 1
+    && hasilRek.bankSaja[0].keterangan === 'BIAYA ADM BANK',
+    hasilRek.bankSaja.map((b) => b.keterangan).join(', '));
+  check('selisihnya dirinci per arah',
+    hasilRek.ringkas.bankSaja.keluar === 17500,
+    JSON.stringify(hasilRek.ringkas.bankSaja));
+
+  // Membuat catatan yang hilang langsung dari baris bank.
+  const idAdm = hasilRek.bankSaja[0].id;
+  const dicatat = await call('POST', `/api/rekonsiliasi/baris/${idAdm}/catat`, {
+    category_code: '7100', description: 'Biaya administrasi bank',
+  });
+  check('catatan yang hilang bisa dibuat dari baris bank', dicatat.ok === true);
+
+  const hasilRek2 = await call('GET', `/api/rekonsiliasi/${impor.statementId}`);
+  check('setelah dicatat, barisnya langsung berpasangan',
+    hasilRek2.bankSaja.length === 0,
+    `sisa ${hasilRek2.bankSaja.length}`);
+  // Identitas yang harus selalu berlaku: selisih antara mutasi bank dan mutasi
+  // catatan PERSIS sebesar yang belum berpasangan di kedua sisi. Kalau tidak,
+  // ada baris yang hilang dari perhitungan — dan rekonsiliasi yang angkanya
+  // sendiri tidak konsisten tidak bisa dipakai menjelaskan apa pun.
+  const ringkasRek = hasilRek2.ringkas;
+  const selisihMutasi = r2Uji(ringkasRek.mutasiBank - ringkasRek.mutasiCatatan);
+  const selisihBelumCocok = r2Uji(
+    (ringkasRek.bankSaja.masuk - ringkasRek.bankSaja.keluar) - (ringkasRek.catatanSaja.masuk - ringkasRek.catatanSaja.keluar)
+  );
+  check('selisih mutasi persis sebesar yang belum berpasangan',
+    Math.abs(selisihMutasi - selisihBelumCocok) < 0.01,
+    `selisih ${selisihMutasi} vs belum cocok ${selisihBelumCocok}`);
+
+  const neracaRek = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('neraca tetap seimbang setelah pencatatan dari rekonsiliasi',
+    Math.abs(neracaRek.totalDebit - neracaRek.totalCredit) < 0.01);
+
+  // Inti kehati-hatiannya: saat ada DUA calon yang sama persis, mesin tidak
+  // boleh menebak. Pasangan yang keliru lebih berbahaya daripada tidak
+  // berpasangan — yang tidak berpasangan setidaknya masih ditinjau orang.
+  for (let i = 0; i < 2; i += 1) {
+    await call('POST', '/api/cashflow/entries', {
+      entry_date: hariRek, direction: 'IN', category_code: '4900', cash_code: '1010',
+      amount: 99000, description: `Kembar ${i}`,
+    });
+  }
+  const imporKembar = await call('POST', '/api/rekonsiliasi/impor', {
+    account_code: '1010', nama_berkas: 'kembar.csv',
+    rows: [{ tanggal: hariRek, keterangan: 'MASUK KEMBAR', masuk: 99000, keluar: 0 }],
+  });
+  check('pencocokan menyerah saat calonnya lebih dari satu',
+    imporKembar.cocok === 0,
+    `${imporKembar.cocok} cocok — seharusnya 0 karena ada dua calon identik`);
+
+  // Pemasangan manual untuk kasus yang hanya bisa dikenali orang.
+  const hasilKembar = await call('GET', `/api/rekonsiliasi/${imporKembar.statementId}`);
+  const barisKembar = hasilKembar.bankSaja[0];
+  const calonKembar = hasilKembar.catatanSaja.find((j) => r2Uji(j.debit) === 99000);
+  const pasang = await call('PATCH', `/api/rekonsiliasi/baris/${barisKembar.id}`, {
+    journal_line_id: calonKembar.id,
+  });
+  check('baris bisa dipasangkan manual', pasang.ok === true);
+
+  let tolakPasangGanda = 0;
+  try {
+    const imporLagi = await call('POST', '/api/rekonsiliasi/impor', {
+      account_code: '1010', nama_berkas: 'kembar2.csv',
+      rows: [{ tanggal: hariRek, keterangan: 'MASUK KEMBAR LAGI', masuk: 99000, keluar: 0 }],
+    });
+    const h = await call('GET', `/api/rekonsiliasi/${imporLagi.statementId}`);
+    await call('PATCH', `/api/rekonsiliasi/baris/${h.bankSaja[0].id}`, {
+      journal_line_id: calonKembar.id,
+    });
+  } catch (err) { tolakPasangGanda = err.status; }
+  check('satu catatan tidak bisa dipasangkan ke dua baris bank', tolakPasangGanda === 409,
+    `status ${tolakPasangGanda}`);
+
+  const daftarRek = await call('GET', '/api/rekonsiliasi');
+  check('rekening koran yang diimpor terdaftar', daftarRek.rows.length >= 2);
+  check('daftar rekening kas ikut dikirim', daftarRek.rekening.length >= 2);
+
+  let tolakAkunSalah = 0;
+  try {
+    await call('POST', '/api/rekonsiliasi/impor', {
+      account_code: '4000',
+      rows: [{ tanggal: hariRek, keterangan: 'x', masuk: 1000, keluar: 0 }],
+    });
+  } catch (err) { tolakAkunSalah = err.status; }
+  check('akun yang bukan kas/bank ditolak', tolakAkunSalah === 422);
+
+  // Membuang rekening koran TIDAK boleh menghapus jurnal yang terlanjur dibuat.
+  const jurnalSebelumBuang = (await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`)).totalDebit;
+  await call('DELETE', `/api/rekonsiliasi/${impor.statementId}`);
+  const jurnalSesudahBuang = (await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`)).totalDebit;
+  check('membuang rekening koran tidak melubangi pembukuan',
+    Math.abs(jurnalSebelumBuang - jurnalSesudahBuang) < 0.01,
+    `${jurnalSebelumBuang} -> ${jurnalSesudahBuang}`);
 
 
   // ---------- Hasil ----------

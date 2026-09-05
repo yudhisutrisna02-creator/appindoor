@@ -7,8 +7,8 @@ keputusan yang lahir dari kesalahan nyata di aplikasi berjalan — bagian itulah
 yang paling menentukan apakah hasil duplikasinya bisa dipakai bertahun-tahun
 atau berantakan dalam tiga bulan. Jangan dilewati.
 
-**Versi acuan:** 4 September 2026 · 35.572 baris kode · 31 tabel · 39 izin ·
-40 akun COA · 38 halaman · 522 uji otomatis.
+**Versi acuan:** 5 September 2026 · 37.400 baris kode · 33 tabel · 39 izin ·
+41 akun COA · 39 halaman · 566 uji otomatis.
 
 ---
 
@@ -32,7 +32,7 @@ diisi manual lewat layar setelah aplikasi berdiri:
 | Saldo awal kas/modal | Keuangan → Buku Besar & Jurnal |
 
 Yang **disemai otomatis** hanya kerangka yang sama untuk semua bisnis:
-40 akun COA, 5 peran bawaan beserta izinnya, dan satu akun admin pertama.
+41 akun COA, 5 peran bawaan beserta izinnya, dan satu akun admin pertama.
 
 ### Cara menjalankan promptnya
 
@@ -253,6 +253,8 @@ yang ringkas.
 | `product_variants` | katalog varian untuk produk yang dijual tanpa label |
 | `stock_moves` | kartu stok: IN / OUT / ADJ, `balance_after`, sumber & id sumber |
 | `stock_opnames`, `stock_opname_lines` | stok opname beserta selisihnya |
+| `product_batches` | batch beserta tanggal kadaluarsa dan sisanya |
+| `batch_moves` | kartu pergerakan tiap batch |
 
 ### Penjualan
 | Tabel | Isi |
@@ -314,6 +316,7 @@ dan API-nya juga menolak — bukan sekadar disembunyikan.
 - **Mutasi Stok** — kartu stok masuk/keluar/penyesuaian
 - **Stok Opname** — hitung fisik, selisih, penyesuaian otomatis
 - **Kinerja Produk** — laku/tidak, modal menganggur, margin per produk
+- **Batch & Kadaluarsa** — batch menjelang kadaluarsa beserta nilainya, diurutkan dari yang mendesak
 
 ### Pembelian
 - **Pesanan Pembelian** — PO, faktur, jatuh tempo, penerimaan barang
@@ -415,7 +418,7 @@ keluar dari fitur yang baru saja dipasang.
 
 ---
 
-## 7. Chart of Accounts (40 Akun)
+## 7. Chart of Accounts (41 Akun)
 
 Kolom: kode, nama, tipe, arus kas, saldo normal (D/K).
 
@@ -433,7 +436,9 @@ Kolom: kode, nama, tipe, arus kas, saldo normal (D/K).
 
 | 4300 | Pendapatan Ongkir Non-Marketplace | REVENUE | OTHER_INCOME | K |
 
-Ringkasan: **10 aset · 5 kewajiban · 3 ekuitas · 5 pendapatan · 17 beban**.
+| 3050 | Saldo Awal Kas & Bank | EQUITY | CAPITAL | K |
+
+Ringkasan: **10 aset · 5 kewajiban · 4 ekuitas · 5 pendapatan · 17 beban**.
 
 Akun bertanda `is_system = 1` tidak bisa dihapus — dipakai jurnal otomatis.
 Pemilik boleh menambah akun sendiri lewat menu Chart of Accounts.
@@ -502,6 +507,45 @@ tidak pernah terjadi. Diperlakukan persis seperti selisih stok opname: satu
 mutasi ADJ beserta alasan wajibnya, dan satu jurnal Persediaan lawan Selisih
 Stok. Dua jalan menuju hal yang sama tidak boleh menghasilkan angka berbeda
 di neraca.
+
+### Kategori kas bukan hanya pendapatan dan beban
+
+Uang yang masuk ke rekening sering bukan hasil berjualan, dan uang keluar
+sering bukan biaya. Layar kas **wajib** menawarkan tiga kelompok di tiap arah:
+
+| Kas Masuk | Kas Keluar |
+|---|---|
+| Pemasukan Usaha (REVENUE) | Biaya Operasional (EXPENSE) |
+| Modal & Saldo Awal (EQUITY/CAPITAL) | Pengambilan Pemilik (EQUITY/DRAWING) |
+| Pinjaman Diterima (LIABILITY/LOAN) | Pembayaran Utang (LIABILITY) |
+
+Tanpa kelompok "Saldo Awal", saldo yang sudah ada di kas dan bank sebelum
+aplikasi dipakai **tidak bisa dimasukkan sama sekali** — sehingga setiap
+pembayaran tampak keluar dari nol dan seluruh rekening berakhir minus meski
+uangnya sebenarnya ada. Ini bukan kemungkinan teoretis; ini benar-benar
+terjadi dan baru ketahuan berbulan-bulan kemudian.
+
+Akun yang punya menunya sendiri (Utang Usaha, Utang Gaji, Biaya Iklan) harus
+**ditolak peladen**, bukan sekadar disembunyikan dari daftar.
+
+### Batch & tanggal kadaluarsa
+
+Wajib bila barangnya punya masa aktif — produk hayati, makanan, obat, kosmetik.
+
+- Pelacakan dinyalakan **per produk**, bukan menyeluruh.
+- Menyalakannya memasukkan stok yang ada sebagai **batch pembuka**; tanpa itu
+  sisa batch nol sementara stoknya ratusan, dan penjualan pertama ditolak.
+- Barang keluar memakai **FEFO**, bukan FIFO: yang lebih dulu kedaluwarsa
+  keluar lebih dulu, karena barang yang datang belakangan bisa saja
+  kedaluwarsa lebih cepat.
+- Batch **tanpa tanggal disisakan paling akhir** — ia bisa jadi stok lama yang
+  datanya belum lengkap, dan mengeluarkannya duluan menyembunyikan batch yang
+  justru mendesak.
+- Pembatalan mengembalikan ke **batch asalnya** lewat catatan pergerakan, bukan
+  menebak. Menebak membuat barang "pindah" batch hanya karena ordernya
+  disunting, dan penelusurannya salah persis saat paling dibutuhkan.
+- Jumlah batch **tidak boleh bisa diketik** di layar — ia dibentuk pergerakan
+  barang. Yang dilengkapi hanya kode dan tanggalnya.
 
 ### Kunci periode
 Tutup buku mengunci satu bulan. Setelah dikunci, `postJournal()` dan
@@ -984,9 +1028,11 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Ongkir non-marketplace digabung ke akun Penjualan | Omzet menggelembung dan tidak bisa dipisahkan lagi |
 | Skrip pengganti massal memakai penanda sementara | Penanda tidak terpulihkan karena backslash regex termakan shell; sumbu grafik kehilangan formatternya dan menampilkan angka mentah — lolos build karena JSX menerima atribut apa pun |
 | Saldo awal tidak pernah dimasukkan | Semua rekening minus meski uangnya ada; setiap pembayaran tampak keluar dari nol |
+| Akun COA baru diberi kode arus kas di luar OCF/ICF/FCF/NONE | Peladen GAGAL START total saat penyemaian akun |
+| Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---
 
-*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 4 September 2026.
+*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 5 September 2026.
 Saat aplikasinya berkembang, perbarui dokumen ini bersamaan — panduan duplikasi
 yang tertinggal dari kenyataan lebih menyesatkan daripada tidak ada panduan.*
