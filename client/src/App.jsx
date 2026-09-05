@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket, UsersRound,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';

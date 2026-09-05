@@ -16,7 +16,8 @@
     "smoke": "node scripts/smoke-test.js",
     "seed:demo": "node scripts/seed-demo.js",
     "smoke:features": "node scripts/smoke-features.js",
-    "rekonsiliasi": "node scripts/rekonsiliasi.js"
+    "rekonsiliasi": "node scripts/rekonsiliasi.js",
+    "cek:ikon": "node scripts/cek-ikon.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
