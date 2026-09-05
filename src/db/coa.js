@@ -32,6 +32,10 @@ const COA = [
 
   // ---------- EKUITAS ----------
   ['3000', 'Modal Pemilik',                  'EQUITY', 'CAPITAL',  'K', 'FCF',  0],
+  // Dipakai sekali di awal: memasukkan uang yang SUDAH ada di kas dan rekening
+  // sebelum aplikasi ini dipakai. Dipisahkan dari Modal Pemilik supaya setoran
+  // modal yang benar-benar baru tetap bisa dibedakan dari saldo pembukaan.
+  ['3050', 'Saldo Awal Kas & Bank',           'EQUITY', 'CAPITAL',  'K', 'FCF',  0],
   ['3100', 'Prive (Penarikan Pemilik)',      'EQUITY', 'DRAWING',  'D', 'FCF',  0],
   ['3900', 'Laba Ditahan',                   'EQUITY', 'RETAINED', 'K', 'NONE', 0],
 

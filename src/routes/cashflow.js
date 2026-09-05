@@ -35,17 +35,57 @@ function cashAccounts() {
  */
 const AKUN_BERMENU_SENDIRI = {
   [ACC.FEE_ADS]: 'Biaya Iklan (menu Penjualan → Biaya Iklan)',
+  [ACC.AP]: 'Pelunasan Utang/Piutang (menu Keuangan → Utang & Piutang)',
+  [ACC.SALARY_PAYABLE]: 'Penggajian (menu Presensi → Penggajian)',
 };
 
-/** Kategori yang masuk akal untuk pemasukan / pengeluaran non-penjualan. */
+/**
+ * Kategori yang masuk akal untuk pemasukan / pengeluaran lewat layar kas.
+ *
+ * Bukan hanya pendapatan dan beban. Uang yang masuk ke rekening sering bukan
+ * hasil berjualan: setoran modal pemilik, pinjaman yang cair, dan — yang paling
+ * sering diperlukan di awal — saldo yang sudah ada di kas dan bank sebelum
+ * aplikasi ini dipakai. Tanpa kategori itu, saldo pembukaan tidak bisa
+ * dimasukkan sama sekali, sehingga setiap pembayaran tampak keluar dari nol dan
+ * seluruh rekening berakhir minus meski uangnya sebenarnya ada.
+ *
+ * Begitu pula sebaliknya: pengambilan pemilik dan cicilan pinjaman adalah uang
+ * keluar yang bukan biaya, dan memaksanya masuk ke akun beban membuat laba
+ * tampak lebih kecil daripada yang sebenarnya.
+ */
+const KELOMPOK = {
+  REVENUE: 'Pemasukan Usaha',
+  EQUITY_IN: 'Modal & Saldo Awal',
+  LIABILITY_IN: 'Pinjaman Diterima',
+  EXPENSE: 'Biaya Operasional',
+  EQUITY_OUT: 'Pengambilan Pemilik',
+  LIABILITY_OUT: 'Pembayaran Utang',
+};
+
 function categoryAccounts(direction) {
   const where = direction === 'IN'
-    ? "type = 'REVENUE' AND subtype IN ('OTHER_INCOME','SALES')"
-    : "type = 'EXPENSE' AND subtype IN ('SELLING','ADMIN','TAX','FINANCE','OTHER','COGS')";
+    ? `(type = 'REVENUE' AND subtype IN ('OTHER_INCOME','SALES'))
+       OR (type = 'EQUITY' AND subtype = 'CAPITAL')
+       OR (type = 'LIABILITY' AND subtype = 'LOAN')`
+    : `(type = 'EXPENSE' AND subtype IN ('SELLING','ADMIN','TAX','FINANCE','OTHER','COGS'))
+       OR (type = 'EQUITY' AND subtype = 'DRAWING')
+       OR (type = 'LIABILITY' AND subtype IN ('LOAN','ACCRUED','TAX'))`;
+
   return db
-    .prepare(`SELECT id, code, name, subtype FROM accounts WHERE ${where} AND active = 1 ORDER BY code`)
+    .prepare(`SELECT id, code, name, type, subtype FROM accounts WHERE (${where}) AND active = 1 ORDER BY code`)
     .all()
-    .filter((a) => !AKUN_BERMENU_SENDIRI[a.code]);
+    .filter((a) => !AKUN_BERMENU_SENDIRI[a.code])
+    .map((a) => ({
+      ...a,
+      // Dikelompokkan supaya "Modal Pemilik" tidak berbaur begitu saja di antara
+      // akun pendapatan — keduanya sama-sama uang masuk, tetapi artinya jauh
+      // berbeda bagi yang membaca laporannya nanti.
+      grup: KELOMPOK[
+        a.type === 'REVENUE' || a.type === 'EXPENSE'
+          ? a.type
+          : `${a.type}_${direction}`
+      ] || 'Lainnya',
+    }));
 }
 
 /** GET /api/cashflow/options — isi dropdown form. */

@@ -3503,6 +3503,111 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n41. Kategori kas masuk & keluar');
+
+  const opsiKategori = await call('GET', '/api/cashflow/options');
+  const kodeMasuk = opsiKategori.incomeCategories.map((k) => k.code);
+  const kodeKeluar = opsiKategori.expenseCategories.map((k) => k.code);
+
+  // Inti permintaannya: saldo yang sudah ada di kas dan bank sebelum aplikasi
+  // dipakai harus bisa dimasukkan. Tanpa kategori ini, setiap pembayaran tampak
+  // keluar dari nol dan seluruh rekening berakhir minus meski uangnya ada.
+  check('kategori Saldo Awal tersedia di kas masuk', kodeMasuk.includes('3050'),
+    kodeMasuk.join(' '));
+  check('kategori Modal Pemilik tersedia di kas masuk', kodeMasuk.includes('3000'));
+  check('kategori Pinjaman tersedia di kas masuk', kodeMasuk.includes('2500'));
+  check('kategori Prive tersedia di kas keluar', kodeKeluar.includes('3100'),
+    kodeKeluar.join(' '));
+  check('kategori Pembayaran Pinjaman tersedia di kas keluar', kodeKeluar.includes('2500'));
+  check('kategori Utang Pajak tersedia di kas keluar', kodeKeluar.includes('2200'));
+
+  // Yang punya menu sendiri tetap tidak boleh muncul — mencatatnya di dua
+  // tempat membuat satu transaksi terhitung dua kali.
+  check('Utang Usaha tidak muncul di kas keluar', !kodeKeluar.includes('2000'));
+  check('Utang Gaji tidak muncul di kas keluar', !kodeKeluar.includes('2110'));
+  check('Biaya Iklan tetap tidak muncul di kas keluar', !kodeKeluar.includes('6050'));
+
+  check('kategori dikelompokkan untuk layar',
+    opsiKategori.incomeCategories.every((k) => !!k.grup),
+    JSON.stringify(opsiKategori.incomeCategories.map((k) => k.grup)));
+
+  const rekeningKas = opsiKategori.cashAccounts.map((k) => k.code);
+  check('rekening tujuan bisa dipilih, bukan hanya kas tunai',
+    rekeningKas.includes('1000') && rekeningKas.includes('1010'),
+    rekeningKas.join(' '));
+
+  // Memasukkan saldo awal ke rekening BANK, bukan kas tunai — persis keadaan
+  // nyatanya: uangnya sebagian besar ada di bank.
+  const tbSebelumSaldo = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  const barisKas = (tb, kode) => (tb.rows || []).find((r) => r.code === kode) || {};
+  const bankSebelum = barisKas(tbSebelumSaldo, '1010').debit || 0;
+
+  const saldoAwal = await call('POST', '/api/cashflow/entries', {
+    entry_date: today, direction: 'IN', category_code: '3050', cash_code: '1010',
+    amount: 25000000, description: 'Saldo awal rekening bank operasional',
+  });
+  check('saldo awal bisa dicatat ke rekening bank', saldoAwal.ok === true);
+
+  const tbSesudahSaldo = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  const bankSesudah = barisKas(tbSesudahSaldo, '1010').debit || 0;
+  check('saldo bank bertambah sebesar yang dimasukkan',
+    Math.abs((bankSesudah - bankSebelum) - 25000000) < 0.01,
+    `naik ${bankSesudah - bankSebelum}`);
+
+  const barisSaldoAwal = barisKas(tbSesudahSaldo, '3050');
+  check('lawan jurnalnya masuk ekuitas Saldo Awal, bukan pendapatan',
+    (barisSaldoAwal.credit || 0) >= 25000000,
+    JSON.stringify(barisSaldoAwal));
+
+  check('neraca tetap seimbang setelah saldo awal dimasukkan',
+    Math.abs(tbSesudahSaldo.totalDebit - tbSesudahSaldo.totalCredit) < 0.01,
+    `${tbSesudahSaldo.totalDebit} vs ${tbSesudahSaldo.totalCredit}`);
+
+  // Saldo awal TIDAK boleh terbaca sebagai penjualan atau laba.
+  const lrSaldo = await call('GET',
+    `/api/finance/reports/income-statement?from=${bulanIni}&to=${today}`);
+  const lrSebelum = await call('GET',
+    `/api/finance/reports/income-statement?from=2020-01-01&to=2020-01-02`);
+  check('saldo awal tidak menambah penjualan',
+    lrSaldo.grossSales === (await call('GET',
+      `/api/finance/reports/income-statement?from=${bulanIni}&to=${today}`)).grossSales);
+  void lrSebelum;
+
+  // Prive: uang keluar yang bukan biaya.
+  const prive = await call('POST', '/api/cashflow/entries', {
+    entry_date: today, direction: 'OUT', category_code: '3100', cash_code: '1010',
+    amount: 1000000, description: 'Pengambilan pemilik',
+  });
+  check('prive bisa dicatat sebagai kas keluar', prive.ok === true);
+
+  const tbPrive = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('prive masuk ekuitas, bukan beban',
+    (barisKas(tbPrive, '3100').debit || 0) >= 1000000,
+    JSON.stringify(barisKas(tbPrive, '3100')));
+  check('neraca tetap seimbang setelah prive',
+    Math.abs(tbPrive.totalDebit - tbPrive.totalCredit) < 0.01);
+
+  const lrPrive = await call('GET',
+    `/api/finance/reports/income-statement?from=${bulanIni}&to=${today}`);
+  check('prive tidak mengurangi laba usaha',
+    Math.abs(lrPrive.netProfit - lrSaldo.netProfit) < 0.01,
+    `${lrSaldo.netProfit} -> ${lrPrive.netProfit}`);
+
+  // Peladen tetap menolak akun bermenu sendiri, meski layar lama mengirimnya.
+  let tolakUtangUsaha = 0;
+  try {
+    await call('POST', '/api/cashflow/entries', {
+      entry_date: today, direction: 'OUT', category_code: '2000', cash_code: '1000',
+      amount: 50000, description: 'coba lewat layar kas',
+    });
+  } catch (err) { tolakUtangUsaha = err.status; }
+  check('Utang Usaha ditolak peladen, bukan sekadar disembunyikan',
+    tolakUtangUsaha === 422, `status ${tolakUtangUsaha}`);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

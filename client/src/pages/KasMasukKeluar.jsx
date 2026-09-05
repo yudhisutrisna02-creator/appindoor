@@ -239,10 +239,35 @@ export default function KasMasukKeluar() {
                 onChange={(e) => setForm({ ...form, category_code: e.target.value })}
               >
                 <option value="">— pilih kategori —</option>
-                {(kategori || []).map((k) => (
-                  <option key={k.code} value={k.code}>{k.code} — {k.name}</option>
+                {/* Dikelompokkan karena daftarnya kini memuat tiga hal yang
+                    berbeda artinya: pendapatan usaha, modal/saldo awal, dan
+                    pinjaman. Ketiganya sama-sama uang masuk, tetapi menyamakan
+                    tampilannya membuat orang memilih yang salah. */}
+                {Object.entries(
+                  (kategori || []).reduce((peta, k) => {
+                    (peta[k.grup || 'Lainnya'] ||= []).push(k);
+                    return peta;
+                  }, {})
+                ).map(([grup, isi]) => (
+                  <optgroup key={grup} label={grup}>
+                    {isi.map((k) => (
+                      <option key={k.code} value={k.code}>{k.code} — {k.name}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
+              {form.direction === 'IN' && (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                  Memasukkan uang yang <strong>sudah ada</strong> di kas atau rekening sebelum
+                  aplikasi ini dipakai? Pilih <strong>3050 — Saldo Awal Kas &amp; Bank</strong>,
+                  lalu pilih rekeningnya di bawah. Ulangi untuk tiap rekening.
+                  Memindahkan uang antar rekening sendiri bukan kas masuk — pakai{' '}
+                  <Link to="/keuangan/pindah" className="font-medium text-brand-600 hover:underline">
+                    menu Pindah Saldo
+                  </Link>.
+                </p>
+              )}
+
               {/* Kategori biaya iklan sengaja tidak ada di sini; tanpa penjelasan,
                   yang mencarinya akan mengira daftarnya kurang lengkap. */}
               {form.direction === 'OUT' && (
