@@ -242,6 +242,82 @@ function buatTabelRekonsiliasi(db, applied) {
 }
 
 /**
+ * Retur pembelian: barang yang dikembalikan ke supplier.
+ *
+ * Dicatat terpisah dari retur penjualan karena arah uangnya berlawanan —
+ * yang satu mengurangi pendapatan, yang satu mengurangi utang atau
+ * mengembalikan kas. Menyatukannya dalam satu tabel akan memaksa setiap
+ * pembacanya memeriksa arah lebih dulu sebelum boleh menjumlahkan apa pun.
+ */
+function buatTabelReturBeli(db, applied) {
+  if (tableExists(db, 'purchase_returns')) return;
+
+  db.exec(`
+    CREATE TABLE purchase_returns (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      return_no   TEXT NOT NULL UNIQUE,
+      return_date TEXT NOT NULL,
+      po_id       INTEGER REFERENCES purchase_orders(id),
+      partner_id  INTEGER REFERENCES partners(id),
+      product_id  INTEGER NOT NULL REFERENCES products(id),
+      qty         REAL NOT NULL,
+      unit_cost   REAL NOT NULL DEFAULT 0,
+      amount      REAL NOT NULL DEFAULT 0,
+      -- UTANG  : utang ke supplier berkurang sebesar nilai barangnya
+      -- REFUND : supplier mengembalikan uangnya ke kas/bank
+      mode        TEXT NOT NULL DEFAULT 'UTANG',
+      cash_code   TEXT,
+      reason      TEXT,
+      user_id     INTEGER REFERENCES users(id),
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_pr_tanggal ON purchase_returns(return_date);
+    CREATE INDEX idx_pr_mitra   ON purchase_returns(partner_id);
+  `);
+
+  applied.push('tabel purchase_returns');
+}
+
+/**
+ * Menyelaraskan waktu riwayat lama ke waktu setempat.
+ *
+ * Kolom at dulu memakai datetime('now') bawaan SQLite yang selalu UTC,
+ * sedangkan seluruh tanggal lain di aplikasi memakai waktu setempat. Akibatnya
+ * perubahan yang dilakukan antara tengah malam sampai pagi tercatat bertanggal
+ * hari sebelumnya, dan halaman riwayat tampak kosong di jam-jam itu.
+ *
+ * Baris lama digeser sebesar selisih zona waktu yang berlaku. Dijalankan
+ * sekali saja, ditandai lewat settings — bukan dengan menebak apakah datanya
+ * "kelihatan sudah lokal", karena tebakan yang salah akan menggeser waktu yang
+ * sudah benar untuk kedua kalinya.
+ */
+function selaraskanWaktuRiwayat(db, applied) {
+  if (!tableExists(db, 'audit_log')) return;
+
+  const sudah = db
+    .prepare("SELECT value FROM settings WHERE key = 'riwayat_waktu_lokal'")
+    .get();
+  if (sudah) return;
+
+  let menit = 0;
+  try {
+    menit = require('../utils/time').nowLocal().utcOffset();
+  } catch {
+    menit = 0;
+  }
+
+  db.transaction(() => {
+    if (menit !== 0) {
+      const n = db
+        .prepare("UPDATE audit_log SET at = datetime(at, ?)")
+        .run(`${menit >= 0 ? '+' : '-'}${Math.abs(menit)} minutes`).changes;
+      if (n) applied.push(`${n} baris riwayat digeser ke waktu setempat`);
+    }
+    db.prepare("INSERT INTO settings (key, value) VALUES ('riwayat_waktu_lokal', '1')").run();
+  })();
+}
+
+/**
  * Menjalankan seluruh migrasi. Dipanggil sekali saat boot, setelah schema.sql.
  * @returns {string[]} daftar perubahan yang benar-benar diterapkan
  */
@@ -299,6 +375,8 @@ function runMigrations(db) {
   addColumn(db, 'products', 'lacak_batch', 'INTEGER NOT NULL DEFAULT 0', applied);
   buatTabelBatch(db, applied);
   buatTabelRekonsiliasi(db, applied);
+  buatTabelReturBeli(db, applied);
+  selaraskanWaktuRiwayat(db, applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
   // --- Data tim yang lebih lengkap ---

@@ -13,6 +13,7 @@
  * benar-benar penting di antara ribuan baris tak berguna.
  */
 const { db } = require('../db');
+const { nowLocal } = require('../utils/time');
 
 /** Kunci yang isinya tidak boleh ikut tercatat, apa pun keadaannya. */
 const RAHASIA = [
@@ -75,9 +76,21 @@ function modulDari(path) {
   return (bagian[0] || '-').toLowerCase();
 }
 
+/**
+ * Waktunya ditulis sendiri dalam waktu setempat, bukan dibiarkan memakai
+ * datetime('now') bawaan SQLite yang selalu UTC.
+ *
+ * Seluruh tanggal lain di aplikasi ini memakai waktu setempat — tanggal order,
+ * tanggal mutasi, tanggal jurnal. Riwayat yang memakai UTC berarti setiap
+ * perubahan yang dilakukan antara tengah malam sampai pagi tercatat bertanggal
+ * HARI SEBELUMNYA, dan halaman riwayat tampak kosong di jam-jam itu.
+ *
+ * Untuk catatan yang gunanya menjawab "siapa mengubah ini, kapan", menjawab
+ * kapan-nya dengan salah menghapus separuh gunanya.
+ */
 const simpan = db.prepare(
-  `INSERT INTO audit_log (user_id, user_name, method, path, modul, status, berhasil, ringkas, isi, ip)
-   VALUES (?,?,?,?,?,?,?,?,?,?)`
+  `INSERT INTO audit_log (at, user_id, user_name, method, path, modul, status, berhasil, ringkas, isi, ip)
+   VALUES (?,?,?,?,?,?,?,?,?,?,?)`
 );
 
 function jejak(req, res, next) {
@@ -101,6 +114,7 @@ function jejak(req, res, next) {
       const status = res.statusCode;
       const pesan = badan && (badan.message || badan.error);
       simpan.run(
+        nowLocal().format('YYYY-MM-DD HH:mm:ss'),
         req.user ? req.user.id : null,
         req.user ? req.user.name || req.user.email : null,
         req.method,
@@ -112,9 +126,12 @@ function jejak(req, res, next) {
         isi,
         req.ip || null
       );
-    } catch {
+    } catch (err) {
       // Riwayat yang gagal dicatat tidak boleh menggagalkan pekerjaan yang
-      // sudah terlanjur dikerjakan endpoint-nya.
+      // sudah terlanjur dikerjakan endpoint-nya — tetapi juga tidak boleh
+      // hilang tanpa jejak. Kegagalan yang ditelan diam-diam membuat riwayat
+      // kosong terlihat sama persis dengan "memang tidak ada perubahan".
+      console.error('[jejak] gagal mencatat riwayat:', err.message);
     }
     return asli(badan);
   };

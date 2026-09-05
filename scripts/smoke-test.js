@@ -4128,6 +4128,133 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n46. Retur pembelian');
+
+  const supRet = (await call('POST', '/api/partners', {
+    name: `Supplier Retur ${Date.now()}`, type: 'SUPPLIER',
+  })).partner;
+
+  const skuRet = `RTB-${Date.now()}`;
+  const prodRet = (await call('POST', '/api/inventory/products', {
+    sku: skuRet, name: 'Produk Uji Retur Beli', cost: 20000, price: 50000,
+  })).product;
+
+  // Dibeli kredit supaya ada utang yang bisa berkurang.
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodRet.id, move_date: today, move_type: 'IN',
+    qty: 50, unit_cost: 20000, payment: 'CREDIT', partner_id: supRet.id,
+  });
+
+  const barisAkunRet = (tb, kode) => (tb.rows || []).find((r) => r.code === kode) || {};
+  const tbSebelumRet = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  const utangSebelumRetur = r2Uji((barisAkunRet(tbSebelumRet, '2000').credit || 0)
+    - (barisAkunRet(tbSebelumRet, '2000').debit || 0));
+
+  const retur = await call('POST', '/api/retur-beli', {
+    return_date: today, partner_id: supRet.id, product_id: prodRet.id,
+    qty: 10, mode: 'UTANG', reason: 'Kemasan rusak saat diterima',
+  });
+  check('retur pembelian bisa dicatat', retur.ok === true);
+  check('nilai retur dihitung dari harga belinya',
+    Math.abs(retur.nilai - 200000) < 0.01, String(retur.nilai));
+
+  // Stok berkurang — barangnya benar-benar keluar gudang.
+  const prodSetelahRet = (await call('GET', `/api/inventory/products?q=${skuRet}`))
+    .products.find((x) => x.sku === skuRet);
+  check('stok berkurang setelah barang dikembalikan',
+    prodSetelahRet.stock === 40, String(prodSetelahRet.stock));
+
+  // INTI FITURNYA: utang ke supplier ikut berkurang. Tanpa ini, aplikasi tetap
+  // menagih pembayaran untuk barang yang sudah dikembalikan.
+  const tbSesudahRet = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  const utangSetelahRetur = r2Uji((barisAkunRet(tbSesudahRet, '2000').credit || 0)
+    - (barisAkunRet(tbSesudahRet, '2000').debit || 0));
+  check('utang ke supplier berkurang sebesar nilai retur',
+    Math.abs((utangSebelumRetur - utangSetelahRetur) - 200000) < 0.01,
+    `${utangSebelumRetur} -> ${utangSetelahRetur}`);
+
+  check('neraca tetap seimbang setelah retur pembelian',
+    Math.abs(tbSesudahRet.totalDebit - tbSesudahRet.totalCredit) < 0.01,
+    `${tbSesudahRet.totalDebit} vs ${tbSesudahRet.totalCredit}`);
+
+  // Kartu stok harus menjelaskan ke mana barangnya pergi.
+  const kartuRet = await call('GET',
+    `/api/inventory/moves?product_id=${prodRet.id}&from=${today}&to=${today}`);
+  const keluarRet = kartuRet.rows.filter((m) => m.source === 'PURCHASE_RETURN');
+  check('retur tercatat di kartu stok sebagai barang keluar',
+    keluarRet.length === 1 && keluarRet[0].move_type === 'OUT' && keluarRet[0].qty === 10,
+    JSON.stringify(keluarRet.map((m) => [m.move_type, m.qty])));
+  check('kartu stok menyebut supplier tujuannya',
+    keluarRet[0] && /Supplier Retur/.test(keluarRet[0].note || ''),
+    keluarRet[0] ? String(keluarRet[0].note) : '-');
+
+  // Mode REFUND: supplier mengembalikan uang, bukan memotong utang.
+  const returTunai = await call('POST', '/api/retur-beli', {
+    return_date: today, partner_id: supRet.id, product_id: prodRet.id,
+    qty: 5, mode: 'REFUND', cash_code: '1010', reason: 'Barang salah kirim',
+  });
+  check('retur dengan pengembalian dana bisa dicatat', returTunai.ok === true);
+
+  const tbRefund = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  check('pengembalian dana menambah saldo rekening, bukan mengurangi utang',
+    (barisAkunRet(tbRefund, '1010').debit || 0)
+      > (barisAkunRet(tbSesudahRet, '1010').debit || 0));
+  check('neraca tetap seimbang setelah retur dengan pengembalian dana',
+    Math.abs(tbRefund.totalDebit - tbRefund.totalCredit) < 0.01);
+
+  // Penjagaan.
+  let tolakLebihStok = 0;
+  try {
+    await call('POST', '/api/retur-beli', {
+      return_date: today, partner_id: supRet.id, product_id: prodRet.id,
+      qty: 9999, mode: 'UTANG',
+    });
+  } catch (err) { tolakLebihStok = err.status; }
+  check('tidak bisa mengembalikan lebih banyak daripada stok yang ada',
+    tolakLebihStok === 422, `status ${tolakLebihStok}`);
+
+  let tolakTanpaRekening = 0;
+  try {
+    await call('POST', '/api/retur-beli', {
+      return_date: today, partner_id: supRet.id, product_id: prodRet.id,
+      qty: 1, mode: 'REFUND',
+    });
+  } catch (err) { tolakTanpaRekening = err.status; }
+  check('pengembalian dana tanpa rekening ditolak', tolakTanpaRekening === 422);
+
+  // Pembatalan mengembalikan semuanya seperti semula.
+  const daftarRet = await call('GET', `/api/retur-beli?from=${today}&to=${today}`);
+  check('daftar retur memuat keduanya', daftarRet.rows.length >= 2);
+  check('ringkasan memisahkan potong utang dan dana kembali',
+    daftarRet.ringkas.kurangUtang >= 200000 && daftarRet.ringkas.danaKembali >= 100000,
+    JSON.stringify(daftarRet.ringkas));
+
+  await call('DELETE', `/api/retur-beli/${retur.id}`);
+  const prodBatalRet = (await call('GET', `/api/inventory/products?q=${skuRet}`))
+    .products.find((x) => x.sku === skuRet);
+  // 50 dibeli, 10 diretur lalu dibatalkan, 5 diretur dan tetap berlaku → 45.
+  check('membatalkan retur mengembalikan barang ke gudang',
+    prodBatalRet.stock === 45, String(prodBatalRet.stock));
+
+  const tbBatalRet = await call('GET',
+    `/api/finance/reports/trial-balance?from=${bulanIni}&to=${today}`);
+  const utangBatal = r2Uji((barisAkunRet(tbBatalRet, '2000').credit || 0)
+    - (barisAkunRet(tbBatalRet, '2000').debit || 0));
+  check('utang kembali seperti sebelum retur dicatat',
+    Math.abs(utangBatal - utangSebelumRetur) < 0.01,
+    `${utangSebelumRetur} vs ${utangBatal}`);
+  check('neraca tetap seimbang setelah pembatalan retur',
+    Math.abs(tbBatalRet.totalDebit - tbBatalRet.totalCredit) < 0.01);
+
+  const unduhRet = await fetch(`${BASE}/api/retur-beli/export/excel?from=${today}&to=${today}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  check('retur pembelian bisa diunduh', unduhRet.status === 200, `status ${unduhRet.status}`);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
