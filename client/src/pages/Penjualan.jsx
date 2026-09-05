@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, KotakCari } from '../components/ui';
 import UbahOrder from './UbahOrder';
 import BarisVarian from '../components/BarisVarian';
-import { rupiah, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel } from '../lib/format';
+import { rupiah, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel, EKSPEDISI } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const emptyOrder = () => ({
@@ -628,7 +628,7 @@ export default function Penjualan() {
               <Field label="Ekspedisi">
                 <input className="input" list="ekspedisi-list" value={form.courier} onChange={(e) => setForm({ ...form, courier: e.target.value })} />
                 <datalist id="ekspedisi-list">
-                  {['SPXpress', 'SPXpress COD', 'JNT', 'JNT COD', 'JNT CARGO', 'JNE', 'AnterAja', 'AnterAja COD', 'POS Indonesia', 'CASH'].map((x) => <option key={x} value={x} />)}
+                  {EKSPEDISI.map((x) => <option key={x} value={x} />)}
                 </datalist>
               </Field>
               <Field label="Resi / Kode Booking">

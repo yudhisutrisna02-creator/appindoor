@@ -3,7 +3,7 @@ import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { Modal, Field, useToast } from '../components/ui';
 import BarisVarian from '../components/BarisVarian';
-import { STATUS_PESANAN, CHANNEL_LABEL, rupiah } from '../lib/format';
+import { STATUS_PESANAN, CHANNEL_LABEL, rupiah, EKSPEDISI } from '../lib/format';
 
 /**
  * Formulir ubah order.
@@ -288,7 +288,13 @@ export default function UbahOrder({ order, shops = [], products = [], open, onCl
           <input className="input" value={form.order_ref} onChange={ubah('order_ref')} disabled={batal} />
         </Field>
         <Field label="Ekspedisi">
-          <input className="input" value={form.courier} onChange={ubah('courier')} disabled={batal} />
+          <input
+            className="input" list="ekspedisi-ubah" value={form.courier}
+            onChange={ubah('courier')} disabled={batal}
+          />
+          <datalist id="ekspedisi-ubah">
+            {EKSPEDISI.map((x) => <option key={x} value={x} />)}
+          </datalist>
         </Field>
         <Field label="Resi / Kode Booking" className="sm:col-span-2">
           <input className="input" value={form.tracking_no} onChange={ubah('tracking_no')} disabled={batal} />

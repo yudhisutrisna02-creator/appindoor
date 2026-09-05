@@ -75,6 +75,27 @@ export const STATUS_PESANAN = {
   BATAL: 'Batal',
 };
 
+/**
+ * Ekspedisi yang biasa dipakai.
+ *
+ * Hanya saran pengisian — kolomnya tetap bisa diketik bebas, karena ekspedisi
+ * baru selalu muncul dan tim tidak boleh terhalang hanya karena namanya belum
+ * ada di daftar. Ditaruh di sini supaya formulir order baru dan formulir ubah
+ * order memakai daftar yang sama; sebelumnya hanya formulir baru yang punya
+ * saran, sehingga nama ekspedisi yang sama bisa tertulis berbeda-beda
+ * tergantung lewat layar mana ordernya disentuh.
+ */
+export const EKSPEDISI = [
+  'SPXpress', 'SPXpress COD',
+  'JNT', 'JNT COD', 'JNT CARGO',
+  'JNE', 'JNE JTR',
+  'AnterAja', 'AnterAja COD',
+  'POS Indonesia',
+  'Next Cargo',
+  'Ekspedisi Bus',
+  'CASH',
+];
+
 /** Tahap yang berarti dananya sudah diterima — jalur biasa maupun kilat. */
 export const STATUS_CAIR = ['CAIR', 'KILAT_CAIR'];
 
