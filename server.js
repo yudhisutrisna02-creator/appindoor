@@ -151,6 +151,7 @@ app.use('/api/finance', halaman('keuangan.lihat'), require('./src/routes/finance
 app.use('/api/inventory', halaman('gudang.lihat'), require('./src/routes/inventory'));
 app.use('/api/sales', halaman('penjualan.lihat'), require('./src/routes/sales'));
 app.use('/api/pencairan', halaman('penjualan.lihat'), require('./src/routes/pencairan'));
+app.use('/api/pelanggan', halaman('penjualan.lihat'), require('./src/routes/pelanggan'));
 app.use('/api/kinerja', halaman('gudang.kinerja'), require('./src/routes/kinerja'));
 app.use('/api/target', halaman('target.lihat'), require('./src/routes/target'));
 app.use('/api/penggajian', halaman('penggajian.lihat'), require('./src/routes/penggajian'));

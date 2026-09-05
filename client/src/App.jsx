@@ -32,6 +32,7 @@ import PindahSaldo from './pages/PindahSaldo';
 import Kadaluarsa from './pages/Kadaluarsa';
 import Rekonsiliasi from './pages/Rekonsiliasi';
 import SaranBeli from './pages/SaranBeli';
+import Pelanggan from './pages/Pelanggan';
 import UtangPiutang from './pages/UtangPiutang';
 import Mitra from './pages/Mitra';
 import Retur from './pages/Retur';
@@ -104,6 +105,7 @@ const NAV = [
       { to: '/penjualan/pengiriman', label: 'Papan Pengiriman', icon: Truck, izin: 'penjualan.lihat' },
       { to: '/penjualan/pencairan', label: 'Pencairan Dana', icon: Hourglass, izin: 'penjualan.lihat' },
       { to: '/penjualan/analisis', label: 'Analisis Margin', icon: TrendingUp, izin: 'penjualan.margin' },
+      { to: '/penjualan/pelanggan', label: 'Analisis Pelanggan', icon: UsersRound, izin: 'penjualan.lihat' },
       { to: '/penjualan/retur', label: 'Retur Penjualan', icon: Undo2, izin: 'penjualan.retur' },
       { to: '/penjualan/toko', label: 'Toko / Marketplace', icon: Store, izin: 'penjualan.lihat' },
       { to: '/penjualan/iklan', label: 'Biaya Iklan', icon: Megaphone, izin: 'iklan.lihat' },
@@ -473,6 +475,7 @@ export default function App() {
         <Route path="/gudang/kadaluarsa" element={<Dijaga izin="gudang.lihat"><Kadaluarsa /></Dijaga>} />
         <Route path="/keuangan/rekonsiliasi" element={<Dijaga izin="keuangan.kas"><Rekonsiliasi /></Dijaga>} />
         <Route path="/pembelian/saran" element={<Dijaga izin="pembelian.lihat"><SaranBeli /></Dijaga>} />
+        <Route path="/penjualan/pelanggan" element={<Dijaga izin="penjualan.lihat"><Pelanggan /></Dijaga>} />
         <Route path="/keuangan/utang-piutang" element={<Dijaga izin="keuangan.lihat"><UtangPiutang /></Dijaga>} />
         <Route path="/keuangan/laporan" element={<Dijaga izin="keuangan.lihat"><LaporanKeuangan /></Dijaga>} />
         <Route path="/keuangan/jurnal" element={<Dijaga izin="keuangan.lihat"><Jurnal /></Dijaga>} />

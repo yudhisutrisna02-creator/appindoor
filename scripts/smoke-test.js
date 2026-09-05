@@ -4026,6 +4026,108 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n45. Analisis pelanggan & repeat order');
+
+  const skuPel = `PEL-${Date.now()}`;
+  const prodPel = (await call('POST', '/api/inventory/products', {
+    sku: skuPel, name: 'Produk Uji Pelanggan', cost: 10000, price: 50000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodPel.id, move_date: today, move_type: 'IN',
+    qty: 200, unit_cost: 10000, payment: 'CASH',
+  });
+
+  const namaBerulang = `Pembeli Berulang ${Date.now()}`;
+  const namaSekali = `Pembeli Sekali ${Date.now()}`;
+  const namaTidur = `Pembeli Tidur ${Date.now()}`;
+
+  const beli = (nama, tanggal, qty, kota) => call('POST', '/api/sales', {
+    order_date: tanggal, channel: 'SHOPEE', customer: nama,
+    buyer_name: nama, buyer_city: kota || 'Kebumen',
+    items: [{ product_id: prodPel.id, qty, price: 50000 }],
+  });
+
+  // Dua kali beli → berulang.
+  await beli(namaBerulang, today, 2, 'Semarang');
+  await beli(namaBerulang, today, 1, 'Semarang');
+  // Sekali beli, baru.
+  await beli(namaSekali, today, 1, 'Kebumen');
+  // Pernah beli lama sekali → tidur/hilang.
+  await beli(namaTidur, '2026-01-15', 3, 'Surabaya');
+
+  const pel = await call('GET', '/api/pelanggan?aktif=60&hilang=180');
+  const cariPel = (n) => pel.rows.find((r) => r.nama === n);
+
+  check('pembeli dikenali dan riwayatnya dikumpulkan', !!cariPel(namaBerulang));
+  check('pembelian berulang terhitung sebagai satu pelanggan',
+    cariPel(namaBerulang) && cariPel(namaBerulang).orders === 2,
+    cariPel(namaBerulang) ? String(cariPel(namaBerulang).orders) : '-');
+  check('omzet pelanggan dijumlahkan dari seluruh ordernya',
+    cariPel(namaBerulang) && cariPel(namaBerulang).omzet === 150000,
+    cariPel(namaBerulang) ? String(cariPel(namaBerulang).omzet) : '-');
+  check('pelanggan berulang ditandai berbeda dari yang baru sekali',
+    cariPel(namaBerulang).status === 'BERULANG' && cariPel(namaSekali).status === 'BARU',
+    `${cariPel(namaBerulang).status} / ${cariPel(namaSekali).status}`);
+
+  // Inti nilainya: menemukan yang PERNAH beli lalu berhenti.
+  const tidur = cariPel(namaTidur);
+  check('pembeli yang lama tidak kembali ditandai tidur atau hilang',
+    tidur && ['TIDUR', 'HILANG'].includes(tidur.status),
+    tidur ? `${tidur.status} (${tidur.hariSejakTerakhir} hari)` : '-');
+  check('jarak sejak pembelian terakhir dihitung',
+    tidur && tidur.hariSejakTerakhir > 100, tidur ? String(tidur.hariSejakTerakhir) : '-');
+
+  check('jeda rata-rata antar pembelian hanya untuk yang berulang',
+    cariPel(namaBerulang).jedaRataHari !== null && cariPel(namaSekali).jedaRataHari === null);
+
+  check('ringkasan memuat porsi pelanggan berulang',
+    pel.ringkas.berulang.pelanggan >= 1 && pel.ringkas.berulang.persen > 0,
+    JSON.stringify(pel.ringkas.berulang));
+  check('ringkasan memuat nilai rata-rata per pelanggan',
+    pel.ringkas.nilaiRataPelanggan > 0);
+
+  // Wilayah: dipakai melihat di mana pasarnya menumpuk.
+  const smg = pel.wilayah.find((w) => w.wilayah === 'Semarang');
+  check('sebaran wilayah dihitung dari kota pembeli', !!smg && smg.pelanggan >= 1,
+    pel.wilayah.slice(0, 3).map((w) => `${w.wilayah}=${w.pelanggan}`).join(' '));
+
+  // Nama dengan spasi berlebih TIDAK boleh dianggap orang lain.
+  const namaSpasi = `Uji  Spasi  ${Date.now()}`;
+  await beli(namaSpasi.replace(/\s+/g, ' '), today, 1);
+  await beli(namaSpasi, today, 1);
+  const pel2 = await call('GET', '/api/pelanggan');
+  const cocokSpasi = pel2.rows.filter((r) => r.nama.replace(/\s+/g, ' ') === namaSpasi.replace(/\s+/g, ' '));
+  check('nama dengan spasi ganda tidak terpecah jadi dua pelanggan',
+    cocokSpasi.length === 1 && cocokSpasi[0].orders === 2,
+    `${cocokSpasi.length} baris, order ${cocokSpasi[0] ? cocokSpasi[0].orders : '-'}`);
+
+  // Order yang dibatalkan tidak boleh ikut terhitung.
+  const oPelBatal = (await beli(namaSekali, today, 1)).order;
+  const sebelumBatalPel = (await call('GET', '/api/pelanggan')).rows
+    .find((r) => r.nama === namaSekali).orders;
+  await call('DELETE', `/api/sales/${oPelBatal.id}`);
+  const sesudahBatalPel = (await call('GET', '/api/pelanggan')).rows
+    .find((r) => r.nama === namaSekali).orders;
+  check('order yang dibatalkan tidak ikut dihitung sebagai pembelian',
+    sesudahBatalPel < sebelumBatalPel,
+    `${sebelumBatalPel} -> ${sesudahBatalPel}`);
+
+  const unduhPel = await fetch(`${BASE}/api/pelanggan/export/excel`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  check('analisis pelanggan bisa diunduh', unduhPel.status === 200,
+    `status ${unduhPel.status}`);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakPel = 0;
+  try {
+    await call('GET', '/api/pelanggan');
+  } catch (err) { tolakPel = err.status; }
+  check('tim tanpa izin penjualan tidak bisa melihat data pelanggan',
+    tolakPel === 403, `status ${tolakPel}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
