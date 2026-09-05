@@ -3899,6 +3899,133 @@ async function main() {
     `${jurnalSebelumBuang} -> ${jurnalSesudahBuang}`);
 
 
+  console.log('\n44. Saran pembelian otomatis');
+
+  const skuSar = `SAR-${Date.now()}`;
+  const prodSar = (await call('POST', '/api/inventory/products', {
+    sku: skuSar, name: 'Produk Uji Saran', cost: 10000, price: 30000, unit: 'PCS',
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodSar.id, move_date: today, move_type: 'IN',
+    qty: 30, unit_cost: 10000, payment: 'CASH',
+  });
+
+  // Dijual 25 dari 30 → stok tersisa 5. Dengan kecepatan itu, stok habis
+  // sebelum barang pengganti sempat datang, jadi memang perlu dipesan.
+  await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', customer: 'Uji Saran',
+    items: [{ product_id: prodSar.id, qty: 25, price: 30000 }],
+  });
+
+  const saran = await call('GET', '/api/saran-beli?hari=60');
+  const barisSar = saran.rows.find((r) => r.sku === skuSar);
+  check('produk yang laku muncul di saran pembelian', !!barisSar);
+  check('kecepatan jual dihitung dari penjualan nyata',
+    barisSar && Math.abs(barisSar.perHari - (25 / 60)) < 0.02,
+    barisSar ? String(barisSar.perHari) : '-');
+  check('sisa hari dihitung dari stok dan kecepatannya',
+    barisSar && barisSar.hariTersisa === Math.floor(5 / barisSar.perHari),
+    barisSar ? `${barisSar.hariTersisa} hari` : '-');
+  check('produk yang akan habis sebelum barang datang ditandai perlu dipesan',
+    barisSar && ['MENDESAK', 'SEGERA', 'HABIS'].includes(barisSar.status),
+    barisSar ? barisSar.status : '-');
+  check('jumlah yang disarankan lebih dari nol untuk produk yang menipis',
+    barisSar && barisSar.saranQty > 0, barisSar ? String(barisSar.saranQty) : '-');
+
+  // Produk yang stoknya masih panjang TIDAK boleh disarankan — menyarankan
+  // pembelian yang belum perlu sama saja menumpuk barang di gudang.
+  const saranPanjang = (await call('GET', '/api/saran-beli?hari=60&cakupan=7'))
+    .rows.find((r) => r.sku === skuSar);
+  void saranPanjang;
+  check('nilai saran dihitung dari HPP-nya',
+    barisSar && Math.abs(barisSar.nilaiSaran - barisSar.saranQty * 10000) < 0.01);
+
+  // JEBAKAN 1: barang yang tidak laku TIDAK BOLEH disarankan dibeli lagi.
+  const skuDiam = `DIAM-${Date.now()}`;
+  const prodDiam = (await call('POST', '/api/inventory/products', {
+    sku: skuDiam, name: 'Produk Uji Diam', cost: 50000, price: 100000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodDiam.id, move_date: today, move_type: 'IN',
+    qty: 40, unit_cost: 50000, payment: 'CASH',
+  });
+
+  const saran2 = await call('GET', '/api/saran-beli?hari=60');
+  const barisDiam = saran2.rows.find((r) => r.sku === skuDiam);
+  check('barang yang tidak laku ditandai DIAM, bukan disarankan dibeli',
+    barisDiam && barisDiam.status === 'DIAM' && barisDiam.saranQty === 0,
+    barisDiam ? `${barisDiam.status} saran ${barisDiam.saranQty}` : '-');
+  check('modal yang mengendap dilaporkan terpisah',
+    barisDiam && Math.abs(barisDiam.nilaiDiam - 40 * 50000) < 0.01,
+    barisDiam ? String(barisDiam.nilaiDiam) : '-');
+  check('ringkasan memuat total modal yang diam',
+    saran2.ringkas.diam.nilai >= 2000000, String(saran2.ringkas.diam.nilai));
+
+  // JEBAKAN 2: barang yang SUDAH DIPESAN tidak boleh disarankan lagi sebanyak
+  // itu — kalau dihitung belum ada, gudang menerima dua kali lipat.
+  const supplierSar = (await call('POST', '/api/partners', {
+    name: `Supplier Saran ${Date.now()}`, type: 'SUPPLIER',
+  })).partner;
+  const saranSebelumPO = (await call('GET', '/api/saran-beli?hari=60'))
+    .rows.find((r) => r.sku === skuSar).saranQty;
+
+  await call('POST', '/api/pembelian', {
+    order_date: today, partner_id: supplierSar.id, payment: 'CREDIT',
+    items: [{ product_id: prodSar.id, qty: saranSebelumPO, unit_cost: 10000 }],
+  });
+
+  const saran3 = await call('GET', '/api/saran-beli?hari=60');
+  const barisSar3 = saran3.rows.find((r) => r.sku === skuSar);
+  check('barang yang sudah dipesan tercatat sebagai sedang di jalan',
+    barisSar3 && barisSar3.diJalan === saranSebelumPO,
+    barisSar3 ? String(barisSar3.diJalan) : '-');
+  check('saran berkurang setelah pesanan pembelian dibuat',
+    barisSar3 && barisSar3.saranQty < saranSebelumPO,
+    `${saranSebelumPO} -> ${barisSar3 ? barisSar3.saranQty : '-'}`);
+
+  // Order yang dibatalkan tidak boleh membuat produk tampak laris.
+  const oBatalSar = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', customer: 'Batal Saran',
+    items: [{ product_id: prodSar.id, qty: 5, price: 30000 }],
+  })).order;
+  const lakuSebelumBatal = (await call('GET', '/api/saran-beli?hari=60'))
+    .rows.find((r) => r.sku === skuSar).terjual;
+  await call('DELETE', `/api/sales/${oBatalSar.id}`);
+  const lakuSesudahBatal = (await call('GET', '/api/saran-beli?hari=60'))
+    .rows.find((r) => r.sku === skuSar).terjual;
+  check('order yang dibatalkan tidak ikut menaikkan kecepatan jual',
+    lakuSesudahBatal < lakuSebelumBatal,
+    `${lakuSebelumBatal} -> ${lakuSesudahBatal}`);
+
+  // Parameter bisa disetel dan benar-benar berpengaruh.
+  const cakupanPendek = (await call('GET', '/api/saran-beli?hari=60&cakupan=7'))
+    .rows.find((r) => r.sku === skuSar);
+  const cakupanPanjang = (await call('GET', '/api/saran-beli?hari=60&cakupan=180'))
+    .rows.find((r) => r.sku === skuSar);
+  check('cakupan yang lebih panjang menyarankan pembelian lebih banyak',
+    cakupanPanjang.saranQty > cakupanPendek.saranQty,
+    `7 hari: ${cakupanPendek.saranQty}, 180 hari: ${cakupanPanjang.saranQty}`);
+
+  check('lead time supplier ikut dilaporkan',
+    typeof barisSar3.leadTime === 'number' && barisSar3.leadTime >= 1,
+    String(barisSar3.leadTime));
+
+  const unduhSaran = await fetch(`${BASE}/api/saran-beli/export/excel`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  check('saran pembelian bisa diunduh', unduhSaran.status === 200,
+    `status ${unduhSaran.status}`);
+
+  // Tim tanpa izin pembelian tidak boleh melihatnya.
+  token = await masukSebagai(akunSempit.user.email, 'RahasiaKuat1');
+  let tolakSaran = 0;
+  try {
+    await call('GET', '/api/saran-beli');
+  } catch (err) { tolakSaran = err.status; }
+  check('tim tanpa izin pembelian ditolak', tolakSaran === 403, `status ${tolakSaran}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

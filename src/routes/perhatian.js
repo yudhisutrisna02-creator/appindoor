@@ -29,6 +29,7 @@ const { ambilKinerja } = require('./kinerja');
 const { rekeningKas } = require('./cashflow');
 const { ambilPencapaian } = require('./target');
 const { ambilKadaluarsa } = require('./inventory');
+const { ambilSaran } = require('./saran-beli');
 const { daftar: daftarPembelian } = require('./pembelian');
 const { daftarCadangan } = require('../utils/cadangan');
 
@@ -64,6 +65,19 @@ function kumpulkan(req) {
   /** Menambahkan satu butir bila pembacanya memang berhak melihatnya. */
   const tambah = (b) => {
     if (b.izin && !boleh(...[].concat(b.izin))) return;
+
+    // Tingkat yang tidak dikenal membuat butirnya tidak terhitung di ringkasan
+    // dan terlempar ke urutan yang salah — tanpa galat apa pun, karena
+    // TINGKAT[tingkat] hanya menghasilkan undefined. Ditolak di sini supaya
+    // salah ketik ketahuan saat menulisnya, bukan berbulan-bulan kemudian
+    // ketika kebetulan ada data yang memicunya.
+    if (!(b.tingkat in TINGKAT)) {
+      throw new Error(
+        `Tingkat "${b.tingkat}" tidak dikenal pada butir "${b.kunci}". ` +
+          `Pilih salah satu: ${Object.keys(TINGKAT).join(', ')}.`
+      );
+    }
+
     butir.push(b);
   };
 
@@ -256,7 +270,7 @@ function kumpulkan(req) {
     if (d.ringkas.kedaluwarsa.batch > 0) {
       tambah({
         kunci: 'batch-kedaluwarsa',
-        tingkat: 'mendesak',
+        tingkat: 'genting',
         judul: `${d.ringkas.kedaluwarsa.batch} batch sudah kedaluwarsa`,
         rincian:
           `Senilai ${d.ringkas.kedaluwarsa.nilai.toLocaleString('id-ID')} rupiah masih tercatat sebagai stok. ` +
@@ -281,6 +295,35 @@ function kumpulkan(req) {
         tautan: '/gudang/kadaluarsa',
         tombol: 'Lihat',
         izin: 'gudang.lihat',
+      });
+    }
+  });
+
+  // ---- Barang yang perlu dipesan ----
+  // Kehabisan barang laris tidak menimbulkan galat apa pun — ia hanya membuat
+  // penjualan yang seharusnya terjadi tidak pernah terjadi. Karena tidak ada
+  // yang berteriak, peringatannya harus datang sendiri.
+  coba('saran-beli', () => {
+    if (!boleh('pembelian.lihat')) return;
+    const d = ambilSaran({ query: {} });
+
+    const mendesak = d.ringkas.habis.produk + d.ringkas.mendesak.produk;
+    if (mendesak > 0) {
+      const contoh = d.rows
+        .filter((r) => ['HABIS', 'MENDESAK'].includes(r.status))
+        .slice(0, 3)
+        .map((r) => r.name);
+      tambah({
+        kunci: 'perlu-dipesan',
+        tingkat: 'genting',
+        judul: `${mendesak} produk laris habis atau segera habis`,
+        rincian:
+          `Perlu dipesan sekitar ${(d.ringkas.habis.nilai + d.ringkas.mendesak.nilai).toLocaleString('id-ID')} rupiah. ` +
+          contoh.join(', '),
+        jumlah: mendesak,
+        tautan: '/pembelian/saran',
+        tombol: 'Lihat',
+        izin: 'pembelian.lihat',
       });
     }
   });
