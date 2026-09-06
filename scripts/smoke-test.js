@@ -4112,6 +4112,59 @@ async function main() {
     sesudahBatalPel < sebelumBatalPel,
     `${sebelumBatalPel} -> ${sesudahBatalPel}`);
 
+  // ---- Titik kirim internal marketplace ----
+  // Shopee menuliskan nama hub sortirnya sendiri di kolom pembeli. Ia muncul
+  // ratusan kali dan menjadi "pelanggan berulang" terbesar kalau dibiarkan.
+  const namaHub = `Semarang RDC - Pengiriman SPX ${Date.now()}`;
+  await beli(namaHub, today, 1, 'Semarang');
+  await beli(namaHub, today, 1, 'Semarang');
+
+  const pelHub = await call('GET', '/api/pelanggan');
+  check('titik kirim internal tidak ikut jadi pelanggan',
+    !pelHub.rows.some((r) => r.nama === namaHub));
+  check('yang dikecualikan tetap ditampilkan, bukan hilang diam-diam',
+    pelHub.hubInternal.jumlah >= 1
+      && pelHub.hubInternal.daftar.some((h) => h.nama === namaHub),
+    JSON.stringify(pelHub.hubInternal.daftar.map((h) => h.nama)));
+  check('order dan omzet hub internal ikut dilaporkan',
+    pelHub.hubInternal.orders >= 2 && pelHub.hubInternal.omzet > 0,
+    `${pelHub.hubInternal.orders} order, ${pelHub.hubInternal.omzet}`);
+  check('sebaran wilayah tidak menghitung hub internal',
+    !((pelHub.wilayah.find((w) => w.wilayah === 'Semarang') || {}).pelanggan >= 99));
+
+  // Penjagaan terpenting: penanda dicocokkan sebagai KATA UTUH. Kalau tidak,
+  // "RDC" ikut mengenai nama orang, dan pelanggan sungguhan lenyap dari daftar
+  // tanpa ada yang menyadarinya.
+  // "Bardcode" memuat huruf r-d-c berurutan, "Sortiran" memuat "sortir".
+  // Keduanya HARUS lolos: yang dicocokkan kata utuh, bukan potongan huruf.
+  const namaMirip = `Bardcode Sortiran ${Date.now()}`;
+  await beli(namaMirip, today, 1, 'Kebumen');
+  const pelMirip = await call('GET', '/api/pelanggan');
+  check('nama yang hanya memuat penanda di tengah kata tetap dihitung pelanggan',
+    pelMirip.rows.some((r) => r.nama === namaMirip));
+
+  // Daftarnya bisa diubah — tiap marketplace menamai hubnya sendiri-sendiri.
+  const hubAwal = await call('GET', '/api/pelanggan/hub');
+  check('daftar penanda bisa dibaca', Array.isArray(hubAwal.kata) && hubAwal.kata.includes('RDC'),
+    JSON.stringify(hubAwal.kata));
+
+  await call('PUT', '/api/pelanggan/hub', { kata: [] });
+  const pelTanpaHub = await call('GET', '/api/pelanggan');
+  check('mengosongkan penanda mengembalikan hub sebagai pelanggan biasa',
+    pelTanpaHub.rows.some((r) => r.nama === namaHub)
+      && pelTanpaHub.hubInternal.jumlah === 0);
+
+  let tolakHubPendek = 0;
+  try {
+    await call('PUT', '/api/pelanggan/hub', { kata: ['a'] });
+  } catch (err) { tolakHubPendek = err.status; }
+  check('penanda satu huruf ditolak', tolakHubPendek === 400, `status ${tolakHubPendek}`);
+
+  await call('PUT', '/api/pelanggan/hub', { kata: hubAwal.kata });
+  const pelPulih = await call('GET', '/api/pelanggan');
+  check('penanda yang dikembalikan berlaku lagi',
+    !pelPulih.rows.some((r) => r.nama === namaHub));
+
   const unduhPel = await fetch(`${BASE}/api/pelanggan/export/excel`, {
     headers: { Authorization: `Bearer ${token}` },
   });

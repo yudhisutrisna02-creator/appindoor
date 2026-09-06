@@ -620,9 +620,20 @@ Mencocokkan rekening koran dengan jurnal — bukan menggantikan jurnal.
   dinormalkan. Kalau data yang ada memang tidak lengkap, **katakan
   keterbatasannya di layar** — angka pelanggan berulang yang dihitung dari nama
   saja bisa menggabungkan dua orang berbeda.
-- Waspadai "pelanggan" yang sebenarnya titik kirim internal atau gudang
-  perantara. Ia muncul ratusan kali dan menggelembungkan angka pembelian
-  berulang.
+- Marketplace menuliskan **nama hub sortirnya sendiri** di kolom pembeli
+  ("Semarang RDC - Pengiriman SPX"). Satu hub muncul ratusan kali dan menjadi
+  "pelanggan berulang" terbesar kalau dibiarkan.
+  - Dikecualikan lewat daftar kata penanda yang **bisa diubah dari layar**,
+    karena tiap marketplace menamai hubnya sendiri-sendiri dan namanya berganti
+    tanpa memberi tahu siapa pun.
+  - Dicocokkan sebagai **kata utuh**, bukan potongan huruf. "RDC" sebagai
+    potongan ikut mengenai nama orang, dan pelanggan sungguhan yang lenyap dari
+    daftar jauh lebih merugikan daripada satu hub yang lolos.
+  - Penanda satu huruf **ditolak** — ia akan mengenai hampir semua nama, dan
+    pemakainya baru sadar setelah daftar pelanggannya nyaris kosong.
+  - Yang dikecualikan **tetap ditampilkan** beserta jumlah, order, dan omzetnya.
+    Angka yang hilang tanpa penjelasan lebih meresahkan daripada angka yang
+    salah — orang akan menghabiskan waktu mencarinya.
 
 ---
 

@@ -26,9 +26,10 @@
  * pun yang baru — dan merekalah yang paling perlu ditemukan.
  */
 const express = require('express');
-const { db } = require('../db');
+const { z } = require('zod');
+const { db, getSetting, setSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
-const { ah } = require('../utils/http');
+const { ah, parse } = require('../utils/http');
 const { r2 } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
@@ -58,6 +59,51 @@ function kunciPembeli(o) {
 
   const nama = String(o.buyer_name || o.customer || '').trim().toLowerCase().replace(/\s+/g, ' ');
   return nama ? `nama:${nama}` : null;
+}
+
+/**
+ * Titik kirim internal marketplace — terlihat seperti pelanggan, padahal bukan.
+ *
+ * Shopee mengirim sebagian pesanan lewat hub sortirnya sendiri, dan namanya
+ * masuk ke kolom pembeli apa adanya: "Semarang RDC - Pengiriman SPX". Satu hub
+ * bisa muncul ratusan kali, sehingga ia menjadi "pelanggan berulang" terbesar
+ * dan menggelembungkan angka pembelian berulang seluruh toko.
+ *
+ * Yang dikecualikan TIDAK dibuang diam-diam: jumlah, omzet, dan daftarnya tetap
+ * ditampilkan. Angka yang hilang tanpa penjelasan lebih meresahkan daripada
+ * angka yang salah — orang akan menghabiskan waktu mencarinya.
+ *
+ * Daftar katanya bisa diubah lewat layar, karena tiap marketplace menamai
+ * hubnya sendiri-sendiri dan namanya berganti tanpa memberi tahu siapa pun.
+ */
+const KUNCI_HUB = 'pelanggan_hub_internal';
+const HUB_BAWAAN = ['RDC', 'SPX', 'SORTIR', 'HUB'];
+
+function daftarHub() {
+  const isi = getSetting(KUNCI_HUB, null);
+  if (isi == null) return [...HUB_BAWAAN];
+  try {
+    const arr = JSON.parse(isi);
+    if (!Array.isArray(arr)) return [...HUB_BAWAAN];
+    return arr.map((x) => String(x).trim()).filter(Boolean);
+  } catch {
+    return [...HUB_BAWAAN];
+  }
+}
+
+const lolosRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Dicocokkan sebagai KATA UTUH, bukan potongan huruf di tengah nama.
+ *
+ * "RDC" sebagai potongan akan ikut mengenai nama orang seperti "Firdaus", dan
+ * pelanggan sungguhan yang hilang dari daftar jauh lebih merugikan daripada
+ * satu hub yang lolos.
+ */
+function penyaringHub(kata) {
+  if (!kata.length) return () => false;
+  const re = new RegExp(`(^|[^a-z0-9])(${kata.map(lolosRegex).join('|')})([^a-z0-9]|$)`, 'i');
+  return (nama) => re.test(String(nama || ''));
 }
 
 function ambilPelanggan(req) {
@@ -114,7 +160,10 @@ function ambilPelanggan(req) {
 
   const selisihHari = (a, b) => Math.floor((new Date(b) - new Date(a)) / 86400000);
 
-  const rows = [...peta.values()].map((p) => {
+  const kataHub = daftarHub();
+  const adalahHub = penyaringHub(kataHub);
+
+  const semua = [...peta.values()].map((p) => {
     const jeda = selisihHari(p.terakhir, hariIni);
     const umur = selisihHari(p.pertama, hariIni);
 
@@ -133,8 +182,12 @@ function ambilPelanggan(req) {
       // lebih dari sekali; bagi yang baru sekali, tidak ada jaraknya.
       jedaRataHari: p.orders > 1 ? Math.round(selisihHari(p.pertama, p.terakhir) / (p.orders - 1)) : null,
       status,
+      internal: adalahHub(p.nama),
     };
   });
+
+  const hub = semua.filter((x) => x.internal).sort((a, b) => b.omzet - a.omzet);
+  const rows = semua.filter((x) => !x.internal);
 
   rows.sort((a, b) => b.omzet - a.omzet);
 
@@ -168,6 +221,15 @@ function ambilPelanggan(req) {
       rataOrderPerPelanggan: rows.length ? r2(rows.reduce((s, r) => s + r.orders, 0) / rows.length) : 0,
       nilaiRataPelanggan: rows.length ? r2(jum(rows, (r) => r.omzet) / rows.length) : 0,
     },
+    hubInternal: {
+      kata: kataHub,
+      jumlah: hub.length,
+      orders: hub.reduce((s, x) => s + x.orders, 0),
+      omzet: jum(hub, (x) => x.omzet),
+      daftar: hub.slice(0, 20).map((x) => ({
+        kunci: x.kunci, nama: x.nama, kota: x.kota, orders: x.orders, omzet: x.omzet,
+      })),
+    },
     wilayah: ringkasWilayah(rows),
   };
 }
@@ -197,6 +259,28 @@ function ringkasWilayah(rows) {
 
 router.get('/', butuhIzin('penjualan.lihat'), ah((req, res) => res.json(ambilPelanggan(req))));
 
+router.get('/hub', butuhIzin('penjualan.lihat'), ah((req, res) =>
+  res.json({ kata: daftarHub(), bawaan: HUB_BAWAAN })));
+
+const hubSchema = z.object({
+  // Minimal dua huruf: satu huruf akan mengenai hampir semua nama sekaligus,
+  // dan pemakainya baru sadar setelah daftar pelanggannya nyaris kosong.
+  kata: z.array(z.string().trim().min(2, 'kata penanda minimal 2 huruf').max(40)).max(30),
+});
+
+router.put('/hub', butuhIzin('penjualan.ubah'), ah((req, res) => {
+  const body = parse(hubSchema, req.body);
+  const kata = [...new Set(body.kata.map((k) => k.trim()).filter(Boolean))];
+  setSetting(KUNCI_HUB, JSON.stringify(kata));
+  res.json({
+    ok: true,
+    kata,
+    message: kata.length
+      ? `${kata.length} kata penanda titik kirim internal disimpan`
+      : 'Tidak ada yang dikecualikan — semua nama dihitung sebagai pelanggan',
+  });
+}));
+
 daftarkanEkspor(router, {
   path: '/',
   judul: 'Analisis Pelanggan',
@@ -224,6 +308,7 @@ daftarkanEkspor(router, {
         ['Pernah beli berulang', `${d.ringkas.berulang.pelanggan} (${d.ringkas.berulang.persen}%)`],
         ['Tidur — pernah beli lalu berhenti', d.ringkas.tidur.pelanggan],
         ['Order tanpa identitas pembeli', d.ringkas.tanpaIdentitas],
+        ['Titik kirim internal dikecualikan', `${d.hubInternal.jumlah} nama, ${d.hubInternal.orders} order`],
       ],
     };
   },
