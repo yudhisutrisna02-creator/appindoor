@@ -234,7 +234,7 @@ yang ringkas.
 
 ---
 
-## 4. Skema Database (31 Tabel)
+## 4. Skema Database (36 Tabel)
 
 ### Pengguna & hak akses
 | Tabel | Isi |
@@ -269,6 +269,7 @@ yang ringkas.
 | Tabel | Isi |
 |---|---|
 | `purchase_orders`, `purchase_items` | pesanan pembelian, no. faktur, jatuh tempo, tanggal bayar |
+| `purchase_returns` | retur pembelian: barang yang dikembalikan ke supplier, beserta perlakuannya |
 | `partners` | supplier & pelanggan, beserta piutang/utangnya |
 
 ### Keuangan
@@ -279,6 +280,7 @@ yang ringkas.
 | `period_locks` | penguncian periode (tutup buku) |
 | `ad_spends` | biaya iklan per toko/kanal |
 | `targets` | target omzet, laba, batas belanja iklan |
+| `bank_statements`, `bank_statement_lines` | rekening koran yang diunggah, beserta baris yang sudah/belum cocok dengan jurnal |
 
 ### Presensi & gaji
 | Tabel | Isi |
@@ -319,13 +321,16 @@ dan API-nya juga menolak — bukan sekadar disembunyikan.
 - **Batch & Kadaluarsa** — batch menjelang kadaluarsa beserta nilainya, diurutkan dari yang mendesak
 
 ### Pembelian
+- **Saran Pembelian** — barang yang perlu dibeli beserta jumlah dan perkiraan dananya
 - **Pesanan Pembelian** — PO, faktur, jatuh tempo, penerimaan barang
+- **Retur Pembelian** — barang dikembalikan ke supplier; stok berkurang, utang atau kas menyesuaikan
 
 ### Penjualan
 - **Order Penjualan** — daftar + formulir order (8 kartu statistik, pencarian di semua submenu)
 - **Papan Pengiriman** — kanban per tahap, ubah status massal
 - **Pencairan Dana** — dana marketplace yang belum cair, rekonsiliasi
 - **Analisis Margin** — margin per kanal & produk
+- **Analisis Pelanggan** — pembeli berulang, nilai seumur hidup, sebaran kota
 - **Retur Penjualan**
 - **Toko / Marketplace** — kinerja per toko
 - **Biaya Iklan** — belanja iklan per toko, laba setelah iklan, ROAS
@@ -335,6 +340,7 @@ dan API-nya juga menolak — bukan sekadar disembunyikan.
 - **Rekening Kas & Bank** — saldo per rekening, rincian pergerakan
 - **Kas Masuk & Keluar**
 - **Pindah Saldo** — memindahkan uang antar rekening sendiri (bank ke kas tunai, kas ke bank, antar bank)
+- **Rekonsiliasi Bank** — mencocokkan rekening koran dengan jurnal, menandai yang belum tercatat
 - **Proyeksi Arus Kas**
 - **Utang & Piutang**
 - **Laporan Keuangan** — neraca, laba rugi, arus kas, neraca saldo
@@ -565,6 +571,61 @@ masalah yang membuat orang membetulkan tanggalnya sejak awal.
 
 ---
 
+### Retur pembelian
+
+Arah uangnya berlawanan dengan retur penjualan, jadi **tidak boleh memakai
+jalur yang sama**: retur penjualan mengurangi pendapatan, retur pembelian
+mengurangi utang atau mengembalikan kas.
+
+- Dua perlakuan, dan **orangnya yang memilih** — bukan ditebak dari status
+  pembayaran PO. Menebaknya terdengar pintar tetapi salah: satu PO bisa dibayar
+  sebagian, dan supplier sering memotong tagihan berikutnya alih-alih mengirim
+  uang kembali. Yang tahu kesepakatannya hanya orang yang menelepon suppliernya.
+  - **Potong utang** — barang belum dibayar: Utang Usaha didebit, Persediaan dikredit.
+  - **Dana kembali** — barang sudah dibayar: rekening kas didebit, Persediaan dikredit.
+- Menolak mengembalikan lebih banyak daripada stok yang ada. Membiarkannya
+  membuat stok minus, dan stok minus tidak pernah bisa dijelaskan kepada siapa
+  pun yang menghitung fisik.
+- Batch dipotong FEFO seperti pengeluaran lain. Barang cacat memang biasanya
+  dari batch tertentu, tetapi memilihnya butuh orang yang melihat fisiknya.
+- **Tanpa menu ini**, barang rusak hanya bisa dicatat lewat koreksi stok:
+  stoknya berkurang tetapi utangnya tidak, sehingga aplikasi tetap menagih
+  pembayaran untuk barang yang sudah dikembalikan.
+
+### Rekonsiliasi bank
+
+Mencocokkan rekening koran dengan jurnal — bukan menggantikan jurnal.
+
+- Kecocokan hanya diterima kalau **nilainya persis sama** dan tanggalnya dalam
+  toleransi ±3 hari.
+- Kalau calon pasangannya **lebih dari satu, menyerah** dan menyerahkannya ke
+  orang. Memilih salah satu secara sembarang menghasilkan pembukuan yang
+  terlihat rapi tetapi menunjuk transaksi yang keliru — dan itu jauh lebih
+  sulit ditemukan daripada baris yang jujur belum cocok.
+- Baris yang ada di koran tetapi tidak ada di jurnal adalah **temuan**, bukan
+  galat: biasanya biaya admin bank atau bunga yang memang belum dicatat.
+
+### Saran pembelian
+
+- **Tidak pernah menyarankan barang yang tidak laku.** Produk berstatus diam
+  bukan kekurangan stok — membelinya lagi justru menambah modal menganggur.
+- Barang yang **sudah dipesan tetapi belum datang dikurangkan** dari sarannya,
+  kalau tidak barang yang sama dipesan dua kali.
+- Waktu tunggu dihitung dari **riwayat penerimaan yang sesungguhnya**, bukan
+  angka tetap yang ditebak.
+
+### Analisis pelanggan
+
+- Identitas pembeli disusun dari nomor telepon dulu, baru nama yang
+  dinormalkan. Kalau data yang ada memang tidak lengkap, **katakan
+  keterbatasannya di layar** — angka pelanggan berulang yang dihitung dari nama
+  saja bisa menggabungkan dua orang berbeda.
+- Waspadai "pelanggan" yang sebenarnya titik kirim internal atau gudang
+  perantara. Ia muncul ratusan kali dan menggelembungkan angka pembelian
+  berulang.
+
+---
+
 ## 9. Fitur Lintas Modul
 
 ### Ekspor terpadu
@@ -646,8 +707,9 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 482 pemeriksaan, 37 bagian
+npm run smoke            # 629 pemeriksaan, 46 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
+npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
 
 ### Aturan menulis uji
@@ -663,6 +725,12 @@ npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
    penggajian pernah gagal setiap tanggal 1 karena gaji jatuh tempo tanggal 25,
    di luar jendela "awal bulan sampai hari ini".
 4. **Setiap perbaikan bug ditemani satu uji** yang gagal sebelum perbaikan.
+5. **Uji tidak menggantikan membuka halamannya.** Uji asap berbicara dengan
+   API, bukan dengan layar. Satu ikon menu yang lupa diimpor pernah membuat
+   seluruh aplikasi di produksi layar putih total — build lulus, 611 pemeriksaan
+   lulus, dan tidak ada satu pun yang menyadarinya. Sejak itu: `npm run cek:ikon`
+   berjalan sebelum penyebaran, dan setiap halaman baru DIBUKA di peramban
+   beserta konsolnya sebelum kode didorong.
 
 ---
 
@@ -974,11 +1042,56 @@ valuasi stok gudang.
      gagal di tanggal tertentu saja, dan itu sangat membingungkan.
    - Tiap perbaikan bug ditemani satu uji yang gagal sebelum perbaikan.
 2. Buat scripts/smoke-features.js untuk alur ujung-ke-ujung.
+3. Buat scripts/cek-ikon.js — memeriksa tiap ikon yang dipakai menu benar-benar
+   diimpor. Build TIDAK menangkap ini: identifier yang tidak ada bukan galat
+   sintaks, ia baru meledak saat halaman dibuka dan hasilnya LAYAR PUTIH TOTAL.
+   Uji asap pun tidak menangkapnya karena ia berbicara dengan API, bukan
+   membuka halaman.
+4. SEBELUM setiap penyebaran, BUKA halaman yang baru dibuat di peramban dan
+   periksa konsolnya. Build lulus dan uji lulus tidak berarti halamannya bisa
+   dibuka.
 3. Penyebaran: GitHub Actions memverifikasi build, lalu webhook deploy.
    Database dan folder unggahan WAJIB di luar folder aplikasi supaya tidak
    terhapus saat kode diperbarui.
    .gitignore WAJIB memuat .env, berkas database, dan catatan akses.
    JANGAN PERNAH menjalankan penyemaian data contoh terhadap database produksi.
+```
+
+---
+
+### TAHAP 11 — Pelengkap Operasional
+
+```
+Dibangun paling akhir karena semuanya membaca data yang sudah ada, bukan
+membuat data baru. Jangan dikerjakan sebelum penjualan dan pembelian benar.
+
+1. Saran Pembelian — barang yang perlu dibeli beserta jumlah dan perkiraan
+   dananya, dihitung dari kecepatan penjualan dan waktu tunggu supplier yang
+   diambil dari riwayat penerimaan sesungguhnya.
+   JANGAN menyarankan produk yang tidak laku — itu bukan kekurangan stok,
+   melainkan modal menganggur yang akan bertambah.
+   Barang yang sudah dipesan tetapi belum datang WAJIB dikurangkan, kalau tidak
+   barang yang sama dipesan dua kali.
+
+2. Retur Pembelian — barang dikembalikan ke supplier. Stok berkurang lewat
+   jalur pengeluaran yang sama dengan penjualan (batch ikut terpotong FEFO),
+   dan pembukuannya menyesuaikan.
+   Perlakuannya DIPILIH ORANGNYA, bukan ditebak dari status pembayaran PO:
+   potong utang (debit Utang Usaha) atau dana kembali (debit kas), keduanya
+   mengkredit Persediaan.
+   Tolak mengembalikan lebih banyak daripada stok yang ada.
+
+3. Rekonsiliasi Bank — unggah rekening koran, cocokkan dengan jurnal.
+   Hanya cocok bila nilainya PERSIS sama dan tanggalnya dalam toleransi 3 hari.
+   Bila calonnya lebih dari satu, MENYERAH dan serahkan ke orang — tebakan yang
+   salah menghasilkan pembukuan yang terlihat rapi tetapi menunjuk transaksi
+   keliru, dan itu jauh lebih sulit ditemukan daripada baris yang belum cocok.
+
+4. Analisis Pelanggan — pembeli berulang, nilai seumur hidup, sebaran kota.
+   Identitas disusun dari nomor telepon dulu, baru nama yang dinormalkan.
+   Periksa DULU kelengkapan data pembelinya sebelum membangun layarnya; kalau
+   nomor teleponnya jarang terisi, katakan keterbatasan itu di layar alih-alih
+   menyajikan angka yang terdengar pasti.
 ```
 
 ---
@@ -1029,10 +1142,15 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Skrip pengganti massal memakai penanda sementara | Penanda tidak terpulihkan karena backslash regex termakan shell; sumbu grafik kehilangan formatternya dan menampilkan angka mentah — lolos build karena JSX menerima atribut apa pun |
 | Saldo awal tidak pernah dimasukkan | Semua rekening minus meski uangnya ada; setiap pembayaran tampak keluar dari nol |
 | Akun COA baru diberi kode arus kas di luar OCF/ICF/FCF/NONE | Peladen GAGAL START total saat penyemaian akun |
+| Ikon menu dipakai tetapi lupa diimpor | SELURUH aplikasi di produksi layar putih, tanpa pesan apa pun — build lulus, uji lulus, karena keduanya tidak pernah membuka halamannya |
+| Penjaga skrip penyunting memeriksa potongan teks yang justru baru saja ditambahkan | Penjaganya selalu "sudah ada", impornya tidak pernah ditambahkan |
+| Jejak perubahan memakai `datetime('now')` (UTC) sementara aplikasi memakai waktu setempat | Perubahan pukul 00:00–07:00 tercatat di tanggal kemarin; halaman Riwayat tampak kosong padahal ada isinya |
+| Menelan galat pencatatan jejak dengan `catch {}` kosong | Jejak berhenti tercatat tanpa ada yang tahu |
+| Nilai tingkat peringatan yang tidak dikenal ditulis begitu saja | Hitungan dan urutan Pusat Perhatian salah diam-diam; baru ketahuan setelah butir kedua memakainya juga — beri penjaga yang MELEMPAR galat |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---
 
-*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 5 September 2026.
+*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 6 September 2026.
 Saat aplikasinya berkembang, perbarui dokumen ini bersamaan — panduan duplikasi
 yang tertinggal dari kenyataan lebih menyesatkan daripada tidak ada panduan.*
