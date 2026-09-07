@@ -3179,10 +3179,15 @@ async function main() {
   const wajibkan = await call('POST', '/api/admin/users/wajib-ganti-sandi', {});
   check('seluruh tim bisa diwajibkan ganti kata sandi sekaligus', wajibkan.jumlah > 0);
 
+  // Email admin diambil dari akun yang benar-benar dipakai masuk, bukan
+  // ditulis mati. Alamat bawaannya bisa disetel lewat SEED_ADMIN_EMAIL — dan
+  // di CI memang disetel berbeda, sehingga baris ini dulu tidak menemukan
+  // siapa pun dan uji gagal hanya di sana.
   const daftarSetelah = await call('GET', '/api/admin/users');
-  const sayaSendiri = daftarSetelah.users.find((u) => u.email === 'admin@kebumen.local');
+  const sayaSendiri = daftarSetelah.users.find((u) => u.email === login.user.email);
   check('pengelola yang menekan tidak ikut terkunci',
-    sayaSendiri && !sayaSendiri.must_change_password);
+    sayaSendiri && !sayaSendiri.must_change_password,
+    `admin ${login.user.email}`);
 
   // Kata sandi lama harus tetap bisa dipakai masuk — kalau ikut diacak,
   // seluruh tim berhenti bekerja sampai ada yang membagikan yang baru.
