@@ -85,10 +85,38 @@ const orderSchema = z.object({
   buyer_address: z.string().trim().max(300).optional().nullable(),
   buyer_city: z.string().trim().max(80).optional().nullable(),
   lead_source: z.string().trim().max(50).optional().nullable(),
+  // Rekening penerima uangnya. Kosong berarti ikut rekening bawaan tokonya.
+  cash_code: z.string().trim().optional().nullable(),
 
   payment_status: z.enum(['PAID', 'UNPAID']).default('PAID'),
   note: z.string().max(300).optional().nullable(),
 });
+
+/**
+ * Rekening penerima uang sebuah order.
+ *
+ * Uang order hampir tidak pernah masuk ke kas tunai: pembeli mentransfer, dan
+ * marketplace mencairkan ke rekening tertentu milik toko itu. Karena itu
+ * rekeningnya diambil menurut urutan berikut:
+ *
+ *   1. yang dipilih pada ordernya — orang yang mengetik selalu menang;
+ *   2. rekening bawaan tokonya — supaya tidak perlu dipilih ulang tiap order;
+ *   3. dikosongkan — jurnalnya lalu memakai perkiraan lama, sehingga order
+ *      yang dicatat sebelum ada kolom ini tidak berubah artinya.
+ */
+function rekeningOrder(body) {
+  if (body.cash_code) {
+    const akun = db.prepare('SELECT * FROM accounts WHERE code = ?').get(body.cash_code);
+    if (!akun) throw httpError(404, `Rekening ${body.cash_code} tidak ditemukan`);
+    if (!akun.is_cash) throw httpError(422, `${akun.code} · ${akun.name} bukan rekening kas/bank`);
+    return akun.code;
+  }
+  if (body.shop_id) {
+    const toko = db.prepare('SELECT cash_code FROM shops WHERE id = ?').get(body.shop_id);
+    if (toko && toko.cash_code) return toko.cash_code;
+  }
+  return null;
+}
 
 /**
  * Menghitung seluruh struktur biaya & margin satu order.
@@ -273,6 +301,12 @@ const createOrder = db.transaction((body, userId) => {
   const calc = computeOrder(body, items);
   const orderNo = nextNumber('SO', body.order_date.slice(0, 7));
 
+  // Dihitung SEKALI lalu dipakai dua tempat: baris ordernya dan jurnalnya.
+  // Menghitungnya dua kali membuka peluang keduanya berbeda — dan jurnal yang
+  // menunjuk rekening berbeda dari yang tertulis di ordernya adalah selisih
+  // yang tidak akan pernah bisa dijelaskan.
+  const kodeRekening = rekeningOrder(body);
+
   const info = db
     .prepare(
       `INSERT INTO sales_orders (
@@ -284,9 +318,9 @@ const createOrder = db.transaction((body, userId) => {
          payment_status, status, note, user_id, partner_id, due_date,
          shop_id, order_ref, courier, tracking_no, fulfillment_status, payout_date,
          shipping_charged, buyer_name, buyer_account, buyer_phone, buyer_address,
-         buyer_city, lead_source, shipping_non_mp
+         buyer_city, lead_source, shipping_non_mp, cash_code
        ) VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, 'POSTED', ?, ?, ?, ?,
-                 ?,?,?,?,?,?, ?,?,?,?,?, ?,?, ?)`
+                 ?,?,?,?,?,?, ?,?,?,?,?, ?,?, ?, ?)`
     )
     .run(
       orderNo, body.order_date, body.channel, body.customer || null, body.marketplace_ref || null,
@@ -300,7 +334,8 @@ const createOrder = db.transaction((body, userId) => {
       body.tracking_no || null, body.fulfillment_status, body.payout_date || null,
       r2(body.shipping_charged), body.buyer_name || null, body.buyer_account || null,
       body.buyer_phone || null, body.buyer_address || null,
-      body.buyer_city || null, body.lead_source || null, calc.shipping_non_mp
+      body.buyer_city || null, body.lead_source || null, calc.shipping_non_mp,
+      kodeRekening
     );
 
   const orderId = info.lastInsertRowid;
@@ -349,7 +384,7 @@ const createOrder = db.transaction((body, userId) => {
   const journal = postJournal({
     date: body.order_date,
     description: `Penjualan ${orderNo} — ${CHANNEL_LABEL[body.channel]}`,
-    lines: buildSalesJournalLines({ ...body, ...calc }),
+    lines: buildSalesJournalLines({ ...body, ...calc, cash_code: kodeRekening }),
     source: 'SALES',
     sourceId: orderId,
     userId,
@@ -1032,6 +1067,8 @@ const returnSchema = z.object({
   // Dipertahankan demi pemanggil lama; kondisi yang menang bila keduanya ada.
   restock: z.boolean().default(true),
   kondisi: z.enum(KONDISI).optional(),
+  // Rekening yang dipotong. Kosong berarti ikut rekening ordernya.
+  cash_code: z.string().trim().optional().nullable(),
   reason: z.string().max(300).optional().nullable(),
 });
 
@@ -1098,6 +1135,44 @@ function periksaOrderAsal(orderId, productId, qty, abaikanId = null) {
  * nomornya sudah beredar di percakapan dengan pembeli, dan id yang berganti
  * tiap kali diubah membuat riwayat perubahan tidak bisa ditelusuri.
  */
+/**
+ * Rekening yang dipotong saat dana dikembalikan ke pembeli.
+ *
+ * Urutannya mengikuti dari mana uangnya dulu datang:
+ *   1. rekening yang dipilih pada formulir retur — orangnya selalu menang;
+ *   2. rekening ordernya;
+ *   3. rekening bawaan toko tempat order itu dibuat;
+ *   4. kas tunai, sebagai jalan terakhir untuk penjualan luring.
+ */
+function rekeningPengembalian(body) {
+  const pakai = (code) => {
+    if (!code) return null;
+    const akun = db.prepare('SELECT * FROM accounts WHERE code = ? AND is_cash = 1').get(code);
+    return akun ? akun.code : null;
+  };
+
+  if (body.cash_code) {
+    const akun = db.prepare('SELECT * FROM accounts WHERE code = ?').get(body.cash_code);
+    if (!akun) throw httpError(404, `Rekening ${body.cash_code} tidak ditemukan`);
+    if (!akun.is_cash) throw httpError(422, `${akun.code} · ${akun.name} bukan rekening kas/bank`);
+    return akun.code;
+  }
+
+  if (body.order_id) {
+    const o = db
+      .prepare(
+        `SELECT o.cash_code, s.cash_code AS toko_cash_code
+           FROM sales_orders o
+           LEFT JOIN shops s ON s.id = o.shop_id
+          WHERE o.id = ?`
+      )
+      .get(body.order_id);
+    if (o) return pakai(o.cash_code) || pakai(o.toko_cash_code) || ACC.CASH;
+  }
+
+  return ACC.CASH;
+}
+
 const tulisRetur = db.transaction((body, userId) => {
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(body.product_id);
   if (!product) throw httpError(404, 'Produk tidak ditemukan');
@@ -1112,6 +1187,14 @@ const tulisRetur = db.transaction((body, userId) => {
   const costValue = r2(qty * product.cost);
   // Nomor dipertahankan saat retur diubah: nomor itu sudah beredar di
   // percakapan dengan pembeli, jadi menggantinya hanya membingungkan.
+  // Uangnya dikembalikan lewat jalan yang sama dengan masuknya.
+  //
+  // Pembeli marketplace tidak pernah menerima uang tunai dari kita: dananya
+  // dipotong dari saldo toko tempat ia membeli. Mengkreditkan kas tunai
+  // membuat saldo tunai berkurang untuk uang yang tidak pernah ada di laci,
+  // sementara rekening toko yang benar-benar terpotong tetap tampak utuh.
+  const rekeningRetur = rekeningPengembalian(body);
+
   const returnNo = body.return_no || nextNumber('RTN', body.return_date.slice(0, 7));
 
   let returnId = body.id || null;
@@ -1119,26 +1202,26 @@ const tulisRetur = db.transaction((body, userId) => {
     db.prepare(
       `UPDATE sales_returns
           SET return_date = ?, order_id = ?, product_id = ?, qty = ?, price = ?, cost = ?,
-              amount = ?, restock = ?, kondisi = ?, reason = ?
+              amount = ?, restock = ?, kondisi = ?, reason = ?, cash_code = ?
         WHERE id = ?`
     ).run(
       body.return_date, body.order_id || null, product.id, qty, r2(body.price),
-      product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, returnId
+      product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, rekeningRetur, returnId
     );
   } else {
     returnId = db
       .prepare(
-        `INSERT INTO sales_returns (return_no, return_date, order_id, product_id, qty, price, cost, amount, restock, kondisi, reason, user_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO sales_returns (return_no, return_date, order_id, product_id, qty, price, cost, amount, restock, kondisi, reason, user_id, cash_code)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
       )
-      .run(returnNo, body.return_date, body.order_id || null, product.id, qty, r2(body.price), product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, userId)
+      .run(returnNo, body.return_date, body.order_id || null, product.id, qty, r2(body.price), product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, userId, rekeningRetur)
       .lastInsertRowid;
   }
   const info = { lastInsertRowid: returnId };
 
   const lines = [
     { code: ACC.SALES_RETURN, debit: amount, credit: 0, memo: `Retur ${product.name}` },
-    { code: ACC.CASH, debit: 0, credit: amount, memo: 'Pengembalian dana pelanggan' },
+    { code: rekeningRetur, debit: 0, credit: amount, memo: 'Pengembalian dana pembeli' },
   ];
 
   if (kondisi === 'PERBAIKI') {

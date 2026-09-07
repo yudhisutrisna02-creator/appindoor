@@ -4995,6 +4995,140 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n50. Rekening penerima order & pengembalian dana retur');
+
+  const capRO = Date.now();
+  const rekRO = await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI TOKO A 111-222-${capRO}`, `BNI UJI TOKO B 333-444-${capRO}`],
+    mulai_kode: '1500',
+  });
+  const kodeA = rekRO.dibuat[0].code;
+  const kodeB = rekRO.dibuat[1].code;
+
+  const tokoA = (await call('POST', '/api/shops', {
+    name: `Sh Uji Rekening A ${capRO}`, channel: 'SHOPEE', cash_code: kodeA,
+  })).shop;
+  check('toko bisa punya rekening bawaan', tokoA.cash_code === kodeA, String(tokoA.cash_code));
+
+  const daftarTokoRO = await call('GET', '/api/shops');
+  const barisTokoRO = daftarTokoRO.shops.find((x) => x.id === tokoA.id);
+  check('nama rekening ikut dikirim ke layar toko',
+    !!barisTokoRO && /BCA UJI TOKO A/.test(barisTokoRO.rekening_nama || ''),
+    String(barisTokoRO && barisTokoRO.rekening_nama));
+
+  // Akun yang bukan rekening kas tidak boleh dipasang sebagai rekening toko.
+  let tolakBukanKas50 = 0;
+  try {
+    await call('POST', '/api/shops', {
+      name: `Sh Salah Akun ${capRO}`, channel: 'SHOPEE', cash_code: '4000',
+    });
+  } catch (err) { tolakBukanKas50 = err.status; }
+  check('akun non-kas ditolak sebagai rekening toko', tolakBukanKas50 === 422,
+    `status ${tolakBukanKas50}`);
+
+  const skuRO = `REK-${Date.now()}`;
+  const prodRO = (await call('POST', '/api/inventory/products', {
+    sku: skuRO, name: 'Produk Uji Rekening', cost: 0, price: 100000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodRO.id, move_date: today, move_type: 'IN',
+    qty: 100, unit_cost: 40000, payment: 'CASH',
+  });
+
+  const saldoAkun50 = async (kode) => {
+    const tb = await call('GET',
+      `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+
+  // Order tanpa memilih rekening: ikut rekening bawaan tokonya.
+  const sblmA = await saldoAkun50(kodeA);
+  const orderRO = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', shop_id: tokoA.id,
+    customer: 'Pembeli Rekening', buyer_name: 'Pembeli Rekening',
+    order_ref: `SPX-REK-${capRO}`,
+    payment_status: 'PAID',
+    items: [{ product_id: prodRO.id, qty: 2, price: 100000 }],
+  })).order;
+  check('rekening order terisi dari bawaan tokonya',
+    orderRO.cash_code === kodeA, String(orderRO.cash_code));
+
+  const ssdhA = await saldoAkun50(kodeA);
+  check('uang order masuk ke rekening tokonya, bukan kas tunai',
+    near(ssdhA - sblmA, 200000, 1), `${sblmA} -> ${ssdhA}`);
+
+  // Rekening yang dipilih pada ordernya menang atas bawaan tokonya.
+  const sblmB = await saldoAkun50(kodeB);
+  const orderRO2 = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', shop_id: tokoA.id, cash_code: kodeB,
+    customer: 'Pembeli Rekening 2', payment_status: 'PAID',
+    items: [{ product_id: prodRO.id, qty: 1, price: 100000 }],
+  })).order;
+  check('rekening yang dipilih pada order menang atas bawaan toko',
+    orderRO2.cash_code === kodeB, String(orderRO2.cash_code));
+  check('uangnya masuk ke rekening yang dipilih',
+    near((await saldoAkun50(kodeB)) - sblmB, 100000, 1));
+
+  let tolakRekOrder = 0;
+  try {
+    await call('POST', '/api/sales', {
+      order_date: today, channel: 'SHOPEE', shop_id: tokoA.id, cash_code: '4000',
+      items: [{ product_id: prodRO.id, qty: 1, price: 100000 }],
+    });
+  } catch (err) { tolakRekOrder = err.status; }
+  check('akun non-kas ditolak sebagai rekening order', tolakRekOrder === 422,
+    `status ${tolakRekOrder}`);
+
+  // ---- Pengembalian dana retur ----
+  // Pembeli marketplace tidak pernah menerima uang tunai dari kita: dananya
+  // dipotong dari saldo toko tempat ia membeli.
+  const kasSblmRetur = await saldoAkun50('1000');
+  const rekSblmRetur = await saldoAkun50(kodeA);
+
+  const returRO = await call('POST', '/api/sales/returns', {
+    return_date: today, order_id: orderRO.id, product_id: prodRO.id,
+    qty: 1, price: 100000, kondisi: 'BAGUS', reason: 'Uji pengembalian dana',
+  });
+  check('retur dari order tersimpan', returRO.ok === true);
+
+  check('dana retur dipotong dari rekening tokonya',
+    near((await saldoAkun50(kodeA)) - rekSblmRetur, -100000, 1),
+    'rekening toko terpotong');
+  check('kas tunai TIDAK ikut terpotong oleh retur marketplace',
+    near((await saldoAkun50('1000')) - kasSblmRetur, 0, 1),
+    'kas tunai tidak berubah');
+
+  const daftarReturRO = await call('GET', `/api/sales/returns/list?from=${today}&to=${today}`);
+  const barisReturRO = daftarReturRO.rows.find((r) => r.return_no === returRO.return_no);
+  check('rekening pengembalian ikut tercatat pada returnya',
+    barisReturRO && barisReturRO.cash_code === kodeA, String(barisReturRO && barisReturRO.cash_code));
+
+  // Retur penjualan luring tetap jatuh ke kas tunai.
+  const kasSblmLuring = await saldoAkun50('1000');
+  await call('POST', '/api/sales/returns', {
+    return_date: today, product_id: prodRO.id, qty: 1, price: 50000, kondisi: 'BAGUS',
+    reason: 'Retur luring tanpa order',
+  });
+  check('retur tanpa order tetap memotong kas tunai',
+    near((await saldoAkun50('1000')) - kasSblmLuring, -50000, 1));
+
+  const tbRO50 = await call('GET',
+    `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca tetap seimbang setelah order & retur berrekening',
+    Math.abs(tbRO50.totalDebit - tbRO50.totalCredit) < 0.01);
+
+  // Order lama yang belum punya rekening tidak boleh berpindah akun sendiri.
+  const orderLama50 = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Pembeli Luring',
+    payment_status: 'PAID',
+    items: [{ product_id: prodRO.id, qty: 1, price: 100000 }],
+  })).order;
+  check('order tanpa toko dan tanpa rekening tetap tercatat',
+    orderLama50.cash_code === null || orderLama50.cash_code === undefined,
+    String(orderLama50.cash_code));
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

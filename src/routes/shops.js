@@ -24,8 +24,20 @@ const shopSchema = z.object({
   name: z.string().trim().min(1, 'nama toko wajib diisi').max(100),
   channel: z.enum(CHANNELS).default('SHOPEE'),
   note: z.string().trim().max(300).optional().nullable(),
+  // Rekening penerima uang toko ini. Marketplace mencairkan ke rekening
+  // tertentu, dan yang mengetik order tidak perlu mengingat yang mana.
+  cash_code: z.string().trim().optional().nullable(),
   active: z.boolean().default(true),
 });
+
+/** Memastikan kode yang dipilih memang rekening kas/bank yang aktif. */
+function periksaRekening(code) {
+  if (!code) return null;
+  const akun = db.prepare('SELECT * FROM accounts WHERE code = ?').get(code);
+  if (!akun) throw httpError(404, `Rekening ${code} tidak ditemukan`);
+  if (!akun.is_cash) throw httpError(422, `${akun.code} · ${akun.name} bukan rekening kas/bank`);
+  return akun.code;
+}
 
 /** GET /api/shops — daftar toko beserta ringkasan performanya. */
 /** Pengambil daftar toko + performanya — dipakai layar dan berkas unduhan. */
@@ -35,12 +47,14 @@ function ambilToko(req) {
   const rows = db
     .prepare(
       `SELECT s.*,
+              ak.name                           AS rekening_nama,
               COUNT(o.id)                       AS orders,
               COALESCE(SUM(o.net_revenue), 0)   AS net_revenue,
               COALESCE(SUM(o.cogs), 0)          AS cogs,
               COALESCE(SUM(o.total_fees), 0)    AS total_fees,
               COALESCE(SUM(o.net_profit), 0)    AS net_profit
          FROM shops s
+         LEFT JOIN accounts ak ON ak.code = s.cash_code
          LEFT JOIN sales_orders o
                 ON o.shop_id = s.id
                AND o.status = 'POSTED'
@@ -98,8 +112,8 @@ router.post('/', butuhIzin('penjualan.toko'), ah((req, res) => {
     throw httpError(409, `Toko "${s.name}" sudah terdaftar`);
   }
   const info = db
-    .prepare('INSERT INTO shops (name, channel, note, active) VALUES (?,?,?,?)')
-    .run(s.name, s.channel, s.note || null, s.active ? 1 : 0);
+    .prepare('INSERT INTO shops (name, channel, note, cash_code, active) VALUES (?,?,?,?,?)')
+    .run(s.name, s.channel, s.note || null, periksaRekening(s.cash_code), s.active ? 1 : 0);
 
   res.status(201).json({ ok: true, shop: db.prepare('SELECT * FROM shops WHERE id = ?').get(info.lastInsertRowid) });
 }));
@@ -112,8 +126,8 @@ router.put('/:id', butuhIzin('penjualan.toko'), ah((req, res) => {
   const dupe = db.prepare('SELECT id FROM shops WHERE name = ? AND id <> ?').get(s.name, existing.id);
   if (dupe) throw httpError(409, `Toko "${s.name}" sudah terdaftar`);
 
-  db.prepare('UPDATE shops SET name=?, channel=?, note=?, active=? WHERE id=?')
-    .run(s.name, s.channel, s.note || null, s.active ? 1 : 0, existing.id);
+  db.prepare('UPDATE shops SET name=?, channel=?, note=?, cash_code=?, active=? WHERE id=?')
+    .run(s.name, s.channel, s.note || null, periksaRekening(s.cash_code), s.active ? 1 : 0, existing.id);
 
   res.json({ ok: true, shop: db.prepare('SELECT * FROM shops WHERE id = ?').get(existing.id) });
 }));

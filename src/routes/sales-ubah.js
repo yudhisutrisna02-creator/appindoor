@@ -86,6 +86,7 @@ const ubahSchema = z.object({
 
   payment_status: z.enum(['PAID', 'UNPAID']).optional(),
   note: z.string().max(300).optional().nullable(),
+  cash_code: z.string().trim().optional().nullable(),
 });
 
 /** Kolom yang hanya keterangan — mengubahnya tidak menyentuh angka mana pun. */
@@ -93,7 +94,7 @@ const KOLOM_KETERANGAN = [
   'customer', 'marketplace_ref', 'shop_id', 'order_ref', 'courier', 'tracking_no',
   'fulfillment_status', 'payout_date', 'buyer_name', 'buyer_account', 'buyer_phone',
   'buyer_address', 'buyer_city', 'lead_source', 'note', 'partner_id', 'due_date',
-  'shipping_charged',
+  'shipping_charged', 'cash_code',
 ];
 
 /** Kolom yang ikut menentukan perhitungan laba dan isi jurnal. */
@@ -258,7 +259,7 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
          shop_id = ?, order_ref = ?, courier = ?, tracking_no = ?, fulfillment_status = ?,
          payout_date = ?, shipping_charged = ?, buyer_name = ?, buyer_account = ?,
          buyer_phone = ?, buyer_address = ?, buyer_city = ?, lead_source = ?,
-         shipping_non_mp = ?
+         shipping_non_mp = ?, cash_code = ?
        WHERE id = ?`
     ).run(
       gabung.order_date, gabung.channel, gabung.customer || null, gabung.marketplace_ref || null,
@@ -272,7 +273,7 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
       gabung.tracking_no || null, gabung.fulfillment_status, gabung.payout_date || null,
       r2(gabung.shipping_charged), gabung.buyer_name || null, gabung.buyer_account || null,
       gabung.buyer_phone || null, gabung.buyer_address || null, gabung.buyer_city || null,
-      gabung.lead_source || null, hitung.shipping_non_mp,
+      gabung.lead_source || null, hitung.shipping_non_mp, gabung.cash_code || null,
       orderId
     );
 

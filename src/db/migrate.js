@@ -432,6 +432,19 @@ function runMigrations(db) {
   selaraskanWaktuRiwayat(db, applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
+  // --- Rekening penerima uang penjualan ---
+  //
+  // Uang order hampir tidak pernah masuk ke kas tunai: pembeli mentransfer, dan
+  // marketplace mencairkan ke rekening tertentu milik toko itu. Selama seluruh
+  // penerimaan menumpuk di satu akun, saldo aplikasi tidak akan pernah cocok
+  // dengan mutasi bank mana pun.
+  //
+  // Kolomnya boleh kosong, dan yang kosong tetap diperlakukan seperti dulu —
+  // order lama tidak boleh berubah artinya hanya karena ada kolom baru.
+  addColumn(db, 'shops', 'cash_code', 'TEXT', applied);
+  addColumn(db, 'sales_orders', 'cash_code', 'TEXT', applied);
+  addColumn(db, 'sales_returns', 'cash_code', 'TEXT', applied);
+
   // --- Nilai barang yang benar-benar sudah diterima ---
   // Sebelum pesanan bisa diubah, nilai penerimaan cukup dihitung sebagai
   // qty_received × unit_cost — harga pesanan tidak pernah berubah, jadi angka

@@ -10,7 +10,7 @@ import {
 import { rupiah, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
-const EMPTY = { name: '', channel: 'SHOPEE', note: '', active: true };
+const EMPTY = { name: '', channel: 'SHOPEE', note: '', cash_code: '', active: true };
 
 /**
  * Satu perusahaan bisa punya banyak akun toko pada marketplace yang sama.
@@ -25,6 +25,7 @@ export default function Toko() {
   const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
+  const [rekening, setRekening] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,6 +41,10 @@ export default function Toko() {
   }, [range]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    api.get('/api/cashflow/options').then((d) => setRekening(d.cashAccounts || [])).catch(() => {});
+  }, []);
 
   async function save(e) {
     e.preventDefault();
@@ -199,6 +204,19 @@ export default function Toko() {
             <Field label="Channel *" className="sm:col-span-2">
               <select className="input" value={editing.channel} onChange={(e) => setEditing({ ...editing, channel: e.target.value })}>
                 {Object.entries(CHANNEL_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            <Field
+              label="Rekening Penerima"
+              hint="Rekening tujuan pencairan toko ini — terisi sendiri saat mencatat order"
+              className="sm:col-span-2"
+            >
+              <select
+                className="input" value={editing.cash_code || ''}
+                onChange={(e) => setEditing({ ...editing, cash_code: e.target.value })}
+              >
+                <option value="">— belum ditentukan —</option>
+                {rekening.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
               </select>
             </Field>
             <Field label="Catatan" className="sm:col-span-2">

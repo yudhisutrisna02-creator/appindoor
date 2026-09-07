@@ -194,8 +194,11 @@ function deleteJournalById(id) {
  */
 function buildSalesJournalLines(o) {
   const lines = [];
+  // Rekening penerima dipilih pada ordernya. Bila kosong — order lama, atau
+  // dicatat sebelum kolomnya ada — dipakai perkiraan lama supaya angka yang
+  // sudah terlanjur terbukukan tidak berpindah akun sendiri.
   const settleAccount = o.payment_status === 'PAID'
-    ? (CHANNEL_MARKETPLACE.includes(o.channel) ? ACC.BANK : ACC.CASH)
+    ? (o.cash_code || (CHANNEL_MARKETPLACE.includes(o.channel) ? ACC.BANK : ACC.CASH))
     : ACC.AR_MARKETPLACE;
 
   // Ongkir non-marketplace ikut masuk ke rekening bersama nilai ordernya,

@@ -43,6 +43,14 @@ export const CHANNEL_LABEL = {
   LAZADA: 'Lazada',
 };
 
+/**
+ * Kanal yang uangnya selalu lewat akun toko marketplace.
+ *
+ * Dipakai memutuskan kapan toko wajib dipilih pada order — tanpa toko, tidak
+ * ada yang tahu ke rekening mana marketplace mencairkannya.
+ */
+export const MARKETPLACE = ['SHOPEE', 'TOKOPEDIA', 'TIKTOK_SHOP', 'LAZADA'];
+
 export const WORK_TYPE_LABEL = {
   WFO: 'WFO (Kantor/Gudang)',
   WFH: 'WFH',

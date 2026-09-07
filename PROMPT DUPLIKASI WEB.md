@@ -752,7 +752,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 724 pemeriksaan, 49 bagian
+npm run smoke            # 739 pemeriksaan, 50 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1203,6 +1203,10 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Mengubah dokumen dikerjakan sebagai hapus-lalu-buat-baru | Id barisnya berganti tiap kali diubah, sehingga riwayat perubahannya putus dan tautan dari tabel lain menunjuk baris yang sudah tidak ada |
 | Pemeriksaan sisa ikut menghitung baris yang sedang diubah | Mengubah retur 4 menjadi 2 ditolak dengan alasan barangnya sudah habis diretur |
 | Rekening dianggap sama bila NAMANYA sama | Nama ditulis berbeda-beda; nomor rekening tidak pernah berubah — cocokkan lewat angka pada namanya |
+| Seluruh penerimaan penjualan jatuh ke satu akun kas | Saldo aplikasi tidak akan pernah cocok dengan mutasi bank mana pun; uang order hampir tidak pernah masuk ke laci |
+| Pengembalian dana retur dikreditkan ke kas tunai | Saldo tunai berkurang untuk uang yang tidak pernah ada di laci, sementara rekening toko yang benar-benar terpotong tetap tampak utuh |
+| Rekening dihitung dua kali: sekali untuk baris order, sekali untuk jurnalnya | Keduanya bisa berbeda, dan jurnal yang menunjuk rekening lain dari ordernya adalah selisih yang tak terjelaskan — hitung sekali, pakai dua kali |
+| Memilih rekening ikut memilih toko walau rekeningnya dipakai beberapa toko | Order tercatat ke toko yang keliru; tebak hanya bila pemakainya tunggal |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---
