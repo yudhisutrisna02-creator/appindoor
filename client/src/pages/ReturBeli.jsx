@@ -54,7 +54,10 @@ export default function ReturBeli() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     api.get('/api/inventory/products').then((d) => setProduk(d.products)).catch(() => {});
-    api.get('/api/partners?type=SUPPLIER').then((d) => setSupplier(d.rows || d.partners || [])).catch(() => {});
+    // Parameternya `kind`, bukan `type`. Nama yang salah diabaikan diam-diam
+    // oleh peladen, dan daftarnya berisi seluruh mitra — pelanggan ikut muncul
+    // sebagai pilihan supplier.
+    api.get('/api/partners', { kind: 'SUPPLIER' }).then((d) => setSupplier(d.partners || [])).catch(() => {});
     api.get('/api/cashflow/options').then((d) => setRekening(d.cashAccounts || [])).catch(() => {});
   }, []);
 

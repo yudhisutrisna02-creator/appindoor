@@ -72,6 +72,30 @@ function check(label, condition, detail = '') {
 }
 
 const near = (a, b, tol = 0.02) => Math.abs(a - b) <= tol;
+
+/**
+ * Memecah satu baris CSV, menghormati tanda kutip dan pemisah di dalamnya.
+ *
+ * Pemisahnya titik koma, bukan koma: Excel berbahasa Indonesia memakai koma
+ * sebagai pemisah desimal, sehingga berkas berkoma terbuka menjadi satu kolom.
+ */
+function belahCsv(baris, pemisah = ';') {
+  const sel = [];
+  let kini = '';
+  let dalamKutip = false;
+  for (let i = 0; i < baris.length; i += 1) {
+    const c = baris[i];
+    if (dalamKutip) {
+      if (c === '"' && baris[i + 1] === '"') { kini += '"'; i += 1; }
+      else if (c === '"') dalamKutip = false;
+      else kini += c;
+    } else if (c === '"') dalamKutip = true;
+    else if (c === pemisah) { sel.push(kini); kini = ''; }
+    else kini += c;
+  }
+  sel.push(kini);
+  return sel;
+}
 const today = new Date().toLocaleDateString('sv-SE');
 
 async function main() {
@@ -954,6 +978,135 @@ async function main() {
 
   const bsPO = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
   check('neraca tetap seimbang setelah pembelian', bsPO.balanced);
+
+  // ---- Mengubah pesanan ----
+  // Yang paling sering: harga dari pabrik ternyata berbeda dari saat memesan.
+  const poUbah = (await call('POST', '/api/pembelian', {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ product_id: prodPO.id, qty: 10, unit_cost: 20000 }],
+  })).po;
+
+  const ubah1 = await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    invoice_no: 'FKT-UJI-1',
+    items: [{ id: poUbah.items[0].id, product_id: prodPO.id, qty: 12, unit_cost: 25000 }],
+  });
+  check('pesanan yang belum diterima bisa diubah jumlah dan harganya',
+    ubah1.po.total === 300000 && ubah1.po.invoice_no === 'FKT-UJI-1',
+    `${ubah1.po.total} ${ubah1.po.invoice_no}`);
+
+  // Baris boleh ditambah dan dihapus selama barangnya belum datang.
+  const ubah2 = await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [
+      { id: poUbah.items[0].id, product_id: prodPO.id, qty: 12, unit_cost: 25000 },
+      { product_id: prodPO.id, qty: 3, unit_cost: 10000 },
+    ],
+  });
+  check('baris baru bisa ditambahkan ke pesanan yang sudah ada',
+    ubah2.po.items.length === 2 && ubah2.po.total === 330000, String(ubah2.po.total));
+
+  const ubah3 = await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ id: poUbah.items[0].id, product_id: prodPO.id, qty: 12, unit_cost: 25000 }],
+  });
+  check('baris yang dihapus dari formulir ikut terhapus', ubah3.po.items.length === 1);
+
+  // Menaikkan harga SETELAH sebagian barang datang: yang sudah dibukukan
+  // dengan harga lama tidak boleh ikut berubah nilainya. Menghitung ulang
+  // dengan harga terbaru membuat layar menyebut angka yang berbeda dari
+  // jurnalnya, dan tidak ada yang tahu mana yang benar.
+  await call('POST', `/api/pembelian/${poUbah.id}/terima`, {
+    receive_date: today, lines: [{ item_id: ubah3.po.items[0].id, qty: 4 }],
+  });
+  const ubah4 = await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ id: ubah3.po.items[0].id, product_id: prodPO.id, qty: 12, unit_cost: 30000 }],
+  });
+  check('nilai barang yang sudah diterima tidak ikut berubah saat harga dinaikkan',
+    near(ubah4.po.total_diterima, 4 * 25000, 1), String(ubah4.po.total_diterima));
+  check('nilai yang masih ditunggu dihitung dari barang yang belum datang',
+    near(ubah4.po.sisa, 8 * 30000, 1), String(ubah4.po.sisa));
+
+  // Harga terbaru dipakai penerimaan berikutnya — inti dari fiturnya.
+  await call('POST', `/api/pembelian/${poUbah.id}/terima`, {
+    receive_date: today, lines: [{ item_id: ubah3.po.items[0].id, qty: 8 }],
+  });
+  const poSetelah = (await call('GET', `/api/pembelian/${poUbah.id}`)).po;
+  check('nilai penerimaan menjumlahkan harga saat masing-masing datang',
+    near(poSetelah.total_diterima, 4 * 25000 + 8 * 30000, 1), String(poSetelah.total_diterima));
+  const kartuUbah = await call('GET',
+    `/api/inventory/moves?product_id=${prodPO.id}&from=${today}&to=${today}`);
+  const masukUbah = kartuUbah.rows.filter((m) => m.ref === poUbah.po_no);
+  const hargaMasuk = masukUbah.map((m) => Math.round(m.unit_cost)).sort((a, b) => a - b);
+  check('tiap penerimaan memakai harga yang berlaku saat itu',
+    hargaMasuk.length === 2 && hargaMasuk[0] === 25000 && hargaMasuk[1] === 30000,
+    JSON.stringify(hargaMasuk));
+
+  // ---- Penjagaan: yang sudah masuk stok tidak boleh diubah dari sini ----
+  const idBarisSelesai = ubah3.po.items[0].id;
+
+  const prodLain = (await call('POST', '/api/inventory/products', {
+    sku: `PO2-${Date.now()}`, name: 'Barang Uji Pembelian Lain', cost: 0, price: 10000,
+  })).product;
+
+  let tolakGantiBarang = 0;
+  try {
+    await call('PUT', `/api/pembelian/${poUbah.id}`, {
+      order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+      items: [{ id: idBarisSelesai, product_id: prodLain.id, qty: 12, unit_cost: 30000 }],
+    });
+  } catch (err) { tolakGantiBarang = err.status; }
+  check('barang yang sudah diterima tidak bisa diganti', tolakGantiBarang === 422,
+    `status ${tolakGantiBarang}`);
+
+  let tolakTurunQty = 0;
+  try {
+    await call('PUT', `/api/pembelian/${poUbah.id}`, {
+      order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+      items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 5, unit_cost: 30000 }],
+    });
+  } catch (err) { tolakTurunQty = err.status; }
+  check('jumlah tidak bisa diturunkan di bawah yang sudah diterima',
+    tolakTurunQty === 422, `status ${tolakTurunQty}`);
+
+  let tolakUbahHarga = 0;
+  try {
+    await call('PUT', `/api/pembelian/${poUbah.id}`, {
+      order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+      items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 99000 }],
+    });
+  } catch (err) { tolakUbahHarga = err.status; }
+  check('harga baris yang sudah diterima seluruhnya tidak bisa diubah',
+    tolakUbahHarga === 422, `status ${tolakUbahHarga}`);
+
+  let tolakHapusBaris = 0;
+  try {
+    await call('PUT', `/api/pembelian/${poUbah.id}`, {
+      order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+      items: [{ product_id: prodPO.id, qty: 1, unit_cost: 1000 }],
+    });
+  } catch (err) { tolakHapusBaris = err.status; }
+  check('baris yang barangnya sudah datang tidak bisa dihapus',
+    tolakHapusBaris === 422, `status ${tolakHapusBaris}`);
+
+  let tolakUbahBayar = 0;
+  try {
+    await call('PUT', `/api/pembelian/${poUbah.id}`, {
+      order_date: today, partner_id: idSupplier, payment: 'CASH', cash_code: '1010',
+      items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 30000 }],
+    });
+  } catch (err) { tolakUbahBayar = err.status; }
+  check('cara bayar tidak bisa diubah setelah ada penerimaan',
+    tolakUbahBayar === 422, `status ${tolakUbahBayar}`);
+
+  // Stok tidak boleh bergeser sedikit pun oleh seluruh percobaan di atas.
+  const stokSetelahUbah = (await call('GET', `/api/inventory/products?q=${prodPO.sku}`)).products[0];
+  check('percobaan mengubah yang terkunci tidak menyentuh stok',
+    stokSetelahUbah.stock === 112, String(stokSetelahUbah.stock));
+
+  const bsUbahPO = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah pesanan diubah', bsUbahPO.balanced);
 
   // Pesanan yang belum diterima sama sekali masih boleh dibatalkan.
   const poBatal = (await call('POST', '/api/pembelian', {
@@ -2769,11 +2922,46 @@ async function main() {
     `${BASE}/api/sales/export/csv?from=${today}&to=${today}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  const kepalaCsv = Buffer.from(await csvBiaya.arrayBuffer()).toString('utf8').split('\r\n')[0];
+  const isiCsvSales = Buffer.from(await csvBiaya.arrayBuffer()).toString('utf8');
+  const barisCsv = isiCsvSales.split('\r\n');
+  const kepalaCsv = barisCsv[0];
   check('kolom unduhan memakai istilah yang sama dengan formulir',
     ['Voucher & Subsidi', 'Biaya Platform', 'Biaya Gratis Ongkir XTRA', 'Biaya Layanan']
       .every((k) => kepalaCsv.includes(k)),
     kepalaCsv.slice(0, 120));
+
+  // Berkas unduhan pernah menamai net_revenue "Pendapatan Bersih". Pada order
+  // tanpa diskon angkanya sama persis dengan penjualan kotor, sehingga
+  // pembacanya menyimpulkan biaya channelnya tidak ikut terhitung.
+  check('unduhan memisahkan pendapatan kotor dan pendapatan bersih',
+    kepalaCsv.includes('Pendapatan Kotor') && kepalaCsv.includes('Pendapatan Bersih'),
+    kepalaCsv.slice(0, 200));
+
+  // Pemisahnya titik koma, bukan koma: Excel berbahasa Indonesia memakai
+  // koma sebagai desimal, sehingga berkas berkoma terbuka menjadi satu kolom.
+  const kolomCsv = belahCsv(kepalaCsv);
+  const barisCsvUji = barisCsv.find((b) => b.includes(ob.order_no));
+  check('baris order uji ada di berkas unduhan', !!barisCsvUji);
+
+  if (barisCsvUji) {
+    const sel = belahCsv(barisCsvUji);
+    // Angka ditulis dengan koma desimal supaya langsung terhitung di Excel.
+    const ambil = (nama) =>
+      Number(String(sel[kolomCsv.indexOf(nama)] || '0').replace(',', '.').replace(/[^0-9.-]/g, ''));
+
+    check('kolom Pendapatan Kotor berisi penjualan setelah diskon',
+      near(ambil('Pendapatan Kotor'), ob.net_revenue, 1),
+      `${ambil('Pendapatan Kotor')} vs ${ob.net_revenue}`);
+
+    // INTI PERBAIKANNYA: pendapatan bersih harus sudah dipotong biaya channel.
+    const bersihHarap = ob.net_revenue - ob.total_fees + (ob.shipping_non_mp || 0);
+    check('kolom Pendapatan Bersih sudah dikurangi biaya channel',
+      near(ambil('Pendapatan Bersih'), bersihHarap, 1),
+      `${ambil('Pendapatan Bersih')} vs ${bersihHarap}`);
+    check('pendapatan bersih di unduhan tidak sama dengan pendapatan kotor',
+      ob.total_fees > 0 && ambil('Pendapatan Bersih') !== ambil('Pendapatan Kotor'),
+      `${ambil('Pendapatan Bersih')} vs ${ambil('Pendapatan Kotor')}`);
+  }
 
   // ---------- Ganti produk pada pesanan yang sudah tersimpan ----------
   console.log('\n33. Ganti produk pada pesanan tersimpan');

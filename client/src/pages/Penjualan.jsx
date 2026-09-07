@@ -46,6 +46,7 @@ export default function Penjualan() {
   const { canManage } = useAuth();
   const [range, setRange] = useState(defaultRange);
   const [channel, setChannel] = useState('');
+  const [shopId, setShopId] = useState('');
   const [q, setQ] = useState('');
   // Kolom keuangan disembunyikan secara bawaan; angkanya tetap ada, hanya tidak
   // ikut memenuhi layar saat yang dicari adalah satu pesanan.
@@ -63,14 +64,14 @@ export default function Penjualan() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.get('/api/sales', { ...range, channel, q }));
+      setData(await api.get('/api/sales', { ...range, channel, shop_id: shopId, q }));
     } catch (err) {
       toast.error(err.message);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, channel, q]);
+  }, [range, channel, shopId, q]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -223,7 +224,7 @@ export default function Penjualan() {
         <Link className="btn-secondary" to="/penjualan/retur">
           <Undo2 size={16} /> Retur
         </Link>
-          <TombolEkspor path="/api/sales" params={{ ...range, channel, q }} nama="order-penjualan" />
+          <TombolEkspor path="/api/sales" params={{ ...range, channel, shop_id: shopId, q }} nama="order-penjualan" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange}>
@@ -240,6 +241,16 @@ export default function Penjualan() {
             nilai={q} onCari={setQ}
             placeholder="No. order, no. pesanan, resi, nama pembeli, toko..."
           />
+        </div>
+        {/* Disaring di peladen, bukan di layar: memilih toko harus mengenai
+            seluruh order pada rentang tanggalnya, bukan hanya baris yang
+            kebetulan sedang tampil. */}
+        <div className="flex-1">
+          <label className="label">Toko</label>
+          <select className="input" value={shopId} onChange={(e) => setShopId(e.target.value)}>
+            <option value="">Semua Toko</option>
+            {shops.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
+          </select>
         </div>
       </DateRangeFilter>
 

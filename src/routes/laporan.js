@@ -157,7 +157,7 @@ const LAPORAN = {
         .prepare(
           `SELECT o.*, p.name AS supplier_name,
                   (SELECT COALESCE(SUM(i.qty * i.unit_cost), 0) FROM purchase_items i WHERE i.po_id = o.id) AS total,
-                  (SELECT COALESCE(SUM(i.qty_received * i.unit_cost), 0) FROM purchase_items i WHERE i.po_id = o.id) AS total_diterima
+                  (SELECT COALESCE(SUM(i.received_amount), 0) FROM purchase_items i WHERE i.po_id = o.id) AS total_diterima
              FROM purchase_orders o
              LEFT JOIN partners p ON p.id = o.partner_id
             WHERE o.order_date BETWEEN ? AND ?

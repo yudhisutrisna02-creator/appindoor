@@ -718,7 +718,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 629 pemeriksaan, 46 bagian
+npm run smoke            # 657 pemeriksaan, 46 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1158,6 +1158,10 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Jejak perubahan memakai `datetime('now')` (UTC) sementara aplikasi memakai waktu setempat | Perubahan pukul 00:00–07:00 tercatat di tanggal kemarin; halaman Riwayat tampak kosong padahal ada isinya |
 | Menelan galat pencatatan jejak dengan `catch {}` kosong | Jejak berhenti tercatat tanpa ada yang tahu |
 | Nilai tingkat peringatan yang tidak dikenal ditulis begitu saja | Hitungan dan urutan Pusat Perhatian salah diam-diam; baru ketahuan setelah butir kedua memakainya juga — beri penjaga yang MELEMPAR galat |
+| Kolom unduhan diberi nama "Pendapatan Bersih" padahal isinya penjualan setelah diskon | Pada order tanpa diskon angkanya sama persis dengan penjualan kotor, dan pembacanya menyimpulkan biaya channel tidak ikut terhitung |
+| Nilai penerimaan dihitung ulang sebagai qty × harga pesanan | Begitu harga sisa boleh diperbarui, layar menyebut nilai yang berbeda dari jurnalnya — simpan nilai yang benar-benar dibukukan di kolom sendiri |
+| Kotak cari diletakkan jauh dari tabel yang disaringnya | Tidak ada yang menemukannya; pemakai melapor fiturnya belum ada padahal sudah lama terpasang |
+| Nama parameter kueri yang salah dikirim ke peladen | Zod mengabaikannya diam-diam dan penyaringnya tidak berlaku — daftar supplier ikut memuat pelanggan |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---

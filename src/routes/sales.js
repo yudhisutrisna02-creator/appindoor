@@ -856,7 +856,12 @@ const KOLOM_ORDER = [
   { header: 'Resi', key: 'tracking_no', width: 20 },
   { header: 'Penjualan Kotor', key: 'gross_sales', width: 15, money: true },
   { header: 'Diskon', key: 'discount', width: 11, money: true },
-  { header: 'Pendapatan Bersih', key: 'net_revenue', width: 16, money: true },
+  // Sama persis dengan layar: "Pendapatan Kotor" adalah penjualan setelah
+  // diskon, dan "Pendapatan Bersih" adalah setelah seluruh biaya channel.
+  // Kolom ini pernah salah diberi nama "Pendapatan Bersih" padahal isinya
+  // net_revenue — pada order tanpa diskon angkanya sama dengan penjualan
+  // kotor, dan pembacanya menyimpulkan biaya channelnya tidak terhitung.
+  { header: 'Pendapatan Kotor', key: 'net_revenue', width: 16, money: true },
   { header: 'HPP', key: 'cogs', width: 13, money: true },
   { header: 'Laba Kotor', key: 'gross_profit', width: 14, money: true },
   // Nama kolom mengikuti rincian pencairan marketplace, sama dengan yang
@@ -870,6 +875,9 @@ const KOLOM_ORDER = [
   { header: 'Biaya Kirim Non MP', key: 'shipping_non_mp', width: 18, money: true },
   { header: 'Packing', key: 'packing_cost', width: 11, money: true },
   { header: 'Total Biaya', key: 'total_fees', width: 14, money: true },
+  // Yang benar-benar mendarat di rekening: pendapatan kotor − biaya channel,
+  // ditambah ongkir yang ditagih di luar marketplace.
+  { header: 'Pendapatan Bersih', key: 'net_received', width: 16, money: true },
   { header: 'Laba Bersih', key: 'net_profit', width: 14, money: true },
   { header: 'Margin', key: 'margin_pct', width: 10, pct: true },
 ];
@@ -889,12 +897,18 @@ daftarkanEkspor(router, {
       )
       .all(...params);
     return {
-      rows: rows.map((r) => ({ ...r, channel_label: CHANNEL_LABEL[r.channel] || r.channel })),
+      rows: rows.map((r) => ({
+        ...r,
+        channel_label: CHANNEL_LABEL[r.channel] || r.channel,
+        net_received: r2(r.net_revenue - r.total_fees + (r.shipping_non_mp || 0)),
+      })),
       subtitle: `Periode ${from} s/d ${to}`,
       meta: [
         ['Jumlah order', rows.length],
-        ['Total pendapatan bersih', r2(rows.reduce((s, r) => s + r.net_revenue, 0))],
-        ['Total biaya', r2(rows.reduce((s, r) => s + r.total_fees, 0))],
+        ['Total pendapatan kotor', r2(rows.reduce((s, r) => s + r.net_revenue, 0))],
+        ['Total biaya channel', r2(rows.reduce((s, r) => s + r.total_fees, 0))],
+        ['Total pendapatan bersih',
+          r2(rows.reduce((s, r) => s + r.net_revenue - r.total_fees + (r.shipping_non_mp || 0), 0))],
         ['Total laba bersih', r2(rows.reduce((s, r) => s + r.net_profit, 0))],
       ],
     };

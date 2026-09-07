@@ -379,6 +379,18 @@ function runMigrations(db) {
   selaraskanWaktuRiwayat(db, applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
+  // --- Nilai barang yang benar-benar sudah diterima ---
+  // Sebelum pesanan bisa diubah, nilai penerimaan cukup dihitung sebagai
+  // qty_received × unit_cost — harga pesanan tidak pernah berubah, jadi angka
+  // itu selalu sama dengan yang dibukukan. Sekarang harga sisa yang belum
+  // datang boleh diperbarui, dan menghitungnya ulang dengan harga terbaru
+  // membuat layar menyebut nilai yang berbeda dari jurnalnya.
+  if (addColumn(db, 'purchase_items', 'received_amount', 'REAL NOT NULL DEFAULT 0', applied)) {
+    // Baris lama: harganya memang belum pernah bisa berubah, jadi perkalian
+    // itu tepat sebagai nilai awalnya.
+    db.exec('UPDATE purchase_items SET received_amount = qty_received * unit_cost');
+  }
+
   // --- Data tim yang lebih lengkap ---
   // Kolom kepegawaian yang selama ini hanya ada di kepala pemilik usaha:
   // nomor induk, penempatan, status kerja, dan kontak darurat. Semuanya boleh

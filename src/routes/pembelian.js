@@ -124,7 +124,8 @@ function ambilPO(id) {
     status_label: STATUS[po.status] || po.status,
     items,
     total: r2(items.reduce((s, i) => s + i.qty * i.unit_cost, 0)),
-    total_diterima: r2(items.reduce((s, i) => s + i.qty_received * i.unit_cost, 0)),
+    total_diterima: r2(items.reduce((s, i) => s + (i.received_amount || 0), 0)),
+    sisa: r2(items.reduce((s, i) => s + (i.qty - i.qty_received) * i.unit_cost, 0)),
   };
 }
 
@@ -157,7 +158,13 @@ function daftar(req) {
       `SELECT o.*, p.name AS supplier_name, u.name AS user_name,
               (SELECT COUNT(*) FROM purchase_items i WHERE i.po_id = o.id) AS jumlah_barang,
               (SELECT COALESCE(SUM(i.qty * i.unit_cost), 0) FROM purchase_items i WHERE i.po_id = o.id) AS total,
-              (SELECT COALESCE(SUM(i.qty_received * i.unit_cost), 0) FROM purchase_items i WHERE i.po_id = o.id) AS total_diterima,
+              (SELECT COALESCE(SUM(i.received_amount), 0) FROM purchase_items i WHERE i.po_id = o.id) AS total_diterima,
+              -- Nilai yang masih ditunggu dihitung dari barang yang memang belum
+              -- datang, bukan sebagai selisih total dikurangi yang sudah diterima.
+              -- Sejak harga sisa boleh diperbarui, kedua cara itu tidak lagi sama:
+              -- yang sudah diterima memakai harga saat barangnya datang.
+              (SELECT COALESCE(SUM((i.qty - i.qty_received) * i.unit_cost), 0)
+                 FROM purchase_items i WHERE i.po_id = o.id) AS sisa_nilai,
               CAST(julianday('now') - julianday(o.order_date) AS INTEGER) AS umur_hari
          FROM purchase_orders o
          LEFT JOIN partners p ON p.id = o.partner_id
@@ -171,7 +178,7 @@ function daftar(req) {
       status_label: STATUS[o.status] || o.status,
       total: r2(o.total),
       total_diterima: r2(o.total_diterima),
-      sisa: r2(o.total - o.total_diterima),
+      sisa: r2(o.sisa_nilai),
     }));
 
   const menunggu = rows.filter((o) => o.status === 'DIPESAN' || o.status === 'SEBAGIAN');
@@ -190,6 +197,171 @@ function daftar(req) {
 }
 
 router.get('/', butuhIzin('pembelian.lihat'), ah((req, res) => res.json(daftar(req))));
+
+// ==================================================================
+// MENGUBAH PESANAN
+// ==================================================================
+/**
+ * Barang yang SUDAH diterima tidak bisa diubah dari sini.
+ *
+ * Penerimaan bukan sekadar catatan: ia sudah menambah stok, sudah menggeser
+ * HPP rata-rata produknya, dan sudah membentuk jurnal. Mengubah barang atau
+ * harganya di sini tidak akan membatalkan tiga hal itu — yang terjadi hanyalah
+ * pesanan menyebut satu angka sementara buku besar menyebut angka lain, dan
+ * selisihnya baru ketahuan berbulan-bulan kemudian saat stok dihitung fisik.
+ *
+ * Yang bisa diubah karena itu:
+ *   - seluruh isi pesanan yang barangnya BELUM datang sama sekali;
+ *   - harga sisa yang belum datang pada baris yang baru diterima sebagian —
+ *     penerimaan berikutnya memang membaca harga terbaru;
+ *   - keterangan (tanggal, faktur, catatan) kapan saja.
+ *
+ * Untuk barang yang sudah telanjur masuk dengan harga keliru, jalurnya sudah
+ * ada dan memang membetulkan pembukuannya: Retur Pembelian atau koreksi stok.
+ */
+const ubahPoSchema = z.object({
+  order_date: tanggal,
+  expected_date: tanggal.optional().nullable(),
+  partner_id: z.number().int().positive({ message: 'supplier wajib dipilih' }),
+  payment: z.enum(['CASH', 'BANK', 'CREDIT']),
+  cash_code: z.string().trim().min(3).optional().nullable(),
+  invoice_no: z.string().trim().max(60).optional().nullable(),
+  due_date: tanggal.optional().nullable(),
+  note: z.string().trim().max(300).optional().nullable(),
+  items: z
+    .array(
+      z.object({
+        // Baris yang sudah ada membawa id-nya; baris baru tidak.
+        id: z.number().int().positive().optional().nullable(),
+        product_id: z.number().int().positive(),
+        qty: z.number().positive('jumlah harus lebih dari 0'),
+        unit_cost: z.number().nonnegative().default(0),
+      })
+    )
+    .min(1, 'minimal satu barang'),
+});
+
+const ubahPO = db.transaction((poId, body) => {
+  const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(poId);
+  if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');
+  if (po.status === 'BATAL') throw httpError(409, 'Pesanan sudah dibatalkan');
+
+  const supplier = db.prepare('SELECT id FROM partners WHERE id = ?').get(body.partner_id);
+  if (!supplier) throw httpError(404, 'Supplier tidak ditemukan');
+
+  const lama = db.prepare('SELECT * FROM purchase_items WHERE po_id = ?').all(poId);
+  const petaLama = new Map(lama.map((i) => [i.id, i]));
+  const adaPenerimaan = lama.some((i) => i.qty_received > 0);
+
+  // Cara bayar menentukan akun lawan jurnal saat barang diterima. Mengubahnya
+  // setelah ada penerimaan membuat penerimaan berikutnya memakai akun yang
+  // berbeda dari yang sebelumnya, di dalam satu pesanan yang sama.
+  if (adaPenerimaan && body.payment !== po.payment) {
+    throw httpError(
+      422,
+      'Sebagian barang sudah diterima dan dibukukan — cara bayar tidak bisa diubah lagi.'
+    );
+  }
+
+  const dipakai = new Set();
+
+  for (const it of body.items) {
+    const produk = db.prepare('SELECT id, name FROM products WHERE id = ?').get(it.product_id);
+    if (!produk) throw httpError(404, `Produk id ${it.product_id} tidak ditemukan`);
+
+    if (!it.id) continue; // baris baru — tidak ada yang perlu dijaga
+    const asal = petaLama.get(it.id);
+    if (!asal) throw httpError(404, `Baris ${it.id} bukan bagian dari pesanan ini`);
+    dipakai.add(it.id);
+    if (asal.qty_received <= 0) continue;
+
+    const namaAsal = db.prepare('SELECT name, unit FROM products WHERE id = ?').get(asal.product_id);
+
+    if (it.product_id !== asal.product_id) {
+      throw httpError(
+        422,
+        `${namaAsal.name}: ${asal.qty_received} ${namaAsal.unit} sudah diterima dan masuk stok, ` +
+          'jadi barangnya tidak bisa diganti. Kembalikan lewat Retur Pembelian bila memang keliru.'
+      );
+    }
+
+    if (r2(it.qty) < r2(asal.qty_received)) {
+      throw httpError(
+        422,
+        `${namaAsal.name}: sudah diterima ${asal.qty_received} ${namaAsal.unit}, ` +
+          `jumlah pesanan tidak bisa diturunkan menjadi ${it.qty}.`
+      );
+    }
+
+    const sisa = r2(asal.qty - asal.qty_received);
+    if (r2(it.unit_cost) !== r2(asal.unit_cost) && sisa <= 0) {
+      throw httpError(
+        422,
+        `${namaAsal.name}: seluruhnya sudah diterima dengan harga ` +
+          `Rp ${asal.unit_cost.toLocaleString('id-ID')} dan sudah masuk HPP. ` +
+          'Harganya tidak bisa diubah dari sini — pakai Retur Pembelian atau koreksi stok.'
+      );
+    }
+  }
+
+  // Baris yang dihapus dari formulir: hanya boleh bila belum ada yang datang.
+  for (const asal of lama) {
+    if (dipakai.has(asal.id)) continue;
+    if (asal.qty_received > 0) {
+      const p = db.prepare('SELECT name, unit FROM products WHERE id = ?').get(asal.product_id);
+      throw httpError(
+        422,
+        `${p.name}: ${asal.qty_received} ${p.unit} sudah diterima, barisnya tidak bisa dihapus.`
+      );
+    }
+    db.prepare('DELETE FROM purchase_items WHERE id = ?').run(asal.id);
+  }
+
+  db.prepare(
+    `UPDATE purchase_orders
+        SET order_date = ?, expected_date = ?, partner_id = ?, payment = ?, cash_code = ?,
+            invoice_no = ?, due_date = ?, note = ?
+      WHERE id = ?`
+  ).run(
+    body.order_date, body.expected_date || null, body.partner_id,
+    body.payment, body.cash_code || null, body.invoice_no || null,
+    body.due_date || null, body.note || null, poId
+  );
+
+  const perbarui = db.prepare(
+    'UPDATE purchase_items SET product_id = ?, qty = ?, unit_cost = ? WHERE id = ?'
+  );
+  const tambah = db.prepare(
+    'INSERT INTO purchase_items (po_id, product_id, qty, unit_cost, qty_received) VALUES (?,?,?,?,0)'
+  );
+
+  for (const it of body.items) {
+    if (it.id) perbarui.run(it.product_id, r2(it.qty), r2(it.unit_cost), it.id);
+    else tambah.run(poId, it.product_id, r2(it.qty), r2(it.unit_cost));
+  }
+
+  // Status selalu dihitung ulang, tidak disetel manual: menambah baris baru
+  // pada pesanan yang sudah "Selesai" mengembalikannya menjadi "Sebagian".
+  const items = db.prepare('SELECT qty, qty_received FROM purchase_items WHERE po_id = ?').all(poId);
+  db.prepare('UPDATE purchase_orders SET status = ? WHERE id = ?').run(hitungStatus(items), poId);
+
+  return { adaPenerimaan };
+});
+
+router.put('/:id(\\d+)', butuhIzin('pembelian.kelola'), ah((req, res) => {
+  const id = Number(req.params.id);
+  const body = parse(ubahPoSchema, req.body);
+  const hasil = ubahPO(id, body);
+  const po = ambilPO(id);
+
+  res.json({
+    ok: true,
+    po,
+    message: hasil.adaPenerimaan
+      ? `Pesanan ${po.po_no} diperbarui — perubahan harga hanya berlaku untuk barang yang belum datang`
+      : `Pesanan ${po.po_no} diperbarui`,
+  });
+}));
 
 router.get('/:id(\\d+)', butuhIzin('pembelian.lihat'), ah((req, res) => {
   res.json({ po: ambilPO(Number(req.params.id)) });
@@ -244,8 +416,14 @@ const terimaBarang = db.transaction((poId, body, userId) => {
       userId
     );
 
-    db.prepare('UPDATE purchase_items SET qty_received = ? WHERE id = ?')
-      .run(r2(item.qty_received + l.qty), item.id);
+    // Nilai yang benar-benar dibukukan dicatat terpisah dari qty × harga
+    // pesanan: harga sisa yang belum datang masih boleh berubah setelah ini.
+    db.prepare('UPDATE purchase_items SET qty_received = ?, received_amount = ? WHERE id = ?')
+      .run(
+        r2(item.qty_received + l.qty),
+        r2((item.received_amount || 0) + l.qty * item.unit_cost),
+        item.id
+      );
     diterima += 1;
   }
 

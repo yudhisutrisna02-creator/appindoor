@@ -109,6 +109,7 @@ function ambilPencairan(req) {
     .prepare(
       `SELECT o.id, o.order_no, o.order_ref, o.order_date, o.channel, o.shop_id,
               o.fulfillment_status, o.payment_status, o.payout_date, o.buyer_city, o.courier,
+              o.tracking_no,
               o.net_revenue, o.total_fees, ${NILAI} AS nilai,
               sh.name AS shop_name
          FROM sales_orders o
@@ -235,6 +236,7 @@ daftarkanEkspor(router, {
   kolom: [
     { header: 'No. Order', key: 'order_no', width: 18 },
     { header: 'No. Pesanan', key: 'order_ref', width: 20 },
+    { header: 'No. Resi', key: 'tracking_no', width: 22 },
     { header: 'Tanggal', key: 'order_date', width: 12 },
     { header: 'Umur (hari)', key: 'umur_hari', width: 12 },
     { header: 'Toko', key: 'shop_name', width: 24 },

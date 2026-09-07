@@ -56,7 +56,7 @@ export default function Pencairan() {
 
   const tampil = useMemo(() => {
     if (!data) return [];
-    return saringLokal(data.rows, q, (o) => [o.order_no, o.order_ref, o.shop_name, o.buyer_city, o.courier])
+    return saringLokal(data.rows, q, (o) => [o.order_no, o.order_ref, o.tracking_no, o.shop_name, o.buyer_city, o.courier])
       .filter((o) => !ember || o.ember === ember)
       .filter((o) => !toko || String(o.shop_id) === toko)
       .sort((a, b) => b.umur_hari - a.umur_hari || b.nilai - a.nilai);
@@ -319,11 +319,21 @@ export default function Pencairan() {
             {tampil.length} order belum cair
             {pilih.size > 0 && ` — ${pilih.size} dipilih (${rupiah(nilaiPilih)})`}
           </h2>
-          {(ember || toko) && (
-            <button className="btn-ghost text-xs" onClick={() => { setEmber(''); setToko(''); }}>
+          {(ember || toko || q) && (
+            <button className="btn-ghost text-xs" onClick={() => { setEmber(''); setToko(''); setQ(''); }}>
               Hapus saringan
             </button>
           )}
+        </div>
+
+        {/* Kotak cari berada tepat di atas daftar yang disaringnya. Sebelumnya
+            ia terletak di kartu ringkasan periode paling bawah, jauh dari
+            tabelnya — dan tidak ada yang menemukannya di sana. */}
+        <div className="mb-3">
+          <KotakCari
+            nilai={q} onCari={setQ}
+            placeholder="No. resi, no. pesanan, no. order, toko, kota, ekspedisi..."
+          />
         </div>
 
         {tampil.length === 0 ? (
@@ -339,6 +349,7 @@ export default function Pencairan() {
                     </th>
                   )}
                   <th>Order</th>
+                  <th>No. Resi</th>
                   <th>Toko</th>
                   <th>Status</th>
                   <th className="text-center">Umur</th>
@@ -358,6 +369,12 @@ export default function Pencairan() {
                     <td>
                       <p className="font-medium text-slate-900">{o.order_ref || o.order_no}</p>
                       <p className="text-xs text-slate-500">{dateID(o.order_date)} • {o.buyer_city || '—'}</p>
+                    </td>
+                    <td className="text-xs">
+                      {o.tracking_no
+                        ? <span className="tabular text-slate-700">{o.tracking_no}</span>
+                        : <span className="text-slate-400">belum ada</span>}
+                      {o.courier && <span className="block text-[11px] text-slate-400">{o.courier}</span>}
                     </td>
                     <td className="text-xs text-slate-600">{o.shop_name || '—'}</td>
                     <td className="text-xs text-slate-600">{o.fulfillment_status}</td>
@@ -385,12 +402,7 @@ export default function Pencairan() {
 
       <div className="card mt-4">
         <h2 className="card-title mb-2">Ringkasan Pencairan per Periode</h2>
-        <DateRangeFilter range={range} onChange={setRange}>
-        <div className="flex-[2]">
-          <label className="label">Cari</label>
-          <KotakCari nilai={q} onCari={setQ} placeholder="No. pesanan, no. order, toko, kota..." />
-        </div>
-      </DateRangeFilter>
+        <DateRangeFilter range={range} onChange={setRange} />
         <p className="mt-2 text-sm text-slate-700">
           Pada {dateID(data.from)} – {dateID(data.to)}, <strong>{r.cairOrders} order</strong> cair
           senilai <strong>{rupiah(r.cairNilai)}</strong>, rata-rata{' '}

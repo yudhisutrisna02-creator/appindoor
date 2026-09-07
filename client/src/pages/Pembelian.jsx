@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, PackageCheck, Truck, XCircle, Trash2, Clock, Receipt, Printer, FileText, FileSpreadsheet } from 'lucide-react';
+import { Plus, PackageCheck, Truck, XCircle, Trash2, Clock, Receipt, Printer, FileText, FileSpreadsheet, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, TombolCetak,
 } from '../components/ui';
-import { rupiah, dateID, today } from '../lib/format';
+import { rupiah, num, dateID, today } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const KOSONG = () => ({
@@ -94,6 +94,7 @@ export default function Pembelian() {
         items: form.items
           .filter((i) => i.product_id && Number(i.qty) > 0)
           .map((i) => ({
+            ...(i.id ? { id: i.id } : {}),
             product_id: Number(i.product_id),
             qty: Number(i.qty),
             unit_cost: Number(i.unit_cost) || 0,
@@ -102,7 +103,9 @@ export default function Pembelian() {
       if (!isi.items.length) throw new Error('Tambahkan minimal satu barang');
       if (!isi.partner_id) throw new Error('Pilih supplier terlebih dahulu');
 
-      const res = await api.post('/api/pembelian', isi);
+      const res = form.id
+        ? await api.put(`/api/pembelian/${form.id}`, isi)
+        : await api.post('/api/pembelian', isi);
       toast.success(res.message);
       setForm(null);
       load();
@@ -110,6 +113,41 @@ export default function Pembelian() {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Membuka pesanan yang sudah ada di formulir yang sama dengan pesanan baru.
+   *
+   * `qty_received` ikut dibawa supaya layar bisa menunjukkan baris mana yang
+   * barangnya sudah datang — dan karena itu tidak lagi bebas diubah. Penjagaan
+   * sesungguhnya tetap ada di peladen; ini hanya supaya orangnya tahu sebelum
+   * mengetik, bukan setelah ditolak.
+   */
+  async function bukaUbah(po) {
+    try {
+      const d = await api.get(`/api/pembelian/${po.id}`);
+      setForm({
+        id: d.po.id,
+        po_no: d.po.po_no,
+        status: d.po.status,
+        order_date: d.po.order_date,
+        expected_date: d.po.expected_date || '',
+        partner_id: String(d.po.partner_id || ''),
+        payment: d.po.payment,
+        invoice_no: d.po.invoice_no || '',
+        due_date: d.po.due_date || '',
+        note: d.po.note || '',
+        items: d.po.items.map((i) => ({
+          id: i.id,
+          product_id: String(i.product_id),
+          qty: i.qty,
+          unit_cost: i.unit_cost,
+          qty_received: i.qty_received,
+        })),
+      });
+    } catch (err) {
+      toast.error(err.message);
     }
   }
 
@@ -309,6 +347,11 @@ export default function Pembelian() {
                         >
                           <Receipt size={15} /> Nota
                         </button>
+                        {bolehKelola && po.status !== 'BATAL' && (
+                          <button className="btn-ghost !px-2 !py-1 text-slate-600" onClick={() => bukaUbah(po)} aria-label={`Ubah pesanan ${po.po_no}`}>
+                            <Pencil size={15} />
+                          </button>
+                        )}
                         {bolehKelola && (po.status === 'DIPESAN' || po.status === 'SEBAGIAN') && (
                           <button className="btn-ghost !px-2 !py-1 text-emerald-600" onClick={() => bukaTerima(po)} aria-label="Terima barang">
                             <PackageCheck size={15} />
@@ -330,9 +373,21 @@ export default function Pembelian() {
       </div>
 
       {/* ---------- PESANAN BARU ---------- */}
-      <Modal open={!!form} onClose={() => setForm(null)} title="Pesanan Pembelian Baru" wide>
+      <Modal
+        open={!!form} onClose={() => setForm(null)} wide
+        title={form?.id ? `Ubah Pesanan — ${form.po_no}` : 'Pesanan Pembelian Baru'}
+      >
         {form && (
           <form onSubmit={simpan} className="grid gap-3 sm:grid-cols-2">
+            {form.id && form.items.some((i) => i.qty_received > 0) && (
+              <p className="sm:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                Sebagian barang sudah diterima. Baris yang barangnya sudah datang{' '}
+                <strong>tidak bisa diganti atau dihapus</strong>, dan jumlahnya tidak bisa diturunkan
+                di bawah yang sudah masuk — stok, HPP, dan jurnalnya sudah terbentuk. Perubahan harga
+                hanya berlaku untuk sisa yang belum datang. Untuk barang yang telanjur masuk dengan
+                harga keliru, pakai <strong>Retur Pembelian</strong> atau koreksi stok.
+              </p>
+            )}
             <Field label="Supplier *" className="sm:col-span-2">
               <select className="input" required value={form.partner_id} onChange={(e) => setForm({ ...form, partner_id: e.target.value })}>
                 <option value="">— pilih supplier —</option>
@@ -374,32 +429,50 @@ export default function Pembelian() {
               </div>
 
               <div className="space-y-2">
-                {form.items.map((it, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2">
-                    <select
-                      className="input col-span-6" value={it.product_id}
-                      onChange={(e) => setItem(i, { product_id: e.target.value })}
-                    >
-                      <option value="">— pilih barang —</option>
-                      {products.map((p) => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
-                    </select>
-                    <input
-                      type="number" min="0" step="any" className="input col-span-2" placeholder="Qty"
-                      value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })}
-                    />
-                    <input
-                      type="number" min="0" className="input col-span-3" placeholder="Harga beli"
-                      value={it.unit_cost} onChange={(e) => setItem(i, { unit_cost: e.target.value })}
-                    />
-                    <button
-                      type="button" className="btn-ghost col-span-1 !px-2 text-rose-600"
-                      onClick={() => setForm({ ...form, items: form.items.filter((_, x) => x !== i) })}
-                      aria-label="Hapus baris"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                ))}
+                {form.items.map((it, i) => {
+                  const sudahDatang = Number(it.qty_received) > 0;
+                  const lunasDatang = sudahDatang && Number(it.qty_received) >= Number(it.qty);
+                  return (
+                    <div key={it.id || `baru-${i}`}>
+                      <div className="grid grid-cols-12 gap-2">
+                        <select
+                          className="input col-span-6" value={it.product_id}
+                          disabled={sudahDatang}
+                          onChange={(e) => setItem(i, { product_id: e.target.value })}
+                        >
+                          <option value="">— pilih barang —</option>
+                          {products.map((p) => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
+                        </select>
+                        <input
+                          type="number" min={sudahDatang ? it.qty_received : 0} step="any"
+                          className="input col-span-2" placeholder="Qty"
+                          value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })}
+                        />
+                        <input
+                          type="number" min="0" className="input col-span-3" placeholder="Harga beli"
+                          disabled={lunasDatang}
+                          value={it.unit_cost} onChange={(e) => setItem(i, { unit_cost: e.target.value })}
+                        />
+                        <button
+                          type="button" className="btn-ghost col-span-1 !px-2 text-rose-600 disabled:opacity-30"
+                          disabled={sudahDatang}
+                          onClick={() => setForm({ ...form, items: form.items.filter((_, x) => x !== i) })}
+                          aria-label="Hapus baris"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                      {sudahDatang && (
+                        <p className="mt-1 text-[11px] text-amber-700">
+                          {num(it.qty_received)} sudah diterima dan masuk stok
+                          {lunasDatang
+                            ? ' — barang dan harganya terkunci'
+                            : ' — harga baru hanya berlaku untuk sisanya'}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
@@ -411,7 +484,7 @@ export default function Pembelian() {
             <div className="flex gap-2 sm:col-span-2">
               <button type="button" className="btn-secondary flex-1" onClick={() => setForm(null)}>Batal</button>
               <button type="submit" className="btn-primary flex-1" disabled={saving}>
-                {saving ? 'Menyimpan...' : 'Simpan Pesanan'}
+                {saving ? 'Menyimpan...' : form.id ? 'Simpan Perubahan' : 'Simpan Pesanan'}
               </button>
             </div>
           </form>
