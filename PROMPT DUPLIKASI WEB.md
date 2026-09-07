@@ -752,7 +752,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 688 pemeriksaan, 47 bagian
+npm run smoke            # 692 pemeriksaan, 47 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1196,6 +1196,9 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Nilai penerimaan dihitung ulang sebagai qty × harga pesanan | Begitu harga sisa boleh diperbarui, layar menyebut nilai yang berbeda dari jurnalnya — simpan nilai yang benar-benar dibukukan di kolom sendiri |
 | Kotak cari diletakkan jauh dari tabel yang disaringnya | Tidak ada yang menemukannya; pemakai melapor fiturnya belum ada padahal sudah lama terpasang |
 | Nama parameter kueri yang salah dikirim ke peladen | Zod mengabaikannya diam-diam dan penyaringnya tidak berlaku — daftar supplier ikut memuat pelanggan |
+| Laporan resmi tidak menyebut retur sama sekali | Seluruh angkanya adalah angka sebelum dikurangi barang yang dikembalikan — dan laporan itulah yang berkop, bertanda tangan, dan diserahkan ke pihak luar |
+| Dampak retur pada laba disamakan dengan nilainya | Barang yang kembali ke stok mengembalikan HPP-nya; menyamakannya dengan barang rusak total membuat laba salah |
+| Uji dijalankan berurutan pada satu peladen tanpa memperhitungkan batas laju login | Rangkaian kedua berhenti di login pertamanya, dikira brute force — CI merah berminggu-minggu tanpa ada yang benar-benar rusak |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---

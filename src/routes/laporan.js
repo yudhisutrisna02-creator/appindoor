@@ -23,6 +23,10 @@ const { r2 } = require('../utils/accounting');
 const { tableExcel, tableCsv } = require('../utils/exporters');
 const { laporanPdf } = require('../utils/laporan-pdf');
 const { blokTtd, KIND } = require('../utils/ttd');
+// Laporan WAJIB memakai fungsi agregat yang sama dengan menunya, bukan query
+// sendiri — kalau tidak, suatu saat kedua angka berbeda dan tidak ada yang tahu
+// mana yang benar.
+const { ambilRetur } = require('./sales');
 const { isiDokumen } = require('../utils/dokumen');
 const { CHANNEL_LABEL } = require('../utils/kanal');
 const { todayLocal } = require('../utils/time');
@@ -224,17 +228,45 @@ const LAPORAN = {
           .get(from, to).t
       );
 
+      // Retur diambil dari fungsi yang SAMA dengan menu Retur Penjualan.
+      //
+      // Sebelumnya laporan ini tidak menyebut retur sama sekali, sehingga
+      // seluruh angkanya adalah angka sebelum dikurangi barang yang
+      // dikembalikan — dan laporan itulah yang berkop, bertanda tangan, dan
+      // diserahkan ke pihak luar.
+      const retur = ambilRetur({ query: { from, to } });
+      const nilaiRetur = nol(retur.total);
+
+      // Dampak retur pada laba tidak sama dengan nilainya.
+      //
+      // Barang yang kembali ke stok atau masuk perbaikan mengembalikan HPP-nya,
+      // jadi labanya hanya berkurang selisih harga jual dan modalnya. Barang
+      // yang rusak total tidak mengembalikan apa pun — modalnya tetap menjadi
+      // beban, hanya berpindah nama menjadi kerugian.
+      const hppKembali = nol(
+        retur.rows
+          .filter((r) => (r.kondisi || (r.restock ? 'BAGUS' : 'RUSAK')) !== 'RUSAK')
+          .reduce((s, r) => s + r.qty * r.cost, 0)
+      );
+      const labaSetelahRetur = nol(jml('net_profit') - nilaiRetur + hppKembali);
+
       return {
         from, to, rows,
         subjudul: `Periode ${from} s/d ${to}`,
         meta: [
           ['Jumlah order', rows.length],
           ['Pendapatan kotor', jml('net_revenue')],
+          // Kata 'nilai' bukan hiasan: layar Laporan memutuskan mana angka
+          // rupiah dari kata pada labelnya. Tanpa kata itu, 840.000 tampil
+          // polos tanpa 'Rp' di antara baris-baris yang berupa rupiah.
+          ['Nilai retur penjualan', nilaiRetur],
+          ['Pendapatan setelah retur', nol(jml('net_revenue') - nilaiRetur)],
           ['Biaya channel', jml('total_fees')],
           ['HPP', jml('cogs')],
-          ['Laba bersih', jml('net_profit')],
+          ['Laba bersih (sebelum retur)', jml('net_profit')],
+          ['Laba bersih setelah retur', labaSetelahRetur],
           ['Biaya iklan', iklan],
-          ['Laba setelah iklan', nol(jml('net_profit') - iklan)],
+          ['Laba setelah iklan', nol(labaSetelahRetur - iklan)],
         ],
         ringkasBawah: {
           order_no: 'TOTAL',

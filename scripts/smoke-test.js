@@ -2693,6 +2693,39 @@ async function main() {
     near(lapJual.ringkasBawah.net_revenue, menuJual.summary.netRevenue, 1),
     `${lapJual.rows.length} vs ${menuJual.summary.orders} order`);
 
+  // Laporan resmi ini berkop, bertanda tangan, dan diserahkan ke pihak luar.
+  // Dulu ia tidak menyebut retur sama sekali, sehingga seluruh angkanya adalah
+  // angka sebelum dikurangi barang yang dikembalikan.
+  const menuRetur = await call('GET', `/api/sales/returns/list?from=${bulanLap}&to=${today}`);
+  const ambilMeta = (d, label) => {
+    const b = (d.meta || []).find((m) => m[0] === label);
+    return b ? Number(b[1]) : null;
+  };
+  check('laporan penjualan menyebut nilai retur',
+    ambilMeta(lapJual, 'Nilai retur penjualan') !== null &&
+    near(ambilMeta(lapJual, 'Nilai retur penjualan'), menuRetur.total, 1),
+    `${ambilMeta(lapJual, 'Nilai retur penjualan')} vs menu ${menuRetur.total}`);
+  check('laporan penjualan menghitung pendapatan setelah retur',
+    near(ambilMeta(lapJual, 'Pendapatan setelah retur'),
+      ambilMeta(lapJual, 'Pendapatan kotor') - menuRetur.total, 1),
+    `${ambilMeta(lapJual, 'Pendapatan setelah retur')}`);
+
+  // Barang yang kembali ke stok mengembalikan HPP-nya, jadi laba hanya
+  // berkurang selisih harga jual dan modalnya. Barang rusak total tidak
+  // mengembalikan apa pun. Menyamakan keduanya membuat laba salah.
+  const hppKembaliHarap = r2Uji(
+    menuRetur.rows
+      .filter((r) => (r.kondisi || (r.restock ? 'BAGUS' : 'RUSAK')) !== 'RUSAK')
+      .reduce((s, r) => s + r.qty * r.cost, 0)
+  );
+  check('laba setelah retur memperhitungkan HPP yang kembali',
+    near(ambilMeta(lapJual, 'Laba bersih setelah retur'),
+      ambilMeta(lapJual, 'Laba bersih (sebelum retur)') - menuRetur.total + hppKembaliHarap, 1),
+    `${ambilMeta(lapJual, 'Laba bersih setelah retur')}, hpp kembali ${hppKembaliHarap}`);
+  check('laba setelah iklan dihitung dari laba setelah retur',
+    near(ambilMeta(lapJual, 'Laba setelah iklan'),
+      ambilMeta(lapJual, 'Laba bersih setelah retur') - ambilMeta(lapJual, 'Biaya iklan'), 1));
+
   const lapPersed = await call('GET', `/api/laporan/persediaan?asOf=${today}`);
   const valuasi = await call('GET', '/api/inventory/valuation');
   check('laporan persediaan sama dengan Valuasi Stok',

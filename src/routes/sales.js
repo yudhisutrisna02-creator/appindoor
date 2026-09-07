@@ -1138,3 +1138,6 @@ function ambilRetur(req) {
 router.get('/returns/list', ah((req, res) => res.json(ambilRetur(req))));
 
 module.exports = router;
+// Dipakai Laporan Penjualan supaya angka returnya berasal dari fungsi yang
+// SAMA dengan menu Retur Penjualan — bukan dihitung ulang dengan query sendiri.
+module.exports.ambilRetur = ambilRetur;
