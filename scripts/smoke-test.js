@@ -4496,6 +4496,216 @@ async function main() {
   check('retur pembelian bisa diunduh', unduhRet.status === 200, `status ${unduhRet.status}`);
 
 
+  console.log('\n47. Retur tiga kondisi & barang perlu perbaikan');
+
+  const skuPbk = `PBK-${Date.now()}`;
+  const prodPbk = (await call('POST', '/api/inventory/products', {
+    sku: skuPbk, name: 'Kemasan Foil Uji 250 Gram', cost: 0, price: 40000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodPbk.id, move_date: today, move_type: 'IN',
+    qty: 100, unit_cost: 10000, payment: 'CASH',
+  });
+
+  const stokPbk = async () =>
+    (await call('GET', `/api/inventory/products?q=${skuPbk}`))
+      .products.find((x) => x.sku === skuPbk);
+
+  const akunPbk = async (kode) => {
+    const tb = await call('GET',
+      `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+
+  // ---- Kondisi BAGUS: kemasan utuh, langsung masuk stok jual ----
+  const stokSblmBagus = (await stokPbk()).stock;
+  const returBagus = await call('POST', '/api/sales/returns', {
+    return_date: today, product_id: prodPbk.id, qty: 2, price: 40000,
+    kondisi: 'BAGUS', reason: 'Kemasan utuh, pembeli salah pesan',
+  });
+  check('retur kondisi bagus tercatat', returBagus.ok === true && returBagus.kondisi === 'BAGUS');
+  check('retur bagus langsung menambah stok jual',
+    (await stokPbk()).stock === stokSblmBagus + 2, String((await stokPbk()).stock));
+
+  // ---- Kondisi RUSAK: botol pecah, jadi kerugian ----
+  const rugiSblm = await akunPbk('8100');
+  const stokSblmRusak = (await stokPbk()).stock;
+  const returRusak = await call('POST', '/api/sales/returns', {
+    return_date: today, product_id: prodPbk.id, qty: 3, price: 40000,
+    kondisi: 'RUSAK', reason: 'Botol pecah saat pengiriman',
+  });
+  check('retur kondisi rusak tercatat', returRusak.kondisi === 'RUSAK');
+  check('retur rusak tidak menambah stok',
+    (await stokPbk()).stock === stokSblmRusak, String((await stokPbk()).stock));
+
+  // Nilainya dipindahkan dari HPP ke akun kerugian: laba tidak berubah, tetapi
+  // berapa yang hilang karena barang rusak akhirnya bisa dibaca.
+  const rugiSesudah = await akunPbk('8100');
+  check('barang rusak total masuk akun Kerugian Barang Rusak',
+    near(rugiSesudah - rugiSblm, 3 * 10000, 1), `${rugiSblm} -> ${rugiSesudah}`);
+
+  // ---- Kondisi PERBAIKI: foil rusak, isinya masih baik ----
+  const stokSblmPbk = (await stokPbk()).stock;
+  const returPbk = await call('POST', '/api/sales/returns', {
+    return_date: today, product_id: prodPbk.id, qty: 5, price: 40000,
+    kondisi: 'PERBAIKI', reason: 'Label & foil rusak, isi masih baik',
+  });
+  check('retur kondisi perbaiki tercatat', returPbk.kondisi === 'PERBAIKI');
+  check('barang perlu perbaikan BELUM masuk stok jual',
+    (await stokPbk()).stock === stokSblmPbk, String((await stokPbk()).stock));
+
+  // Inti fiturnya: barangnya tidak boleh hilang dari pembukuan selama menunggu.
+  const nilaiTunggu = await akunPbk('1250');
+  check('nilainya tetap tercatat sebagai aset selama menunggu',
+    near(nilaiTunggu, 5 * 10000, 1), String(nilaiTunggu));
+
+  const daftarPbk = await call('GET', `/api/perbaikan?from=${today}&to=${today}`);
+  const barisPbk = daftarPbk.rows.find((b) => b.return_no === returPbk.return_no);
+  check('barang muncul di daftar perlu perbaikan',
+    !!barisPbk && barisPbk.status === 'MENUNGGU' && barisPbk.qty === 5,
+    JSON.stringify(daftarPbk.ringkas));
+  check('ringkasan menghitung yang menunggu',
+    daftarPbk.ringkas.menunggu >= 1 && daftarPbk.ringkas.nilaiMenunggu >= 50000,
+    JSON.stringify(daftarPbk.ringkas));
+
+  // Ketiga kondisi sama-sama mengurangi penjualan — itu yang paling penting.
+  const returSemua = await call('GET', `/api/sales/returns/list?from=${today}&to=${today}`);
+  const nilaiTiga = r2Uji(
+    returSemua.rows
+      .filter((r) => [returBagus.return_no, returRusak.return_no, returPbk.return_no].includes(r.return_no))
+      .reduce((a, r) => a + r.amount, 0)
+  );
+  check('ketiga kondisi sama-sama masuk daftar retur',
+    near(nilaiTiga, (2 + 3 + 5) * 40000, 1), String(nilaiTiga));
+
+  const akun4100 = await akunPbk('4100');
+  check('ketiga kondisi sama-sama menambah akun Retur Penjualan',
+    akun4100 >= (2 + 3 + 5) * 40000 - 1, String(akun4100));
+
+  const plPbk = await call('GET',
+    `/api/finance/reports/income-statement?from=2000-01-01&to=${today}`);
+  check('retur mengurangi penjualan bersih di laba rugi',
+    plPbk.salesReturn > 0 && near(plPbk.netSales, plPbk.grossSales - plPbk.salesReturn - plPbk.salesDiscount, 1),
+    `kotor ${plPbk.grossSales} retur ${plPbk.salesReturn} bersih ${plPbk.netSales}`);
+
+  // ---- Selesai dikemas ulang ----
+  const stokSblmSelesai = (await stokPbk()).stock;
+  const selesaiPbk = await call('POST', `/api/perbaikan/${barisPbk.id}/selesai`, {
+    tanggal_selesai: today, biaya_perbaikan: 15000, cash_code: '1000',
+    catatan: 'Ganti label & foil 250 gram',
+  });
+  check('barang selesai dikemas ulang', selesaiPbk.ok === true);
+  check('barang kembali ke stok jual setelah selesai',
+    (await stokPbk()).stock === stokSblmSelesai + 5, String((await stokPbk()).stock));
+
+  // HPP rata-rata produknya WAJIB ikut dihitung ulang. Barang ini kembali
+  // dengan modal berbeda karena biaya kemasannya menempel; kalau HPP produk
+  // dibiarkan, nilai persediaan di neraca tidak lagi sama dengan stok dikali
+  // HPP di gudang, dan selisihnya tidak akan pernah bisa dijelaskan.
+  const produkSetelahPbk = await stokPbk();
+  const hppHarap = r2Uji((stokSblmSelesai * 10000 + (50000 + 15000)) / (stokSblmSelesai + 5));
+  check('HPP rata-rata ikut dihitung ulang setelah barang diperbaiki',
+    near(produkSetelahPbk.cost, hppHarap, 1),
+    `${produkSetelahPbk.cost} vs ${hppHarap}`);
+  check('nilai persediaan produk ini tetap cocok dengan stok x HPP',
+    near(produkSetelahPbk.stock * produkSetelahPbk.cost, stokSblmSelesai * 10000 + 65000, 1),
+    `${r2Uji(produkSetelahPbk.stock * produkSetelahPbk.cost)}`);
+
+  // Biaya kemasan menempel ke nilai barangnya, bukan jadi beban terpisah.
+  const kartuPbk = await call('GET',
+    `/api/inventory/moves?product_id=${prodPbk.id}&from=${today}&to=${today}`);
+  const masukPbk = kartuPbk.rows.filter((m) => m.source === 'REPAIR');
+  check('biaya perbaikan menempel ke HPP barangnya',
+    masukPbk.length === 1 && near(masukPbk[0].unit_cost, (50000 + 15000) / 5, 1),
+    masukPbk[0] ? String(masukPbk[0].unit_cost) : '-');
+
+  const sisaTunggu = await akunPbk('1250');
+  check('nilai keluar dari pos menunggu perbaikan setelah selesai',
+    near(sisaTunggu, 0, 1), String(sisaTunggu));
+
+  const tbSelesai = await call('GET',
+    `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca tetap seimbang setelah barang selesai diperbaiki',
+    Math.abs(tbSelesai.totalDebit - tbSelesai.totalCredit) < 0.01);
+
+  let tolakDuaKali = 0;
+  try {
+    await call('POST', `/api/perbaikan/${barisPbk.id}/selesai`, { tanggal_selesai: today });
+  } catch (err) { tolakDuaKali = err.status; }
+  check('barang yang sudah selesai tidak bisa dikerjakan dua kali',
+    tolakDuaKali === 409, `status ${tolakDuaKali}`);
+
+  // ---- Ternyata tidak bisa diperbaiki ----
+  const returPbk2 = await call('POST', '/api/sales/returns', {
+    return_date: today, product_id: prodPbk.id, qty: 4, price: 40000,
+    kondisi: 'PERBAIKI', reason: 'Foil penyok',
+  });
+  const daftarPbk2 = await call('GET', `/api/perbaikan?from=${today}&to=${today}`);
+  const baris2 = daftarPbk2.rows.find((b) => b.return_no === returPbk2.return_no);
+
+  const rugiSblmHapus = await akunPbk('8100');
+  const stokSblmHapus = (await stokPbk()).stock;
+  const hapusPbk = await call('POST', `/api/perbaikan/${baris2.id}/hapus`, {
+    tanggal_hapus: today, catatan: 'Ternyata isinya ikut rusak',
+  });
+  check('barang bisa ditandai tidak dapat diperbaiki', hapusPbk.ok === true);
+  check('menghapus barang perbaikan tidak menyentuh stok',
+    (await stokPbk()).stock === stokSblmHapus, String((await stokPbk()).stock));
+
+  // Dibandingkan dengan nilai yang DIBEKUKAN pada barisnya, bukan angka yang
+  // dihitung ulang di sini: HPP produknya sudah bergerak setelah barang
+  // sebelumnya selesai diperbaiki, dan yang harus dipindahkan ke kerugian
+  // adalah nilai yang berlaku saat barangnya masuk.
+  const rugiSesudahHapus = await akunPbk('8100');
+  check('nilainya pindah menjadi kerugian barang rusak',
+    near(rugiSesudahHapus - rugiSblmHapus, baris2.nilai, 1),
+    `${rugiSblmHapus} -> ${rugiSesudahHapus}, nilai baris ${baris2.nilai}`);
+
+  const tunggu2 = await akunPbk('1250');
+  check('tidak ada nilai tertinggal di pos menunggu perbaikan',
+    near(tunggu2, 0, 1), String(tunggu2));
+
+  const tbHapus = await call('GET',
+    `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca tetap seimbang setelah barang dihapus',
+    Math.abs(tbHapus.totalDebit - tbHapus.totalCredit) < 0.01);
+
+  // Persediaan di neraca harus tetap sama dengan valuasi stok gudang: barang
+  // yang menunggu perbaikan sengaja TIDAK bersubtipe INVENTORY.
+  const persediaanSblmTunggu = (await call('GET',
+    `/api/finance/reports/balance-sheet?asOf=${today}`)).assets.current.totalInventory;
+  const returPbk3 = await call('POST', '/api/sales/returns', {
+    return_date: today, product_id: prodPbk.id, qty: 6, price: 40000,
+    kondisi: 'PERBAIKI', reason: 'Menunggu dikerjakan',
+  });
+  check('retur ketiga tercatat', returPbk3.ok === true);
+  const bsPbk = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  // Barang yang menunggu perbaikan sengaja BUKAN bersubtipe INVENTORY: nilai
+  // persediaan di neraca harus tetap berisi barang yang benar-benar siap
+  // dijual, tidak lebih. Kalau ia ikut terhitung, valuasi stok gudang dan
+  // neraca akan berselisih tanpa ada yang bisa menjelaskan sebabnya.
+  check('barang yang menunggu perbaikan tidak menggelembungkan nilai persediaan',
+    near(bsPbk.assets.current.totalInventory, persediaanSblmTunggu, 1),
+    `${bsPbk.assets.current.totalInventory} vs ${persediaanSblmTunggu}`);
+  check('neraca tetap seimbang dengan barang yang masih menunggu', bsPbk.balanced);
+
+  const unduhPbk = await fetch(`${BASE}/api/perbaikan/export/excel?from=${today}&to=${today}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  check('daftar barang perbaikan bisa diunduh', unduhPbk.status === 200,
+    `status ${unduhPbk.status}`);
+
+  token = await masukSebagai(akunSempit.user.email, 'RahasiaKuat1');
+  let tolakPbk = 0;
+  try {
+    await call('GET', '/api/perbaikan');
+  } catch (err) { tolakPbk = err.status; }
+  check('tim tanpa izin gudang tidak bisa membuka barang perbaikan',
+    tolakPbk === 403, `status ${tolakPbk}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

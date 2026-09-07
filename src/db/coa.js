@@ -18,6 +18,11 @@ const COA = [
   ['1100', 'Piutang Usaha',                  'ASSET', 'RECEIVABLE',      'D', 'OCF',  0],
   ['1110', 'Piutang Marketplace (Dana Ditahan)', 'ASSET', 'RECEIVABLE',  'D', 'OCF',  0],
   ['1200', 'Persediaan Barang Dagang',       'ASSET', 'INVENTORY',       'D', 'OCF',  0],
+  // Barang retur yang masih bisa dijual setelah dikemas ulang atau diperbaiki.
+  // Sengaja BUKAN bersubtipe INVENTORY: nilai persediaan di neraca harus tetap
+  // sama persis dengan valuasi stok gudang, dan barang ini belum boleh dijual.
+  // Tetap aset karena barangnya memang masih ada dan masih punya nilai.
+  ['1250', 'Persediaan Barang Perlu Perbaikan', 'ASSET', 'OTHER_CURRENT',   'D', 'OCF',  0],
   ['1300', 'Biaya Dibayar di Muka',          'ASSET', 'OTHER_CURRENT',   'D', 'OCF',  0],
   ['1500', 'Peralatan & Inventaris',         'ASSET', 'FIXED_ASSET',     'D', 'ICF',  0],
   ['1510', 'Kendaraan',                      'ASSET', 'FIXED_ASSET',     'D', 'ICF',  0],
@@ -73,6 +78,11 @@ const COA = [
   ['7000', 'Beban Pajak',                    'EXPENSE', 'TAX',     'D', 'OCF', 0],
   ['7100', 'Beban Bunga & Admin Bank',       'EXPENSE', 'FINANCE', 'D', 'OCF', 0],
   ['8000', 'Selisih Stok Opname',            'EXPENSE', 'OTHER',   'D', 'NONE', 0],
+  // Barang retur yang tidak bisa diselamatkan. Nilainya dipindahkan dari HPP
+  // ke sini supaya kerugiannya BISA DIBACA — kalau dibiarkan di HPP, laba
+  // memang sudah benar tetapi tidak ada yang tahu berapa yang hilang karena
+  // barang rusak.
+  ['8100', 'Kerugian Barang Rusak',           'EXPENSE', 'OTHER',   'D', 'NONE', 0],
 ];
 
 /** Kode akun yang direferensikan oleh posting otomatis. */
@@ -101,6 +111,8 @@ const ACC = {
   SALARY: '6100',
   OTHER_EXPENSE: '6190',
   STOCK_VARIANCE: '8000',
+  REPAIR_INVENTORY: '1250',
+  DAMAGED_LOSS: '8100',
 };
 
 module.exports = { COA, ACC };

@@ -14,6 +14,13 @@ const router = express.Router();
 router.use(requireAuth);
 
 const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
+
+/** Kondisi barang retur — dipakai layar dan berkas unduhan. */
+const LABEL_KONDISI = {
+  BAGUS: 'Bagus, kembali ke stok',
+  PERBAIKI: 'Perlu dikemas ulang',
+  RUSAK: 'Rusak, jadi kerugian',
+};
 const { ubahSchema, buatPengubah } = require('./sales-ubah');
 
 const orderSchema = z.object({
@@ -950,14 +957,25 @@ daftarkanEkspor(router, {
     { header: 'Produk', key: 'product_name', width: 34 },
     { header: 'Jumlah', key: 'qty', width: 10 },
     { header: 'Nilai', key: 'amount', width: 16, money: true },
+    { header: 'Kondisi Barang', key: 'kondisi_label', width: 24 },
     { header: 'Alasan', key: 'reason', width: 34 },
   ],
   ambil: (req) => {
     const d = ambilRetur(req);
+    const hitung = (k) => d.rows.filter((r) => (r.kondisi || (r.restock ? 'BAGUS' : 'RUSAK')) === k).length;
     return {
-      rows: d.rows,
+      rows: d.rows.map((r) => ({
+        ...r,
+        kondisi_label: LABEL_KONDISI[r.kondisi] || (r.restock ? LABEL_KONDISI.BAGUS : LABEL_KONDISI.RUSAK),
+      })),
       subtitle: `Periode ${d.from} s/d ${d.to}`,
-      meta: [['Jumlah retur', d.rows.length], ['Total nilai retur', d.total]],
+      meta: [
+        ['Jumlah retur', d.rows.length],
+        ['Total nilai retur', d.total],
+        ['Kembali ke stok jual', hitung('BAGUS')],
+        ['Perlu dikemas ulang', hitung('PERBAIKI')],
+        ['Rusak total', hitung('RUSAK')],
+      ],
     };
   },
 });
@@ -966,19 +984,40 @@ daftarkanEkspor(router, {
 // ==================================================================
 // RETUR PENJUALAN
 // ==================================================================
+/**
+ * Kondisi barang yang diretur — tiga, bukan dua.
+ *
+ *   BAGUS    : botol utuh, kemasan mulus. Langsung kembali ke stok jual.
+ *   PERBAIKI : aluminium foil atau labelnya rusak, isinya masih baik. Perlu
+ *              dikemas ulang dulu, setelah itu bisa dijual lagi.
+ *   RUSAK    : botol pecah, isinya tumpah. Tidak ada yang bisa diselamatkan.
+ *
+ * Dulu hanya ada dua lewat centang `restock`, sehingga barang yang cukup
+ * dikemas ulang terpaksa dicatat sebagai kerugian lalu dimasukkan lagi sebagai
+ * barang baru — dan selama diperbaiki ia tidak tercatat di mana pun.
+ *
+ * `restock` tetap ditulis supaya layar dan berkas lama tidak berubah artinya.
+ */
+const KONDISI = ['BAGUS', 'PERBAIKI', 'RUSAK'];
+
 const returnSchema = z.object({
   return_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => todayLocal()),
   order_id: z.number().int().positive().optional().nullable(),
   product_id: z.number().int().positive(),
   qty: z.number().positive(),
   price: z.number().nonnegative(),
+  // Dipertahankan demi pemanggil lama; kondisi yang menang bila keduanya ada.
   restock: z.boolean().default(true),
+  kondisi: z.enum(KONDISI).optional(),
   reason: z.string().max(300).optional().nullable(),
 });
 
 const createReturn = db.transaction((body, userId) => {
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(body.product_id);
   if (!product) throw httpError(404, 'Produk tidak ditemukan');
+
+  const kondisi = body.kondisi || (body.restock ? 'BAGUS' : 'RUSAK');
+  const masukStok = kondisi === 'BAGUS';
 
   const qty = r2(body.qty);
   const amount = r2(qty * body.price);
@@ -987,17 +1026,45 @@ const createReturn = db.transaction((body, userId) => {
 
   const info = db
     .prepare(
-      `INSERT INTO sales_returns (return_no, return_date, order_id, product_id, qty, price, cost, amount, restock, reason, user_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO sales_returns (return_no, return_date, order_id, product_id, qty, price, cost, amount, restock, kondisi, reason, user_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
     )
-    .run(returnNo, body.return_date, body.order_id || null, product.id, qty, r2(body.price), product.cost, amount, body.restock ? 1 : 0, body.reason || null, userId);
+    .run(returnNo, body.return_date, body.order_id || null, product.id, qty, r2(body.price), product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, userId);
 
   const lines = [
     { code: ACC.SALES_RETURN, debit: amount, credit: 0, memo: `Retur ${product.name}` },
     { code: ACC.CASH, debit: 0, credit: amount, memo: 'Pengembalian dana pelanggan' },
   ];
 
-  if (body.restock) {
+  if (kondisi === 'PERBAIKI') {
+    // Barangnya tidak masuk stok jual, tetapi nilainya tidak boleh hilang dari
+    // neraca — ia dipindahkan dari HPP ke pos tersendiri sampai selesai
+    // dikerjakan. Tanpa ini, barang yang sedang di rak perbaikan tidak ada di
+    // catatan mana pun, dan yang lupa mengerjakannya tidak akan pernah tahu.
+    db.prepare(
+      `INSERT INTO barang_perbaikan
+         (return_id, product_id, tanggal_masuk, qty, unit_cost, nilai, status, catatan, user_id)
+       VALUES (?,?,?,?,?,?, 'MENUNGGU', ?, ?)`
+    ).run(
+      info.lastInsertRowid, product.id, body.return_date, qty,
+      r2(product.cost), costValue, body.reason || null, userId
+    );
+
+    lines.push({ code: ACC.REPAIR_INVENTORY, debit: costValue, credit: 0, memo: `Menunggu perbaikan: ${product.name}` });
+    lines.push({ code: ACC.COGS, debit: 0, credit: costValue, memo: 'Pembalikan HPP' });
+  }
+
+  if (kondisi === 'RUSAK') {
+    // Nilainya dipindahkan dari HPP ke akun kerugian. Laba tidak berubah
+    // sedikit pun — yang berubah hanya namanya, sehingga berapa yang hilang
+    // karena barang rusak akhirnya bisa dibaca di laporan.
+    if (costValue > 0) {
+      lines.push({ code: ACC.DAMAGED_LOSS, debit: costValue, credit: 0, memo: `Barang rusak: ${product.name}` });
+      lines.push({ code: ACC.COGS, debit: 0, credit: costValue, memo: 'Pemindahan dari HPP' });
+    }
+  }
+
+  if (masukStok) {
     const newStock = r2(product.stock + qty);
     db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, product.id);
     db.prepare(
@@ -1028,12 +1095,21 @@ const createReturn = db.transaction((body, userId) => {
     userId,
   });
 
-  return { id: info.lastInsertRowid, return_no: returnNo, amount };
+  return { id: info.lastInsertRowid, return_no: returnNo, amount, kondisi };
 });
 
 router.post('/returns', butuhIzin('penjualan.buat'), ah((req, res) => {
   const body = parse(returnSchema, req.body);
-  res.status(201).json({ ok: true, ...createReturn(body, req.user.id) });
+  const hasil = createReturn(body, req.user.id);
+  const kabar = {
+    BAGUS: 'barang kembali ke stok jual',
+    PERBAIKI: 'barang masuk daftar perlu perbaikan',
+    RUSAK: 'barang dicatat sebagai kerugian',
+  };
+  res.status(201).json({
+    ok: true, ...hasil,
+    message: `Retur ${hasil.return_no} tercatat — ${kabar[hasil.kondisi]}`,
+  });
 }));
 
 /** Pengambil daftar retur — dipakai layar dan berkas unduhan. */

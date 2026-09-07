@@ -234,7 +234,7 @@ yang ringkas.
 
 ---
 
-## 4. Skema Database (36 Tabel)
+## 4. Skema Database (37 Tabel)
 
 ### Pengguna & hak akses
 | Tabel | Isi |
@@ -254,6 +254,7 @@ yang ringkas.
 | `stock_moves` | kartu stok: IN / OUT / ADJ, `balance_after`, sumber & id sumber |
 | `stock_opnames`, `stock_opname_lines` | stok opname beserta selisihnya |
 | `product_batches` | batch beserta tanggal kadaluarsa dan sisanya |
+| `barang_perbaikan` | barang retur yang menunggu dikemas ulang, beserta nilai yang dibekukan |
 | `batch_moves` | kartu pergerakan tiap batch |
 
 ### Penjualan
@@ -319,6 +320,7 @@ dan API-nya juga menolak — bukan sekadar disembunyikan.
 - **Stok Opname** — hitung fisik, selisih, penyesuaian otomatis
 - **Kinerja Produk** — laku/tidak, modal menganggur, margin per produk
 - **Batch & Kadaluarsa** — batch menjelang kadaluarsa beserta nilainya, diurutkan dari yang mendesak
+- **Barang Perlu Perbaikan** — barang retur yang masih bisa dijual setelah dikemas ulang
 
 ### Pembelian
 - **Saran Pembelian** — barang yang perlu dibeli beserta jumlah dan perkiraan dananya
@@ -424,7 +426,7 @@ keluar dari fitur yang baru saja dipasang.
 
 ---
 
-## 7. Chart of Accounts (41 Akun)
+## 7. Chart of Accounts (43 Akun)
 
 Kolom: kode, nama, tipe, arus kas, saldo normal (D/K).
 
@@ -592,6 +594,38 @@ mengurangi utang atau mengembalikan kas.
   stoknya berkurang tetapi utangnya tidak, sehingga aplikasi tetap menagih
   pembayaran untuk barang yang sudah dikembalikan.
 
+### Retur penjualan: tiga kondisi, bukan dua
+
+Barang yang dikembalikan pembeli tidak selalu "bagus" atau "rusak". Botol
+kemasan cair yang pecah memang langsung jadi kerugian, tetapi kemasan foil yang
+hanya rusak label cukup dikemas ulang dan bisa dijual lagi.
+
+- **Bagus** — masuk stok jual, HPP dibalik seperti biasa.
+- **Perlu dikemas ulang** — TIDAK masuk stok jual, tetapi nilainya pindah dari
+  HPP ke pos aset tersendiri. Tanpa pos ini, barang yang sedang dikerjakan
+  tidak tercatat di mana pun: yang lupa mengerjakannya tidak pernah tahu, dan
+  laba turun di bulan barang masuk lalu naik di bulan barang keluar tanpa sebab
+  yang bisa dijelaskan.
+- **Rusak total** — nilainya pindah dari HPP ke akun kerugian tersendiri. Laba
+  tidak berubah sedikit pun; yang berubah hanya namanya, sehingga berapa yang
+  hilang karena barang rusak akhirnya bisa dibaca.
+
+Aturan yang mudah dilanggar:
+
+- Pos "menunggu perbaikan" **jangan diberi subtipe INVENTORY**. Nilai persediaan
+  di neraca harus tetap sama persis dengan valuasi stok gudang, dan barang ini
+  belum boleh dijual.
+- Nilai barangnya **dibekukan saat masuk**. Kalau HPP produknya bergerak setelah
+  itu, yang dikembalikan saat keluar tetap angka yang dipindahkan dari HPP.
+- Saat selesai, **HPP rata-rata produknya wajib dihitung ulang** dengan rumus
+  yang sama seperti barang masuk biasa. Barang ini kembali dengan modal berbeda
+  karena biaya kemasan barunya menempel; melewatkannya membuat nilai persediaan
+  di neraca berbeda dari stok dikali HPP, dan selisihnya tidak akan pernah bisa
+  dijelaskan.
+- Biaya label dan kemasan baru **menempel ke HPP barangnya**, bukan menjadi
+  beban terpisah — kalau tidak, margin barang itu tampak lebih besar daripada
+  kenyataan.
+
 ### Rekonsiliasi bank
 
 Mencocokkan rekening koran dengan jurnal — bukan menggantikan jurnal.
@@ -718,7 +752,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 657 pemeriksaan, 46 bagian
+npm run smoke            # 688 pemeriksaan, 47 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1166,6 +1200,6 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 
 ---
 
-*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 6 September 2026.
+*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 7 September 2026.
 Saat aplikasinya berkembang, perbarui dokumen ini bersamaan — panduan duplikasi
 yang tertinggal dari kenyataan lebih menyesatkan daripada tidak ada panduan.*

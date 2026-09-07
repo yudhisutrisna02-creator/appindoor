@@ -8,6 +8,46 @@ import {
 } from '../components/ui';
 import { rupiah, num, today, dateID } from '../lib/format';
 
+/**
+ * Kondisi barang yang diretur.
+ *
+ * Diambil dari kenyataan di gudang, bukan dari kerapian sistem: botol kemasan
+ * cair yang pecah tidak bisa diselamatkan, sedangkan kemasan aluminium foil
+ * yang hanya rusak label cukup dikemas ulang dan bisa dijual kembali.
+ */
+const KONDISI = [
+  {
+    nilai: 'BAGUS',
+    label: 'Bagus',
+    hint: 'Kemasan utuh, langsung masuk stok jual',
+  },
+  {
+    nilai: 'PERBAIKI',
+    label: 'Perlu dikemas ulang',
+    hint: 'Label atau foil rusak, isinya masih baik',
+  },
+  {
+    nilai: 'RUSAK',
+    label: 'Rusak total',
+    hint: 'Botol pecah atau isi tumpah, jadi kerugian',
+  },
+];
+
+const WARNA_KONDISI = {
+  BAGUS: 'badge-green',
+  PERBAIKI: 'badge-amber',
+  RUSAK: 'badge-red',
+};
+
+const LABEL_KONDISI = {
+  BAGUS: 'Masuk stok',
+  PERBAIKI: 'Dikemas ulang',
+  RUSAK: 'Kerugian',
+};
+
+/** Baris lama hanya punya restock; artinya diterjemahkan apa adanya. */
+const kondisiDari = (r) => r.kondisi || (r.restock ? 'BAGUS' : 'RUSAK');
+
 export default function Retur() {
   const toast = useToast();
   const [range, setRange] = useState(defaultRange);
@@ -43,7 +83,7 @@ export default function Retur() {
       product_id: '',
       qty: 1,
       price: '',
-      restock: true,
+      kondisi: 'BAGUS',
       reason: '',
     });
   }
@@ -58,10 +98,10 @@ export default function Retur() {
         product_id: Number(form.product_id),
         qty: Number(form.qty),
         price: Number(form.price),
-        restock: form.restock,
+        kondisi: form.kondisi,
         reason: form.reason || null,
       });
-      toast.success(`Retur ${res.return_no} tercatat senilai ${rupiah(res.amount)}`);
+      toast.success(`${res.message} — senilai ${rupiah(res.amount)}`);
       setForm(null);
       load();
       api.get('/api/inventory/products').then((d) => setProducts(d.products));
@@ -101,9 +141,9 @@ export default function Retur() {
             <StatCard label="Jumlah Retur" value={data.rows.length} icon={Undo2} tone="amber" />
             <StatCard label="Nilai Retur" value={rupiah(data.total)} icon={Undo2} tone="red" />
             <StatCard
-              label="Kembali ke Gudang"
-              value={data.rows.filter((r) => r.restock).length}
-              sub={`${data.rows.filter((r) => !r.restock).length} tidak dikembalikan (rusak)`}
+              label="Kembali ke Stok Jual"
+              value={data.rows.filter((r) => kondisiDari(r) === 'BAGUS').length}
+              sub={`${data.rows.filter((r) => kondisiDari(r) === 'PERBAIKI').length} perlu dikemas ulang • ${data.rows.filter((r) => kondisiDari(r) === 'RUSAK').length} rusak total`}
               icon={PackageCheck} tone="green"
             />
           </div>
@@ -120,7 +160,7 @@ export default function Retur() {
                   <thead>
                     <tr>
                       <th>No. Retur</th><th>Tanggal</th><th>Produk</th><th>Qty</th>
-                      <th>Harga</th><th>Nilai</th><th>Masuk Gudang</th><th>Alasan</th>
+                      <th>Harga</th><th>Nilai</th><th>Kondisi</th><th>Alasan</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -136,9 +176,9 @@ export default function Retur() {
                         <td className="tabular">{rupiah(r.price)}</td>
                         <td className="tabular font-semibold text-rose-600">{rupiah(r.amount)}</td>
                         <td>
-                          {r.restock
-                            ? <span className="badge-green">Ya</span>
-                            : <span className="badge-slate">Tidak</span>}
+                          <span className={WARNA_KONDISI[kondisiDari(r)]}>
+                            {LABEL_KONDISI[kondisiDari(r)]}
+                          </span>
                         </td>
                         <td className="max-w-[200px] truncate text-xs text-slate-500">{r.reason || '-'}</td>
                       </tr>
@@ -210,19 +250,54 @@ export default function Retur() {
               />
             </Field>
 
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input
-                type="checkbox" className="h-4 w-4 rounded" checked={form.restock}
-                onChange={(e) => setForm({ ...form, restock: e.target.checked })}
-              />
-              Barang kembali ke gudang (stok bertambah &amp; HPP dibalik)
-            </label>
+            {/* Tiga kemungkinan, bukan dua. Botol pecah memang langsung jadi
+                kerugian, tetapi kemasan foil yang labelnya rusak cukup dikemas
+                ulang dan bisa dijual lagi — dan selama dikerjakan, barangnya
+                harus tetap tercatat di suatu tempat. */}
+            <Field label="Kondisi Barang *" className="sm:col-span-2">
+              <div className="grid gap-2 sm:grid-cols-3">
+                {KONDISI.map((k) => (
+                  <label
+                    key={k.nilai}
+                    className={`cursor-pointer rounded-xl border p-2.5 text-left transition ${
+                      form.kondisi === k.nilai
+                        ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-400'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="radio" name="kondisi" className="h-4 w-4"
+                        checked={form.kondisi === k.nilai}
+                        onChange={() => setForm({ ...form, kondisi: k.nilai })}
+                      />
+                      <span className="text-sm font-medium text-slate-800">{k.label}</span>
+                    </span>
+                    <span className="mt-1 block pl-6 text-[11px] leading-snug text-slate-500">
+                      {k.hint}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </Field>
 
             {dipilih && form.qty && form.price && (
-              <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800 sm:col-span-2">
+              <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 sm:col-span-2">
                 Nilai retur <strong>{rupiah(Number(form.qty) * Number(form.price))}</strong> akan
-                mengurangi penjualan bersih.
-                {form.restock && <> Stok {dipilih.name} bertambah menjadi <strong>{num(dipilih.stock + Number(form.qty))} {dipilih.unit}</strong>.</>}
+                mengurangi penjualan bersih — berlaku untuk ketiga kondisi.
+                {form.kondisi === 'BAGUS' && (
+                  <> Stok {dipilih.name} bertambah menjadi{' '}
+                  <strong>{num(dipilih.stock + Number(form.qty))} {dipilih.unit}</strong>.</>
+                )}
+                {form.kondisi === 'PERBAIKI' && (
+                  <> Stok belum bertambah. Barangnya masuk daftar{' '}
+                  <strong>Barang Perlu Perbaikan</strong> di menu Gudang, dan baru masuk stok jual
+                  setelah ditandai selesai di sana.</>
+                )}
+                {form.kondisi === 'RUSAK' && (
+                  <> Stok tidak bertambah dan nilainya dicatat sebagai{' '}
+                  <strong>kerugian barang rusak</strong>.</>
+                )}
               </p>
             )}
 

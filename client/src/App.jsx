@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket, UsersRound,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket, UsersRound, Wrench,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -30,6 +30,7 @@ import Pengaturan from './pages/Pengaturan';
 import KasMasukKeluar from './pages/KasMasukKeluar';
 import PindahSaldo from './pages/PindahSaldo';
 import Kadaluarsa from './pages/Kadaluarsa';
+import Perbaikan from './pages/Perbaikan';
 import Rekonsiliasi from './pages/Rekonsiliasi';
 import SaranBeli from './pages/SaranBeli';
 import Pelanggan from './pages/Pelanggan';
@@ -87,6 +88,7 @@ const NAV = [
       { to: '/gudang/mutasi', label: 'Mutasi Stok', icon: ArrowLeftRight, izin: 'gudang.lihat' },
       { to: '/gudang/opname', label: 'Stok Opname', icon: ClipboardCheck, izin: 'gudang.opname' },
       { to: '/gudang/kadaluarsa', label: 'Batch & Kadaluarsa', icon: CalendarX2, izin: 'gudang.lihat' },
+      { to: '/gudang/perbaikan', label: 'Barang Perlu Perbaikan', icon: Wrench, izin: 'gudang.lihat' },
       { to: '/gudang/kinerja', label: 'Kinerja Produk', icon: PackageSearch, izin: 'gudang.kinerja' },
     ],
   },
@@ -475,6 +477,7 @@ export default function App() {
         <Route path="/keuangan/kas" element={<Dijaga izin="keuangan.kas"><KasMasukKeluar /></Dijaga>} />
         <Route path="/keuangan/pindah" element={<Dijaga izin="keuangan.kas"><PindahSaldo /></Dijaga>} />
         <Route path="/gudang/kadaluarsa" element={<Dijaga izin="gudang.lihat"><Kadaluarsa /></Dijaga>} />
+        <Route path="/gudang/perbaikan" element={<Dijaga izin="gudang.lihat"><Perbaikan /></Dijaga>} />
         <Route path="/keuangan/rekonsiliasi" element={<Dijaga izin="keuangan.kas"><Rekonsiliasi /></Dijaga>} />
         <Route path="/pembelian/saran" element={<Dijaga izin="pembelian.lihat"><SaranBeli /></Dijaga>} />
         <Route path="/pembelian/retur" element={<Dijaga izin="pembelian.lihat"><ReturBeli /></Dijaga>} />

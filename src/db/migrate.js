@@ -279,6 +279,51 @@ function buatTabelReturBeli(db, applied) {
 }
 
 /**
+ * Barang retur yang masih bisa diselamatkan.
+ *
+ * Retur dari pembeli tidak selalu dua kemungkinan. Botol yang pecah memang
+ * langsung jadi kerugian, tetapi kemasan aluminium foil yang labelnya rusak
+ * cukup dikemas ulang dan bisa dijual lagi. Tanpa tempat ketiga, barang seperti
+ * itu terpaksa dicatat sebagai kerugian lalu muncul kembali sebagai barang
+ * baru — labanya turun bulan ini dan naik bulan depan tanpa sebab yang bisa
+ * dijelaskan, dan selama diperbaiki barangnya tidak tercatat di mana pun.
+ *
+ * Satu baris = satu barang retur yang menunggu dikerjakan, dengan nilainya
+ * dibekukan pada saat masuk. Nilai itu tidak boleh ikut berubah kalau HPP
+ * produknya bergerak setelahnya: yang dipindahkan dari HPP adalah angka yang
+ * berlaku saat barangnya kembali.
+ */
+function buatTabelPerbaikan(db, applied) {
+  if (tableExists(db, 'barang_perbaikan')) return;
+
+  db.exec(`
+    CREATE TABLE barang_perbaikan (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      return_id       INTEGER REFERENCES sales_returns(id),
+      product_id      INTEGER NOT NULL REFERENCES products(id),
+      tanggal_masuk   TEXT NOT NULL,
+      qty             REAL NOT NULL,
+      unit_cost       REAL NOT NULL DEFAULT 0,
+      nilai           REAL NOT NULL DEFAULT 0,
+      -- MENUNGGU : masih di rak perbaikan
+      -- SELESAI  : sudah dikemas ulang dan kembali ke stok jual
+      -- HAPUS    : ternyata tidak bisa diselamatkan, jadi kerugian
+      status          TEXT NOT NULL DEFAULT 'MENUNGGU',
+      tanggal_selesai TEXT,
+      biaya_perbaikan REAL NOT NULL DEFAULT 0,
+      biaya_kas_code  TEXT,
+      catatan         TEXT,
+      user_id         INTEGER REFERENCES users(id),
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_perbaikan_status ON barang_perbaikan(status);
+    CREATE INDEX idx_perbaikan_produk ON barang_perbaikan(product_id);
+  `);
+
+  applied.push('tabel barang_perbaikan');
+}
+
+/**
  * Menyelaraskan waktu riwayat lama ke waktu setempat.
  *
  * Kolom at dulu memakai datetime('now') bawaan SQLite yang selalu UTC,
@@ -376,6 +421,14 @@ function runMigrations(db) {
   buatTabelBatch(db, applied);
   buatTabelRekonsiliasi(db, applied);
   buatTabelReturBeli(db, applied);
+  buatTabelPerbaikan(db, applied);
+
+  // Kondisi barang retur: dulu hanya dua kemungkinan lewat kolom restock.
+  // Baris lama diterjemahkan apa adanya — yang dikembalikan berarti bagus,
+  // yang tidak berarti rusak; tidak ada yang boleh berubah artinya.
+  if (addColumn(db, 'sales_returns', 'kondisi', "TEXT NOT NULL DEFAULT 'BAGUS'", applied)) {
+    db.exec("UPDATE sales_returns SET kondisi = CASE WHEN restock = 1 THEN 'BAGUS' ELSE 'RUSAK' END");
+  }
   selaraskanWaktuRiwayat(db, applied);
   addColumn(db, 'stock_moves', 'due_date', 'TEXT', applied);
 
