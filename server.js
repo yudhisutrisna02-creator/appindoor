@@ -87,11 +87,21 @@ app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // Pembatas laju khusus endpoint login untuk meredam brute force.
+//
+// Batasnya boleh dilonggarkan lewat LOGIN_RATE_MAX, dan itu HANYA untuk
+// pengujian otomatis: satu rangkaian uji melakukan belasan login yang sah
+// berturut-turut dari satu alamat IP, sehingga menabrak batas wajar dan
+// menggagalkan seluruh pipeline. Di server produksi variabel ini jangan
+// pernah diisi — nilai bawaannya memang sengaja ketat.
+const maksLogin = Number(process.env.LOGIN_RATE_MAX) > 0
+  ? Number(process.env.LOGIN_RATE_MAX)
+  : 20;
+
 app.use(
   '/api/auth/login',
   rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    max: maksLogin,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' },

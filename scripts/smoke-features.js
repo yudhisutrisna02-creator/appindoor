@@ -101,11 +101,18 @@ const today = new Date().toLocaleDateString('sv-SE');
   // Daftar ini memuat seluruh pergerakan kas, bukan hanya yang diketik di layar
   // kas, jadi yang diperiksa adalah kedua catatan manual ini benar-benar ada —
   // bukan bahwa keduanya satu-satunya isi daftar.
+  // Dicari lewat keterangannya masing-masing, BUKAN dengan menjumlahkan
+  // seluruh catatan bersumber CASH pada hari itu. Rangkaian uji lain berjalan
+  // lebih dulu terhadap peladen yang sama dan ikut membuat catatan kas, jadi
+  // pemeriksaan berbasis jumlah mutlak akan gagal padahal tidak ada yang rusak.
   const manual = daftarKas.rows.filter((r) => r.source === 'CASH');
+  // Keterangannya disimpan dengan awalan "Kas Masuk — " / "Kas Keluar — ".
+  const punyaKata = (r, kata) => String(r.description || '').includes(kata);
+  const sewa = manual.find((r) => punyaKata(r, 'Uji bayar sewa'));
+  const lain = manual.find((r) => punyaKata(r, 'Uji pendapatan lain'));
   cek('kedua catatan kas manual muncul di daftar',
-    near(manual.reduce((s2, r) => s2 + r.masuk, 0), 200000) &&
-    near(manual.reduce((s2, r) => s2 + r.keluar, 0), 500000),
-    `(masuk ${manual.reduce((s2, r) => s2 + r.masuk, 0)}, keluar ${manual.reduce((s2, r) => s2 + r.keluar, 0)})`);
+    !!sewa && near(sewa.keluar, 500000) && !!lain && near(lain.masuk, 200000),
+    `(sewa ${sewa ? sewa.keluar : '-'}, pendapatan ${lain ? lain.masuk : '-'})`);
 
   const kasSeluruh = await call('GET', `/api/cashflow/entries?from=2000-01-01&to=${today}`);
   const neracaKas = (await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`))
