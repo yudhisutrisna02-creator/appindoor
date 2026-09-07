@@ -340,6 +340,99 @@ function rekeningKas(req) {
 
 router.get('/rekening', ah((req, res) => res.json(rekeningKas(req))));
 
+/**
+ * Menambah banyak rekening sekaligus.
+ *
+ * Menambahkannya satu per satu lewat bagan akun berarti mengisi tujuh kolom
+ * untuk tiap rekening — jenis, subtipe, saldo normal, arus kas — padahal
+ * ketujuhnya selalu sama untuk rekening bank. Yang benar-benar berbeda hanya
+ * namanya, dan itu satu-satunya yang ditanyakan di sini.
+ *
+ * Kodenya dipilihkan berurutan dari kode kosong pertama, sehingga tidak perlu
+ * ada yang menghafal kode mana yang sudah terpakai.
+ */
+const rekeningMassalSchema = z.object({
+  nama: z.array(z.string().trim().min(3, 'nama rekening terlalu pendek').max(120)).min(1).max(50),
+  mulai_kode: z.string().trim().regex(/^\d{3,6}$/).default('1021'),
+});
+
+/** Angka pada nama rekening — dipakai mengenali nomor rekening yang sama. */
+const digitSaja = (s) => String(s || '').replace(/\D/g, '');
+
+const buatRekeningMassal = db.transaction((body) => {
+  const adaSekarang = db.prepare('SELECT id, code, name FROM accounts').all();
+  const kodeTerpakai = new Set(adaSekarang.map((a) => a.code));
+
+  // Dua rekening dianggap sama bila NOMORNYA sama, bukan namanya. Nama bisa
+  // ditulis berbeda-beda ("BCA Annisa" / "Bca ANNISA"), tetapi nomor rekening
+  // tidak pernah berubah — itulah yang membedakan dua rekening di bank yang
+  // sama atas nama orang yang sama.
+  const nomorTerpakai = new Map();
+  for (const a of adaSekarang) {
+    const d = digitSaja(a.name);
+    if (d.length >= 6) nomorTerpakai.set(d, a);
+  }
+  const namaTerpakai = new Map(
+    adaSekarang.map((a) => [a.name.trim().toLowerCase().replace(/\s+/g, ' '), a])
+  );
+
+  let kode = Number(body.mulai_kode);
+  const kodeBerikut = () => {
+    while (kodeTerpakai.has(String(kode))) kode += 1;
+    const dipakai = String(kode);
+    kodeTerpakai.add(dipakai);
+    kode += 1;
+    return dipakai;
+  };
+
+  const dibuat = [];
+  const dilewati = [];
+
+  for (const namaAsli of body.nama) {
+    const nama = namaAsli.trim().replace(/\s+/g, ' ');
+    const d = digitSaja(nama);
+
+    const bentrokNomor = d.length >= 6 ? nomorTerpakai.get(d) : null;
+    if (bentrokNomor) {
+      dilewati.push({
+        nama,
+        alasan: `nomornya sudah terdaftar sebagai ${bentrokNomor.code} · ${bentrokNomor.name}`,
+      });
+      continue;
+    }
+
+    const bentrokNama = namaTerpakai.get(nama.toLowerCase());
+    if (bentrokNama) {
+      dilewati.push({ nama, alasan: `namanya sudah ada sebagai ${bentrokNama.code}` });
+      continue;
+    }
+
+    const kodeBaru = kodeBerikut();
+    db.prepare(
+      `INSERT INTO accounts (code, name, type, subtype, normal, cashflow, is_cash, is_system, active)
+       VALUES (?,?, 'ASSET', 'CASH', 'D', 'OCF', 1, 0, 1)`
+    ).run(kodeBaru, nama);
+
+    if (d.length >= 6) nomorTerpakai.set(d, { code: kodeBaru, name: nama });
+    namaTerpakai.set(nama.toLowerCase(), { code: kodeBaru, name: nama });
+    dibuat.push({ code: kodeBaru, name: nama });
+  }
+
+  return { dibuat, dilewati };
+});
+
+router.post('/rekening', butuhIzin('keuangan.coa'), ah((req, res) => {
+  const body = parse(rekeningMassalSchema, req.body);
+  const hasil = buatRekeningMassal(body);
+  res.status(201).json({
+    ok: true,
+    ...hasil,
+    message:
+      `${hasil.dibuat.length} rekening ditambahkan` +
+      (hasil.dilewati.length ? `, ${hasil.dilewati.length} dilewati karena sudah ada` : ''),
+  });
+}));
+
 daftarkanEkspor(router, {
   path: '/rekening',
   judul: 'Rekening Kas & Bank',

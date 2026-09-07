@@ -752,7 +752,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 714 pemeriksaan, 48 bagian
+npm run smoke            # 724 pemeriksaan, 49 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1202,6 +1202,7 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Retur dicatat tanpa memeriksa order asalnya | Barang yang tidak pernah dikirim ke pembeli itu tetap bisa diretur, dan satu order bisa diretur berkali-kali melebihi yang dikirim |
 | Mengubah dokumen dikerjakan sebagai hapus-lalu-buat-baru | Id barisnya berganti tiap kali diubah, sehingga riwayat perubahannya putus dan tautan dari tabel lain menunjuk baris yang sudah tidak ada |
 | Pemeriksaan sisa ikut menghitung baris yang sedang diubah | Mengubah retur 4 menjadi 2 ditolak dengan alasan barangnya sudah habis diretur |
+| Rekening dianggap sama bila NAMANYA sama | Nama ditulis berbeda-beda; nomor rekening tidak pernah berubah — cocokkan lewat angka pada namanya |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---

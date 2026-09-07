@@ -4919,6 +4919,82 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n49. Tambah banyak rekening sekaligus');
+
+  const capRek = Date.now();
+  const namaRek49 = [
+    `BCA UJI SATU 423-046-${capRek}`,
+    `BCA UJI DUA 423-029-${capRek}`,
+    `MANDIRI UJI 180001097-${capRek}`,
+  ];
+
+  const tambahRek49 = await call('POST', '/api/cashflow/rekening', {
+    nama: namaRek49, mulai_kode: '1021',
+  });
+  check('rekening bisa ditambahkan sekaligus',
+    tambahRek49.dibuat.length === 3 && tambahRek49.dilewati.length === 0,
+    JSON.stringify(tambahRek49.dibuat.map((a) => a.code)));
+
+  // Kodenya berurutan dari kode kosong pertama, tanpa ada yang perlu menghafal
+  // kode mana yang sudah terpakai.
+  const kodeRek49 = tambahRek49.dibuat.map((a) => Number(a.code));
+  check('kode dipilihkan berurutan mulai dari yang diminta',
+    kodeRek49[0] >= 1021 && kodeRek49[1] === kodeRek49[0] + 1 && kodeRek49[2] === kodeRek49[1] + 1,
+    JSON.stringify(kodeRek49));
+
+  // Langsung bisa dipakai mencatat kas — itu gunanya ditandai sebagai rekening.
+  const opsiRek49 = await call('GET', '/api/cashflow/options');
+  check('rekening baru langsung bisa dipilih saat mencatat kas',
+    namaRek49.every((n) => opsiRek49.cashAccounts.some((k) => k.name === n)),
+    `${opsiRek49.cashAccounts.length} rekening`);
+
+  const daftarRek49 = await call('GET', `/api/cashflow/rekening?asOf=${today}`);
+  check('rekening baru muncul di layar Rekening Kas & Bank',
+    namaRek49.every((n) => daftarRek49.rows.some((x) => x.name === n)));
+
+  // INTI PENJAGAANNYA: nomor yang sama tidak boleh masuk dua kali, walau
+  // namanya ditulis berbeda. Nomor rekening tidak pernah berubah; penulisan
+  // namanya berubah-ubah.
+  const ulang49 = await call('POST', '/api/cashflow/rekening', {
+    nama: [
+      namaRek49[0].toLowerCase().replace('BCA UJI SATU', 'Bca Uji Satu'),
+      `BCA UJI TIGA 423-777-${capRek}`,
+    ],
+    mulai_kode: '1021',
+  });
+  check('rekening dengan nomor yang sama tidak ditambahkan dua kali',
+    ulang49.dilewati.length === 1 && ulang49.dibuat.length === 1,
+    JSON.stringify({ dibuat: ulang49.dibuat.length, dilewati: ulang49.dilewati }));
+  check('alasan dilewati menyebut rekening yang sudah ada',
+    /sudah terdaftar/.test(ulang49.dilewati[0].alasan), ulang49.dilewati[0].alasan);
+
+  // Kode yang sudah terpakai dilewati, bukan menabrak.
+  const semuaAkun49 = await call('GET', '/api/finance/accounts');
+  const kodeSemua49 = semuaAkun49.accounts.map((a) => a.code);
+  check('tidak ada kode akun yang kembar',
+    new Set(kodeSemua49).size === kodeSemua49.length,
+    `${kodeSemua49.length} akun`);
+
+  const bsRek49 = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah rekening ditambahkan', bsRek49.balanced);
+
+  let tolakRekPendek = 0;
+  try {
+    await call('POST', '/api/cashflow/rekening', { nama: ['AB'] });
+  } catch (err) { tolakRekPendek = err.status; }
+  check('nama rekening terlalu pendek ditolak', tolakRekPendek === 400,
+    `status ${tolakRekPendek}`);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakRekIzin = 0;
+  try {
+    await call('POST', '/api/cashflow/rekening', { nama: ['BCA Coba Tanpa Izin 111-222-333'] });
+  } catch (err) { tolakRekIzin = err.status; }
+  check('tim tanpa izin bagan akun tidak bisa menambah rekening',
+    tolakRekIzin === 403, `status ${tolakRekIzin}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

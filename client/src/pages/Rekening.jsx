@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Landmark, AlertTriangle, Plus, Pencil } from 'lucide-react';
+import { Landmark, AlertTriangle, Plus, Pencil, ListPlus } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
@@ -27,6 +27,8 @@ export default function Rekening() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
+  const [massal, setMassal] = useState(null);
+  const [hasilMassal, setHasilMassal] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -70,6 +72,25 @@ export default function Rekening() {
     }
   }
 
+  async function simpanMassal(e) {
+    e.preventDefault();
+    const nama = massal.teks.split('\n').map((s) => s.trim()).filter((s) => s.length >= 3);
+    if (!nama.length) return toast.error('Isi minimal satu nama rekening');
+
+    setSaving(true);
+    try {
+      const res = await api.post('/api/cashflow/rekening', { nama, mulai_kode: massal.mulai });
+      toast.success(res.message);
+      setHasilMassal(res);
+      setMassal(null);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading || !data) return <Spinner label="Menghitung saldo rekening..." />;
 
   const r = data.ringkas;
@@ -77,6 +98,11 @@ export default function Rekening() {
   return (
     <div>
       <PageHeader title="Rekening Kas & Bank" subtitle="Saldo tiap rekening berikut asal pergerakannya">
+        {bolehUbah && (
+          <button className="btn-secondary" onClick={() => setMassal({ teks: '', mulai: '1021' })}>
+            <ListPlus size={16} /> Tambah Banyak
+          </button>
+        )}
         {bolehUbah && (
           <button className="btn-primary" onClick={() => setForm({ ...KOSONG })}>
             <Plus size={16} /> Rekening Baru
@@ -175,6 +201,90 @@ export default function Rekening() {
           </div>
         )}
       </div>
+
+      <Modal open={!!massal} onClose={() => setMassal(null)} title="Tambah Banyak Rekening" wide>
+        {massal && (
+          <form onSubmit={simpanMassal} className="grid gap-3">
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+              Tulis <strong>satu rekening per baris</strong>, lengkap dengan nomornya — boleh
+              langsung ditempel dari catatan. Kodenya dipilihkan berurutan dari kode kosong pertama,
+              dan sisanya (jenis akun, saldo normal, arus kas) diisi otomatis karena selalu sama
+              untuk rekening bank.
+            </p>
+
+            <Field label="Daftar Rekening *" hint="mis. BCA ANNISA 423-046-6659">
+              <textarea
+                className="input min-h-40 font-mono text-sm" required
+                placeholder={'BCA ANNISA 423-046-6659\nBCA YUDHI 423-029-6621\nMANDIRI AJI 180001097-0988'}
+                value={massal.teks}
+                onChange={(e) => setMassal({ ...massal, teks: e.target.value })}
+              />
+            </Field>
+
+            <Field label="Mulai dari Kode" hint="Kode yang sudah terpakai dilewati sendiri">
+              <input
+                className="input max-w-[10rem]" pattern="\d{3,6}" value={massal.mulai}
+                onChange={(e) => setMassal({ ...massal, mulai: e.target.value })}
+              />
+            </Field>
+
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+              Rekening yang <strong>nomornya sudah terdaftar</strong> akan dilewati, bukan
+              ditambahkan dua kali — pencocokannya memakai angka pada namanya, jadi penulisan nama
+              yang berbeda tetap dikenali sebagai rekening yang sama.
+            </p>
+
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setMassal(null)}>
+                Batal
+              </button>
+              <button type="submit" className="btn-primary flex-1" disabled={saving}>
+                {saving ? 'Menyimpan...' : 'Tambahkan'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={!!hasilMassal} onClose={() => setHasilMassal(null)} title="Hasil Penambahan Rekening">
+        {hasilMassal && (
+          <div className="grid gap-3 text-sm">
+            {hasilMassal.dibuat.length > 0 && (
+              <div>
+                <p className="mb-1 font-semibold text-emerald-700">
+                  {hasilMassal.dibuat.length} rekening ditambahkan
+                </p>
+                <ul className="space-y-0.5">
+                  {hasilMassal.dibuat.map((a) => (
+                    <li key={a.code} className="text-slate-700">
+                      <span className="font-mono text-xs text-slate-500">{a.code}</span> {a.name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {hasilMassal.dilewati.length > 0 && (
+              <div>
+                <p className="mb-1 font-semibold text-amber-700">
+                  {hasilMassal.dilewati.length} dilewati karena sudah ada
+                </p>
+                <ul className="space-y-0.5">
+                  {hasilMassal.dilewati.map((a) => (
+                    <li key={a.nama} className="text-slate-600">
+                      {a.nama} — <span className="text-xs text-slate-500">{a.alasan}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <button type="button" className="btn-primary" onClick={() => setHasilMassal(null)}>
+              Tutup
+            </button>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={!!form} onClose={() => setForm(null)} title={form?.id ? 'Ubah Rekening' : 'Rekening Baru'}>
         {form && (
