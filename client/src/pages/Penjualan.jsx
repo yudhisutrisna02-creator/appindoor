@@ -156,18 +156,41 @@ export default function Penjualan() {
     }));
   }
 
+  /**
+   * Toko mana yang dimaksud saat sebuah rekening dipilih.
+   *
+   * Satu rekening memang sering dipakai beberapa toko, dan itu tidak selalu
+   * membingungkan. Urutan penyaringnya:
+   *
+   *   1. Kalau tokonya beda kanal — satu Shopee, satu TikTok, satu Lazada —
+   *      kanal yang sedang dipilih sudah cukup membedakan.
+   *   2. Kalau masih lebih dari satu, dipakai toko yang ditandai utama untuk
+   *      rekening itu.
+   *   3. Kalau tetap tidak jelas, TIDAK ditebak. Menebak berarti mencatat
+   *      order ke toko yang keliru, dan itu baru ketahuan saat laba per toko
+   *      dibaca berbulan-bulan kemudian.
+   */
+  function tokoUntukRekening(kode, kanal) {
+    const semua = shops.filter((s) => s.cash_code === kode);
+    if (semua.length === 1) return semua[0];
+
+    const seKanal = semua.filter((s) => s.channel === kanal);
+    if (seKanal.length === 1) return seKanal[0];
+
+    const dasar = seKanal.length ? seKanal : semua;
+    const utama = dasar.filter((s) => s.rekening_utama);
+    return utama.length === 1 ? utama[0] : null;
+  }
+
   function pilihRekening(kode) {
-    const pemakai = shops.filter((s) => s.cash_code === kode);
-    setForm((f) => ({
-      ...f,
-      cash_code: kode,
-      // Toko ikut terpilih HANYA bila rekening itu dipakai satu toko saja.
-      // Beberapa rekening dipakai beberapa toko sekaligus, dan menebak salah
-      // satunya akan mencatat order ke toko yang keliru.
-      ...(pemakai.length === 1
-        ? { shop_id: pemakai[0].id, channel: pemakai[0].channel }
-        : {}),
-    }));
+    setForm((f) => {
+      const toko = kode ? tokoUntukRekening(kode, f.channel) : null;
+      return {
+        ...f,
+        cash_code: kode,
+        ...(toko ? { shop_id: toko.id, channel: toko.channel } : {}),
+      };
+    });
   }
 
   function setItem(index, patch) {
@@ -699,8 +722,8 @@ export default function Penjualan() {
                 label={`Rekening Penerima${butuhToko ? ' *' : ''}`}
                 className="sm:col-span-2"
                 hint={
-                  tokoDariRekening.length > 1
-                    ? `Dipakai ${tokoDariRekening.length} toko — tokonya pilih sendiri`
+                  tokoDariRekening.length > 1 && !form.shop_id
+                    ? `Dipakai ${tokoDariRekening.length} toko — pilih tokonya sendiri`
                     : 'Ke mana uang order ini masuk'
                 }
               >

@@ -442,6 +442,11 @@ function runMigrations(db) {
   // Kolomnya boleh kosong, dan yang kosong tetap diperlakukan seperti dulu —
   // order lama tidak boleh berubah artinya hanya karena ada kolom baru.
   addColumn(db, 'shops', 'cash_code', 'TEXT', applied);
+  // Satu rekening kadang dipakai beberapa toko. Bila tokonya berbeda kanal,
+  // kanalnya sudah cukup membedakan. Bila kanalnya sama juga — dua toko Shopee
+  // memakai satu rekening — harus ada yang ditunjuk, karena menebak salah
+  // satunya berarti mencatat order ke toko yang keliru.
+  addColumn(db, 'shops', 'rekening_utama', 'INTEGER NOT NULL DEFAULT 0', applied);
   addColumn(db, 'sales_orders', 'cash_code', 'TEXT', applied);
   addColumn(db, 'sales_returns', 'cash_code', 'TEXT', applied);
 

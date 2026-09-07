@@ -5129,6 +5129,110 @@ async function main() {
     String(orderLama50.cash_code));
 
 
+  console.log('\n51. Menautkan toko ke rekening secara massal');
+
+  const capTT = Date.now();
+  const rekTT = await call('POST', '/api/cashflow/rekening', {
+    nama: [
+      `BCA BERSAMA ${capTT} 423-058-3965`,
+      `BNI LINTAS ${capTT} 125-882-9107`,
+    ],
+    mulai_kode: '1600',
+  });
+  const kodeBersama = rekTT.dibuat[0].code;
+  const kodeLintas = rekTT.dibuat[1].code;
+
+  // Dua toko Shopee memakai satu rekening — kanalnya tidak bisa membedakan.
+  const tokoUrban = (await call('POST', '/api/shops', {
+    name: `Sh Kebun Urban ${capTT}`, channel: 'SHOPEE',
+  })).shop;
+  const tokoSandy = (await call('POST', '/api/shops', {
+    name: `Sh Sandy Fashion ${capTT}`, channel: 'SHOPEE',
+  })).shop;
+
+  // Tiga toko beda kanal memakai satu rekening — kanalnya sudah membedakan.
+  const tokoShopeeL = (await call('POST', '/api/shops', {
+    name: `Sh Kita Tanam ${capTT}`, channel: 'SHOPEE',
+  })).shop;
+  const tokoTiktokL = (await call('POST', '/api/shops', {
+    name: `Tt Supplier Pupuk ${capTT}`, channel: 'TIKTOK_SHOP',
+  })).shop;
+  const tokoLazadaL = (await call('POST', '/api/shops', {
+    name: `Lz Pusat Pupuk ${capTT}`, channel: 'LAZADA',
+  })).shop;
+
+  // Daftarnya ditempel apa adanya: pemisah "pakai" dan "=", nomor bertanda
+  // hubung, dan satu baris sengaja dibuat salah.
+  const hasilTaut = await call('POST', '/api/shops/tautkan-rekening', {
+    baris: [
+      `${tokoUrban.name}  pakai BCA BERSAMA (423-058-3965)`,
+      `${tokoSandy.name} = BCA BERSAMA 423-058-3965`,
+      `${tokoShopeeL.name} pakai BNI LINTAS (125-882-9107)`,
+      `${tokoTiktokL.name} pakai BNI LINTAS 1258829107`,
+      `${tokoLazadaL.name} pakai BNI LINTAS 125-882-9107`,
+      'Toko Yang Tidak Ada pakai BCA BERSAMA 423-058-3965',
+      `${tokoUrban.name} pakai BANK ENTAH 999-999-9999`,
+    ],
+  });
+
+  check('lima toko tertaut dari daftar yang ditempel',
+    hasilTaut.berhasil.length === 5, JSON.stringify(hasilTaut.berhasil.map((b) => b.toko)));
+  check('baris yang tokonya tidak terdaftar dilaporkan, bukan diabaikan diam-diam',
+    hasilTaut.gagal.some((g) => /tidak terdaftar/.test(g.alasan)),
+    JSON.stringify(hasilTaut.gagal));
+  check('baris yang rekeningnya belum ada dilaporkan',
+    hasilTaut.gagal.some((g) => /belum ada/.test(g.alasan)),
+    JSON.stringify(hasilTaut.gagal.map((g) => g.alasan)));
+
+  // Nomor ditulis dengan dan tanpa tanda hubung — keduanya harus mengenai
+  // rekening yang sama.
+  const tokoSetelah = (await call('GET', '/api/shops')).shops;
+  const cariToko = (id) => tokoSetelah.find((t) => t.id === id);
+  check('nomor bertanda hubung dan tanpa tanda hubung dikenali sama',
+    cariToko(tokoTiktokL.id).cash_code === kodeLintas
+      && cariToko(tokoLazadaL.id).cash_code === kodeLintas,
+    `${cariToko(tokoTiktokL.id).cash_code} & ${cariToko(tokoLazadaL.id).cash_code}`);
+
+  // INTI ATURANNYA: yang disebut lebih dulu menjadi toko utama rekening itu.
+  check('toko yang disebut lebih dulu menjadi toko utama rekening',
+    cariToko(tokoUrban.id).rekening_utama === 1 && cariToko(tokoSandy.id).rekening_utama === 0,
+    `urban ${cariToko(tokoUrban.id).rekening_utama}, sandy ${cariToko(tokoSandy.id).rekening_utama}`);
+  check('keduanya tetap memakai rekening yang sama',
+    cariToko(tokoUrban.id).cash_code === kodeBersama
+      && cariToko(tokoSandy.id).cash_code === kodeBersama);
+
+  // Order dari toko kedua tetap memakai rekening itu — tanda utama hanya
+  // menentukan tebakan arah sebaliknya, bukan membatasi tokonya.
+  const skuTT = `TAUT-${Date.now()}`;
+  const prodTT = (await call('POST', '/api/inventory/products', {
+    sku: skuTT, name: 'Produk Uji Tautan', cost: 0, price: 50000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodTT.id, move_date: today, move_type: 'IN',
+    qty: 50, unit_cost: 20000, payment: 'CASH',
+  });
+
+  const orderSandy = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', shop_id: tokoSandy.id,
+    payment_status: 'PAID',
+    items: [{ product_id: prodTT.id, qty: 1, price: 50000 }],
+  })).order;
+  check('order toko non-utama tetap memakai rekening bersamanya',
+    orderSandy.cash_code === kodeBersama, String(orderSandy.cash_code));
+
+  const bsTT = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
+  check('neraca tetap seimbang setelah penautan massal', bsTT.balanced);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakTaut = 0;
+  try {
+    await call('POST', '/api/shops/tautkan-rekening', { baris: ['A pakai B'] });
+  } catch (err) { tolakTaut = err.status; }
+  check('tim tanpa izin toko tidak bisa menautkan rekening',
+    tolakTaut === 403, `status ${tolakTaut}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

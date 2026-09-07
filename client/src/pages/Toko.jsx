@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Store, TrendingUp } from 'lucide-react';
+import { Plus, Pencil, Trash2, Store, TrendingUp, Link2 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 import { api } from '../lib/api';
 import {
@@ -10,7 +10,7 @@ import {
 import { rupiah, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
-const EMPTY = { name: '', channel: 'SHOPEE', note: '', cash_code: '', active: true };
+const EMPTY = { name: '', channel: 'SHOPEE', note: '', cash_code: '', rekening_utama: false, active: true };
 
 /**
  * Satu perusahaan bisa punya banyak akun toko pada marketplace yang sama.
@@ -26,6 +26,9 @@ export default function Toko() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   const [rekening, setRekening] = useState([]);
+  const [taut, setTaut] = useState(null);
+  const [hasilTaut, setHasilTaut] = useState(null);
+  const [menyimpanTaut, setMenyimpanTaut] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,6 +48,25 @@ export default function Toko() {
   useEffect(() => {
     api.get('/api/cashflow/options').then((d) => setRekening(d.cashAccounts || [])).catch(() => {});
   }, []);
+
+  async function simpanTaut(e) {
+    e.preventDefault();
+    const baris = taut.teks.split('\n').map((s) => s.trim()).filter((s) => s.length >= 3);
+    if (!baris.length) return toast.error('Isi minimal satu baris');
+
+    setMenyimpanTaut(true);
+    try {
+      const res = await api.post('/api/shops/tautkan-rekening', { baris });
+      toast.success(res.message);
+      setHasilTaut(res);
+      setTaut(null);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMenyimpanTaut(false);
+    }
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -82,6 +104,11 @@ export default function Toko() {
   return (
     <div>
       <PageHeader title="Toko / Akun Marketplace" subtitle="Bandingkan profitabilitas antar akun toko Anda">
+        {canManage && (
+          <button className="btn-secondary" onClick={() => setTaut({ teks: '' })}>
+            <Link2 size={16} /> Tautkan Rekening
+          </button>
+        )}
         {canManage && (
           <button className="btn-primary" onClick={() => setEditing({ ...EMPTY })}>
             <Plus size={16} /> Toko Baru
@@ -191,6 +218,86 @@ export default function Toko() {
         </>
       )}
 
+      <Modal open={!!taut} onClose={() => setTaut(null)} title="Tautkan Toko ke Rekening" wide>
+        {taut && (
+          <form onSubmit={simpanTaut} className="grid gap-3">
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+              Tempel daftarnya apa adanya, <strong>satu baris satu toko</strong>. Pemisahnya boleh
+              kata <span className="font-mono">pakai</span> atau tanda{' '}
+              <span className="font-mono">=</span>. Rekeningnya dicari lewat <strong>angka</strong>{' '}
+              pada tulisannya, jadi penulisan nama yang berbeda tetap dikenali.
+            </p>
+
+            <Field label="Daftar Tautan *" hint="mis. Sh Ratu Tanam pakai BCA ROSIDAH (423-116-0331)">
+              <textarea
+                className="input min-h-48 font-mono text-sm" required
+                placeholder={'Sh Ratu Tanam  pakai BCA ROSIDAH (423-116-0331)\nSh PIPIT BERKAH = BCA FITRI APRIYATI 423-046-6641'}
+                value={taut.teks}
+                onChange={(e) => setTaut({ ...taut, teks: e.target.value })}
+              />
+            </Field>
+
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+              Bila satu rekening dipakai beberapa toko, <strong>yang disebut lebih dulu</strong> di
+              daftar ini menjadi toko utamanya — itulah yang terpilih otomatis saat rekening tersebut
+              dipilih di formulir order. Toko beda kanal tidak terpengaruh: kanalnya sudah cukup
+              membedakan.
+            </p>
+
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setTaut(null)}>
+                Batal
+              </button>
+              <button type="submit" className="btn-primary flex-1" disabled={menyimpanTaut}>
+                {menyimpanTaut ? 'Menautkan...' : 'Tautkan'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={!!hasilTaut} onClose={() => setHasilTaut(null)} title="Hasil Penautan" wide>
+        {hasilTaut && (
+          <div className="grid gap-3 text-sm">
+            {hasilTaut.berhasil.length > 0 && (
+              <div>
+                <p className="mb-1 font-semibold text-emerald-700">
+                  {hasilTaut.berhasil.length} toko ditautkan
+                </p>
+                <ul className="space-y-0.5">
+                  {hasilTaut.berhasil.map((b) => (
+                    <li key={b.toko} className="text-slate-700">
+                      {b.toko} → <span className="text-xs text-slate-500">{b.rekening}</span>
+                      {b.utama && <span className="badge-green ml-2">toko utama</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {hasilTaut.gagal.length > 0 && (
+              <div>
+                <p className="mb-1 font-semibold text-rose-700">
+                  {hasilTaut.gagal.length} baris tidak dikenali
+                </p>
+                <ul className="space-y-0.5">
+                  {hasilTaut.gagal.map((g) => (
+                    <li key={g.baris} className="text-slate-600">
+                      <span className="font-mono text-xs">{g.baris}</span>
+                      <span className="block text-xs text-rose-600">{g.alasan}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <button type="button" className="btn-primary" onClick={() => setHasilTaut(null)}>
+              Tutup
+            </button>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? 'Ubah Toko' : 'Toko Baru'}>
         {editing && (
           <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
@@ -219,6 +326,22 @@ export default function Toko() {
                 {rekening.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
               </select>
             </Field>
+            {editing.cash_code && (
+              <label className="flex items-start gap-2 text-sm sm:col-span-2">
+                <input
+                  type="checkbox" className="mt-0.5 h-4 w-4 rounded"
+                  checked={!!editing.rekening_utama}
+                  onChange={(e) => setEditing({ ...editing, rekening_utama: e.target.checked })}
+                />
+                <span>
+                  Toko utama untuk rekening ini
+                  <span className="block text-xs text-slate-500">
+                    Dipakai bila satu rekening dipakai beberapa toko pada kanal yang sama —
+                    toko inilah yang terpilih otomatis saat rekeningnya dipilih di formulir order.
+                  </span>
+                </span>
+              </label>
+            )}
             <Field label="Catatan" className="sm:col-span-2">
               <input className="input" value={editing.note || ''} onChange={(e) => setEditing({ ...editing, note: e.target.value })} />
             </Field>
