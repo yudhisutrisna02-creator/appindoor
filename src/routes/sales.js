@@ -15,6 +15,13 @@ router.use(requireAuth);
 
 const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
 
+/** Ringkas akibat tiap kondisi — dipakai pesan setelah simpan dan setelah ubah. */
+const KABAR_KONDISI = {
+  BAGUS: 'barang kembali ke stok jual',
+  PERBAIKI: 'barang masuk daftar perlu perbaikan',
+  RUSAK: 'barang dicatat sebagai kerugian',
+};
+
 /** Kondisi barang retur — dipakai layar dan berkas unduhan. */
 const LABEL_KONDISI = {
   BAGUS: 'Bagus, kembali ke stok',
@@ -586,7 +593,20 @@ router.get('/:id(\\d+)', ah((req, res) => {
     .prepare("SELECT * FROM journals WHERE source = 'SALES' AND source_id = ?")
     .get(order.id);
 
-  res.json({ order, items, journal, katalogVarian: katalog });
+  // Berapa yang sudah pernah diretur dari order ini, per produk. Dikirim
+  // bersama detailnya supaya formulir retur bisa menawarkan sisa yang benar
+  // tanpa menghitung sendiri dari daftar yang mungkin terpotong rentang tanggal.
+  const retur = {};
+  for (const row of db
+    .prepare(
+      `SELECT product_id, COALESCE(SUM(qty), 0) AS qty
+         FROM sales_returns WHERE order_id = ? GROUP BY product_id`
+    )
+    .all(order.id)) {
+    retur[row.product_id] = r2(row.qty);
+  }
+
+  res.json({ order, items, journal, katalogVarian: katalog, retur });
 }));
 
 /**
@@ -953,6 +973,9 @@ daftarkanEkspor(router, {
   judul: 'Retur Penjualan',
   kolom: [
     { header: 'Tanggal', key: 'return_date', width: 12 },
+    { header: 'No. Pesanan', key: 'order_ref', width: 20 },
+    { header: 'No. Resi', key: 'tracking_no', width: 22 },
+    { header: 'Pembeli', key: 'buyer_name', width: 24 },
     { header: 'SKU', key: 'sku', width: 16 },
     { header: 'Produk', key: 'product_name', width: 34 },
     { header: 'Jumlah', key: 'qty', width: 10 },
@@ -1012,9 +1035,74 @@ const returnSchema = z.object({
   reason: z.string().max(300).optional().nullable(),
 });
 
-const createReturn = db.transaction((body, userId) => {
+/**
+ * Memeriksa retur terhadap order asalnya.
+ *
+ * Selama ini nomor order hanya dicatat sebagai angka tanpa diperiksa apa pun,
+ * sehingga barang yang tidak pernah ada di pesanan itu tetap bisa diretur, dan
+ * satu pesanan bisa diretur berkali-kali melebihi jumlah yang benar-benar
+ * dikirim. Keduanya baru ketahuan saat stok dihitung fisik — kalau ketahuan.
+ */
+function periksaOrderAsal(orderId, productId, qty, abaikanId = null) {
+  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(orderId);
+  if (!order) throw httpError(404, 'Order penjualan tidak ditemukan');
+  if (order.fulfillment_status === 'BATAL') {
+    throw httpError(422, `Order ${order.order_ref || order.order_no} sudah dibatalkan`);
+  }
+
+  const terjual = db
+    .prepare(
+      `SELECT COALESCE(SUM(qty), 0) AS n FROM sales_items
+        WHERE order_id = ? AND product_id = ?`
+    )
+    .get(orderId, productId).n;
+
+  if (terjual <= 0) {
+    const p = db.prepare('SELECT name FROM products WHERE id = ?').get(productId);
+    throw httpError(
+      422,
+      `${p ? p.name : 'Produk ini'} tidak ada di order ${order.order_ref || order.order_no}.`
+    );
+  }
+
+  // Retur yang sedang diubah tidak boleh menghitung dirinya sendiri sebagai
+  // "sudah diretur" — kalau ikut, mengubah retur 4 menjadi 2 akan ditolak
+  // dengan alasan barangnya sudah habis diretur.
+  const sudahDiretur = db
+    .prepare(
+      `SELECT COALESCE(SUM(qty), 0) AS n FROM sales_returns
+        WHERE order_id = ? AND product_id = ? AND (? IS NULL OR id <> ?)`
+    )
+    .get(orderId, productId, abaikanId, abaikanId).n;
+
+  const sisa = r2(terjual - sudahDiretur);
+  if (qty > sisa + 0.001) {
+    const p = db.prepare('SELECT name, unit FROM products WHERE id = ?').get(productId);
+    throw httpError(
+      422,
+      `${p.name} pada order ${order.order_ref || order.order_no} hanya ${terjual} ${p.unit}` +
+        (sudahDiretur > 0 ? `, ${sudahDiretur} sudah diretur` : '') +
+        `. Sisa yang bisa diretur ${sisa} ${p.unit}.`
+    );
+  }
+
+  return order;
+}
+
+/**
+ * Menulis satu retur beserta seluruh akibatnya.
+ *
+ * Dipakai dua kali: saat retur baru dicatat, dan saat retur yang sudah ada
+ * diubah. Yang membedakan hanya `id` — bila diisi, barisnya diperbarui di
+ * tempat, bukan dibuat baru. Nomor DAN id barisnya sengaja dipertahankan:
+ * nomornya sudah beredar di percakapan dengan pembeli, dan id yang berganti
+ * tiap kali diubah membuat riwayat perubahan tidak bisa ditelusuri.
+ */
+const tulisRetur = db.transaction((body, userId) => {
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(body.product_id);
   if (!product) throw httpError(404, 'Produk tidak ditemukan');
+
+  if (body.order_id) periksaOrderAsal(body.order_id, product.id, r2(body.qty), body.id || null);
 
   const kondisi = body.kondisi || (body.restock ? 'BAGUS' : 'RUSAK');
   const masukStok = kondisi === 'BAGUS';
@@ -1022,14 +1110,31 @@ const createReturn = db.transaction((body, userId) => {
   const qty = r2(body.qty);
   const amount = r2(qty * body.price);
   const costValue = r2(qty * product.cost);
-  const returnNo = nextNumber('RTN', body.return_date.slice(0, 7));
+  // Nomor dipertahankan saat retur diubah: nomor itu sudah beredar di
+  // percakapan dengan pembeli, jadi menggantinya hanya membingungkan.
+  const returnNo = body.return_no || nextNumber('RTN', body.return_date.slice(0, 7));
 
-  const info = db
-    .prepare(
-      `INSERT INTO sales_returns (return_no, return_date, order_id, product_id, qty, price, cost, amount, restock, kondisi, reason, user_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-    )
-    .run(returnNo, body.return_date, body.order_id || null, product.id, qty, r2(body.price), product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, userId);
+  let returnId = body.id || null;
+  if (returnId) {
+    db.prepare(
+      `UPDATE sales_returns
+          SET return_date = ?, order_id = ?, product_id = ?, qty = ?, price = ?, cost = ?,
+              amount = ?, restock = ?, kondisi = ?, reason = ?
+        WHERE id = ?`
+    ).run(
+      body.return_date, body.order_id || null, product.id, qty, r2(body.price),
+      product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, returnId
+    );
+  } else {
+    returnId = db
+      .prepare(
+        `INSERT INTO sales_returns (return_no, return_date, order_id, product_id, qty, price, cost, amount, restock, kondisi, reason, user_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(returnNo, body.return_date, body.order_id || null, product.id, qty, r2(body.price), product.cost, amount, masukStok ? 1 : 0, kondisi, body.reason || null, userId)
+      .lastInsertRowid;
+  }
+  const info = { lastInsertRowid: returnId };
 
   const lines = [
     { code: ACC.SALES_RETURN, debit: amount, credit: 0, memo: `Retur ${product.name}` },
@@ -1098,17 +1203,84 @@ const createReturn = db.transaction((body, userId) => {
   return { id: info.lastInsertRowid, return_no: returnNo, amount, kondisi };
 });
 
+/**
+ * Membatalkan seluruh akibat satu retur, supaya bisa dicatat ulang.
+ *
+ * Retur bukan sekadar satu baris catatan: ia bisa sudah menambah stok,
+ * membuka batch tersendiri, membentuk jurnal, dan menaruh barang di daftar
+ * perbaikan. Mengubah barisnya saja akan meninggalkan keempatnya seperti
+ * semula — angka lama tetap hidup di stok dan buku besar, sementara layar
+ * menyebut angka baru.
+ *
+ * Karena itu mengubah retur dikerjakan sebagai batalkan-lalu-catat-lagi, di
+ * dalam satu transaksi, dengan nomor retur yang tetap sama.
+ */
+function batalkanEfekRetur(r) {
+  const produk = db.prepare('SELECT * FROM products WHERE id = ?').get(r.product_id);
+  const kondisi = r.kondisi || (r.restock ? 'BAGUS' : 'RUSAK');
+
+  if (kondisi === 'PERBAIKI') {
+    const pbk = db.prepare('SELECT * FROM barang_perbaikan WHERE return_id = ?').get(r.id);
+    if (pbk && pbk.status !== 'MENUNGGU') {
+      throw httpError(
+        409,
+        `Barang retur ini sudah ${pbk.status === 'SELESAI' ? 'selesai dikemas ulang dan kembali ke stok' : 'dihapus sebagai kerugian'}. ` +
+          'Returnya tidak bisa diubah lagi — perubahannya harus lewat menu Barang Perlu Perbaikan.'
+      );
+    }
+    if (pbk) db.prepare('DELETE FROM barang_perbaikan WHERE id = ?').run(pbk.id);
+  }
+
+  if (kondisi === 'BAGUS') {
+    const qty = r2(r.qty);
+    if (qty > r2(produk.stock)) {
+      throw httpError(
+        422,
+        `Stok ${produk.name} tinggal ${produk.stock} ${produk.unit}, tidak cukup untuk ` +
+          `membatalkan retur ${qty} ${produk.unit} yang dulu masuk. Barangnya kemungkinan sudah terjual lagi.`
+      );
+    }
+    db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(r2(produk.stock - qty), produk.id);
+    BATCH.kembalikan({ source: 'RETURN', sourceId: r.id, tanggal: r.return_date });
+    db.prepare("DELETE FROM stock_moves WHERE source = 'RETURN' AND source_id = ?").run(r.id);
+  }
+
+  deleteJournalsBySource('RETURN', r.id);
+}
+
+const ubahReturSchema = returnSchema.extend({
+  return_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+const ubahRetur = db.transaction((id, body, userId) => {
+  const lama = db.prepare('SELECT * FROM sales_returns WHERE id = ?').get(id);
+  if (!lama) throw httpError(404, 'Retur tidak ditemukan');
+
+  batalkanEfekRetur(lama);
+
+  // Dicatat ulang lewat jalur yang sama dengan retur baru, supaya tidak ada
+  // versi kedua dari logika stok, batch, dan jurnalnya. Nomornya dipertahankan
+  // karena nomor itu sudah beredar di percakapan dengan pembeli.
+  // Baris yang sama diperbarui di tempat: nomor dan id-nya tidak berganti.
+  return tulisRetur({ ...body, id: lama.id, return_no: lama.return_no }, userId);
+});
+
+router.put('/returns/:id(\\d+)', butuhIzin('penjualan.retur'), ah((req, res) => {
+  const body = parse(ubahReturSchema, req.body);
+  const hasil = ubahRetur(Number(req.params.id), body, req.user.id);
+  res.json({
+    ok: true,
+    ...hasil,
+    message: `Retur ${hasil.return_no} diperbarui — ${KABAR_KONDISI[hasil.kondisi]}`,
+  });
+}));
+
 router.post('/returns', butuhIzin('penjualan.buat'), ah((req, res) => {
   const body = parse(returnSchema, req.body);
-  const hasil = createReturn(body, req.user.id);
-  const kabar = {
-    BAGUS: 'barang kembali ke stok jual',
-    PERBAIKI: 'barang masuk daftar perlu perbaikan',
-    RUSAK: 'barang dicatat sebagai kerugian',
-  };
+  const hasil = tulisRetur(body, req.user.id);
   res.status(201).json({
     ok: true, ...hasil,
-    message: `Retur ${hasil.return_no} tercatat — ${kabar[hasil.kondisi]}`,
+    message: `Retur ${hasil.return_no} tercatat — ${KABAR_KONDISI[hasil.kondisi]}`,
   });
 }));
 
@@ -1119,15 +1291,24 @@ function ambilRetur(req) {
   const kata = String(req.query.q || '').trim();
   const cari = kata.length >= 2
     ? {
-        where: '(p.name LIKE ? OR p.sku LIKE ? OR r.reason LIKE ? OR r.return_no LIKE ?)',
-        params: Array(4).fill(`%${kata}%`),
+        // Nomor pesanan dan resi ikut dicari: itu yang dipegang orang saat
+        // pembeli menghubungi, bukan nomor retur yang kita buat sendiri.
+        where:
+          '(p.name LIKE ? OR p.sku LIKE ? OR r.reason LIKE ? OR r.return_no LIKE ?'
+          + ' OR o.order_ref LIKE ? OR o.order_no LIKE ? OR o.tracking_no LIKE ?)',
+        params: Array(7).fill(`%${kata}%`),
       }
     : null;
 
   const rows = db
     .prepare(
-      `SELECT r.*, p.sku, p.name AS product_name
-         FROM sales_returns r JOIN products p ON p.id = r.product_id
+      `SELECT r.*, p.sku, p.name AS product_name, p.unit,
+              o.order_no, o.order_ref, o.tracking_no, o.courier,
+              o.buyer_name, o.order_date, sh.name AS shop_name
+         FROM sales_returns r
+         JOIN products p ON p.id = r.product_id
+         LEFT JOIN sales_orders o ON o.id = r.order_id
+         LEFT JOIN shops sh ON sh.id = o.shop_id
         WHERE r.return_date BETWEEN ? AND ? ${cari ? `AND ${cari.where}` : ''}
         ORDER BY r.return_date DESC, r.id DESC`
     )

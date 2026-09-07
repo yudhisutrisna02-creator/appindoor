@@ -4744,6 +4744,181 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n48. Retur ditarik dari order penjualan & bisa diubah');
+
+  const skuRo = `RO-${Date.now()}`;
+  const prodRo = (await call('POST', '/api/inventory/products', {
+    sku: skuRo, name: 'Produk Uji Retur Order', cost: 0, price: 50000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodRo.id, move_date: today, move_type: 'IN',
+    qty: 100, unit_cost: 12000, payment: 'CASH',
+  });
+
+  const prodLuar = (await call('POST', '/api/inventory/products', {
+    sku: `ROX-${Date.now()}`, name: 'Produk Di Luar Order', cost: 0, price: 30000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prodLuar.id, move_date: today, move_type: 'IN',
+    qty: 50, unit_cost: 9000, payment: 'CASH',
+  });
+
+  const orderRo = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', customer: 'Pembeli Retur Order',
+    buyer_name: 'Pembeli Retur Order', buyer_city: 'Kebumen',
+    order_ref: `SPX-RO-${Date.now()}`, courier: 'JNE',
+    tracking_no: `JP${Date.now()}`,
+    items: [{ product_id: prodRo.id, qty: 10, price: 50000 }],
+  })).order;
+
+  // Detail order membawa nomor resi dan berapa yang sudah pernah diretur,
+  // supaya formulir retur bisa menawarkan sisa yang benar tanpa menghitung
+  // sendiri dari daftar yang bisa terpotong rentang tanggal.
+  const detailRo = await call('GET', `/api/sales/${orderRo.id}`);
+  check('detail order membawa nomor resi', !!detailRo.order.tracking_no);
+  check('detail order membawa jumlah yang sudah diretur',
+    detailRo.retur && Object.keys(detailRo.retur).length === 0,
+    JSON.stringify(detailRo.retur));
+
+  // Barang yang tidak pernah ada di order itu tidak boleh diretur atas namanya.
+  let tolakLuarOrder = 0;
+  try {
+    await call('POST', '/api/sales/returns', {
+      return_date: today, order_id: orderRo.id, product_id: prodLuar.id,
+      qty: 1, price: 30000, kondisi: 'BAGUS',
+    });
+  } catch (err) { tolakLuarOrder = err.status; }
+  check('produk di luar order tidak bisa diretur atas order itu',
+    tolakLuarOrder === 422, `status ${tolakLuarOrder}`);
+
+  // Tidak boleh meretur lebih banyak daripada yang benar-benar dikirim.
+  let tolakLebihOrder = 0;
+  try {
+    await call('POST', '/api/sales/returns', {
+      return_date: today, order_id: orderRo.id, product_id: prodRo.id,
+      qty: 11, price: 50000, kondisi: 'BAGUS',
+    });
+  } catch (err) { tolakLebihOrder = err.status; }
+  check('tidak bisa meretur lebih banyak daripada yang dibeli',
+    tolakLebihOrder === 422, `status ${tolakLebihOrder}`);
+
+  const returRo = await call('POST', '/api/sales/returns', {
+    return_date: today, order_id: orderRo.id, product_id: prodRo.id,
+    qty: 4, price: 50000, kondisi: 'BAGUS', reason: 'Pembeli salah pesan',
+  });
+  check('retur dari order tersimpan', returRo.ok === true);
+
+  const detailRo2 = await call('GET', `/api/sales/${orderRo.id}`);
+  check('sisa yang bisa diretur ikut berkurang',
+    detailRo2.retur[prodRo.id] === 4, JSON.stringify(detailRo2.retur));
+
+  // Sisanya 6; meretur 7 lagi harus ditolak.
+  let tolakSisa = 0;
+  try {
+    await call('POST', '/api/sales/returns', {
+      return_date: today, order_id: orderRo.id, product_id: prodRo.id,
+      qty: 7, price: 50000, kondisi: 'BAGUS',
+    });
+  } catch (err) { tolakSisa = err.status; }
+  check('retur kedua dibatasi sisa yang belum diretur',
+    tolakSisa === 422, `status ${tolakSisa}`);
+
+  // Daftar retur membawa nomor pesanan dan resinya.
+  const daftarRo = await call('GET', `/api/sales/returns/list?from=${today}&to=${today}`);
+  const barisRo = daftarRo.rows.find((r) => r.return_no === returRo.return_no);
+  check('daftar retur menampilkan no. pesanan dan resi',
+    !!barisRo && barisRo.order_ref === orderRo.order_ref && !!barisRo.tracking_no,
+    JSON.stringify({ ref: barisRo && barisRo.order_ref, resi: barisRo && barisRo.tracking_no }));
+
+  // Bisa dicari lewat nomor resinya — itu yang dipegang orang saat ditanya.
+  const cariResi = await call('GET',
+    `/api/sales/returns/list?from=${today}&to=${today}&q=${encodeURIComponent(orderRo.tracking_no)}`);
+  check('retur bisa dicari lewat nomor resi',
+    cariResi.rows.some((r) => r.return_no === returRo.return_no),
+    `${cariResi.rows.length} baris`);
+
+  // ---- Mengubah retur ----
+  const stokSblmUbahRo = (await call('GET', `/api/inventory/products?q=${skuRo}`))
+    .products.find((x) => x.sku === skuRo).stock;
+
+  const ubahRo = await call('PUT', `/api/sales/returns/${returRo.id}`, {
+    return_date: today, order_id: orderRo.id, product_id: prodRo.id,
+    qty: 2, price: 50000, kondisi: 'BAGUS', reason: 'Ternyata hanya 2 yang dikembalikan',
+  });
+  check('retur bisa diubah', ubahRo.ok === true);
+  check('nomor retur tidak berubah saat diubah',
+    ubahRo.return_no === returRo.return_no, `${ubahRo.return_no} vs ${returRo.return_no}`);
+
+  // Inti perubahannya: akibat yang lama harus benar-benar dibatalkan, bukan
+  // ditumpuk. Stok semula +4, sekarang harus +2 — selisih bersihnya −2.
+  const stokSsdhUbahRo = (await call('GET', `/api/inventory/products?q=${skuRo}`))
+    .products.find((x) => x.sku === skuRo).stock;
+  check('stok menyesuaikan jumlah retur yang baru, bukan menumpuk',
+    stokSsdhUbahRo === stokSblmUbahRo - 2,
+    `${stokSblmUbahRo} -> ${stokSsdhUbahRo}`);
+
+  const daftarRo2 = await call('GET', `/api/sales/returns/list?from=${today}&to=${today}`);
+  const barisRo2 = daftarRo2.rows.filter((r) => r.return_no === returRo.return_no);
+  check('retur yang diubah tidak menjadi dua baris', barisRo2.length === 1);
+  check('nilai retur ikut berubah', near(barisRo2[0].amount, 100000, 1), String(barisRo2[0].amount));
+
+  const detailRo3 = await call('GET', `/api/sales/${orderRo.id}`);
+  check('sisa retur pada order ikut menyesuaikan',
+    detailRo3.retur[prodRo.id] === 2, JSON.stringify(detailRo3.retur));
+
+  const tbRo = await call('GET',
+    `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca tetap seimbang setelah retur diubah',
+    Math.abs(tbRo.totalDebit - tbRo.totalCredit) < 0.01);
+
+  // Berpindah kondisi: yang tadinya masuk stok kini perlu dikemas ulang.
+  const ubahKondisi = await call('PUT', `/api/sales/returns/${returRo.id}`, {
+    return_date: today, order_id: orderRo.id, product_id: prodRo.id,
+    qty: 2, price: 50000, kondisi: 'PERBAIKI', reason: 'Ternyata labelnya rusak',
+  });
+  check('kondisi retur bisa diubah', ubahKondisi.kondisi === 'PERBAIKI');
+
+  const stokKondisi = (await call('GET', `/api/inventory/products?q=${skuRo}`))
+    .products.find((x) => x.sku === skuRo).stock;
+  check('stok ditarik kembali saat kondisi berubah jadi perlu perbaikan',
+    stokKondisi === stokSsdhUbahRo - 2, `${stokSsdhUbahRo} -> ${stokKondisi}`);
+
+  const pbkDariUbah = await call('GET', `/api/perbaikan?from=${today}&to=${today}`);
+  check('barangnya berpindah ke daftar perlu perbaikan',
+    pbkDariUbah.rows.some((b) => b.return_no === returRo.return_no && b.status === 'MENUNGGU'));
+
+  const tbKondisi = await call('GET',
+    `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca tetap seimbang setelah kondisi retur diubah',
+    Math.abs(tbKondisi.totalDebit - tbKondisi.totalCredit) < 0.01);
+
+  // Setelah barangnya dikerjakan, returnya tidak boleh diubah lagi — akibatnya
+  // sudah menyebar ke stok dan jurnal lain yang tidak bisa ditarik dari sini.
+  const barisPbkUbah = pbkDariUbah.rows.find((b) => b.return_no === returRo.return_no);
+  await call('POST', `/api/perbaikan/${barisPbkUbah.id}/selesai`, { tanggal_selesai: today });
+
+  let tolakUbahSetelah = 0;
+  try {
+    await call('PUT', `/api/sales/returns/${returRo.id}`, {
+      return_date: today, order_id: orderRo.id, product_id: prodRo.id,
+      qty: 1, price: 50000, kondisi: 'BAGUS',
+    });
+  } catch (err) { tolakUbahSetelah = err.status; }
+  check('retur tidak bisa diubah setelah barangnya selesai dikemas ulang',
+    tolakUbahSetelah === 409, `status ${tolakUbahSetelah}`);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakUbahRetur = 0;
+  try {
+    await call('PUT', `/api/sales/returns/${returRo.id}`, {
+      return_date: today, product_id: prodRo.id, qty: 1, price: 50000, kondisi: 'BAGUS',
+    });
+  } catch (err) { tolakUbahRetur = err.status; }
+  check('tim tanpa izin retur tidak bisa mengubah retur',
+    tolakUbahRetur === 403, `status ${tolakUbahRetur}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
