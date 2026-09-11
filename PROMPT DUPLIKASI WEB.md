@@ -752,7 +752,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 748 pemeriksaan, 51 bagian
+npm run smoke            # 773 pemeriksaan, 52 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1208,6 +1208,9 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Rekening dihitung dua kali: sekali untuk baris order, sekali untuk jurnalnya | Keduanya bisa berbeda, dan jurnal yang menunjuk rekening lain dari ordernya adalah selisih yang tak terjelaskan — hitung sekali, pakai dua kali |
 | Memilih rekening ikut memilih toko walau rekeningnya dipakai beberapa toko | Order tercatat ke toko yang keliru; tebak hanya bila pemakainya tunggal |
 | Mencocokkan nomor rekening dengan kesamaan persis saja | Nama rekening kadang membawa angka lain, dan nomor yang ditulis sebagian jadi tidak dikenali — cocokkan juga secara memuat, tetapi terima hanya bila calonnya tunggal |
+| Membatalkan order yang sudah punya retur tanpa membalik returnya | Barang yang sudah kembali lewat retur dikembalikan lagi oleh pembatalan — stok terhitung dua kali — dan jurnal retur mengurangi pendapatan dari penjualan yang sudah tidak ada |
+| Tombol hapus massal yang langsung bekerja | Harus dua langkah: periksa akibatnya dulu (stok, saldo rekening, laba rugi), lalu ketik ulang jumlah ordernya |
+| Formulir ubah mengisi rekening dari toko saat dibuka | Membetulkan resi diam-diam memindahkan uang ke rekening lain; isi otomatis hanya saat tokonya diganti atau lewat tombol yang ditekan sendiri |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---

@@ -5233,6 +5233,213 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n52. Kaitkan rekening order lama, batal ber-retur, & hapus satu periode');
+
+  const cap52 = Date.now();
+  const saldo52 = async (kode) => {
+    const tb52 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31`);
+    const b52 = (tb52.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b52.debit || 0) - (b52.credit || 0));
+  };
+  const stok52 = async (sku) =>
+    (await call('GET', `/api/inventory/products?q=${sku}`)).products.find((x) => x.sku === sku).stock;
+
+  const sku52 = `P52-${cap52}`;
+  const prod52 = (await call('POST', '/api/inventory/products', {
+    sku: sku52, name: 'Produk Uji Pembersihan', cost: 0, price: 100000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod52.id, move_date: '2025-10-01', move_type: 'IN',
+    qty: 500, unit_cost: 40000, payment: 'CASH',
+  });
+
+  // ---- A. Order lama tanpa rekening dikaitkan ke rekening tokonya ----
+  const toko52 = (await call('POST', '/api/shops', {
+    name: `Sh Uji Lama ${cap52}`, channel: 'SHOPEE',
+  })).shop;
+
+  // Dicatat SEBELUM tokonya punya rekening: uangnya jatuh ke Bank Operasional.
+  const bankSblm = await saldo52('1010');
+  const orderLama52 = (await call('POST', '/api/sales', {
+    order_date: '2025-11-03', channel: 'SHOPEE', shop_id: toko52.id,
+    order_ref: `SPX-LAMA-${cap52}`, payment_status: 'PAID',
+    items: [{ product_id: prod52.id, qty: 1, price: 100000 }],
+  })).order;
+  check('order lama tanpa rekening jatuh ke akun bawaan lama',
+    !orderLama52.cash_code && near((await saldo52('1010')) - bankSblm, 100000, 1));
+
+  const orderTanpaToko = (await call('POST', '/api/sales', {
+    order_date: '2025-11-04', channel: 'SHOPEE', payment_status: 'PAID',
+    items: [{ product_id: prod52.id, qty: 1, price: 100000 }],
+  })).order;
+  void orderTanpaToko;
+
+  const rek52 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI LAMA 111-${cap52}`], mulai_kode: '1700',
+  })).dibuat[0].code;
+  await call('PUT', `/api/shops/${toko52.id}`, {
+    name: toko52.name, channel: 'SHOPEE', cash_code: rek52,
+  });
+
+  const cek52 = await call('POST', '/api/sales/kaitkan-rekening', {
+    from: '2025-11-01', to: '2025-11-30', terapkan: false,
+  });
+  check('pemeriksaan menemukan order yang bisa dikaitkan',
+    cek52.ringkas.bisa >= 1, JSON.stringify(cek52.ringkas));
+  check('order tanpa toko dilaporkan, bukan dilewati diam-diam',
+    cek52.ringkas.tanpaToko >= 1 && cek52.contoh.tanpaToko.length >= 1);
+  check('pemeriksaan tidak mengubah apa pun',
+    near(await saldo52(rek52), 0, 1));
+
+  const bankSblmKait = await saldo52('1010');
+  const kait52 = await call('POST', '/api/sales/kaitkan-rekening', {
+    from: '2025-11-01', to: '2025-11-30', terapkan: true,
+  });
+  check('order lama berhasil dikaitkan', kait52.diubah >= 1 && kait52.dilewati.length === 0,
+    JSON.stringify({ diubah: kait52.diubah, dilewati: kait52.dilewati }));
+  check('uangnya pindah dari akun bawaan lama ke rekening tokonya',
+    near(await saldo52(rek52), 100000, 1)
+      && near((await saldo52('1010')) - bankSblmKait, -100000, 1),
+    `rek ${await saldo52(rek52)}`);
+
+  const detail52 = await call('GET', `/api/sales/${orderLama52.id}`);
+  check('rekening tercatat pada ordernya', detail52.order.cash_code === rek52);
+
+  const lagi52 = await call('POST', '/api/sales/kaitkan-rekening', {
+    from: '2025-11-01', to: '2025-11-30', terapkan: false,
+  });
+  check('order yang sudah dikaitkan tidak ditawarkan lagi',
+    !lagi52.ringkas.perRekening.some((x) => x.rekening.startsWith(rek52)));
+
+  // ---- B. Rekening bisa diganti lewat Ubah Pesanan, dan uangnya ikut pindah ----
+  const rek52b = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BNI UJI UBAH 222-${cap52}`], mulai_kode: '1700',
+  })).dibuat[0].code;
+  await call('PUT', `/api/sales/${orderLama52.id}`, { cash_code: rek52b });
+  check('mengganti rekening lewat ubah pesanan memindahkan uangnya',
+    near(await saldo52(rek52b), 100000, 1) && near(await saldo52(rek52), 0, 1),
+    `${await saldo52(rek52)} -> ${await saldo52(rek52b)}`);
+
+  // ---- C. Membatalkan order yang punya retur tidak menghitung stok dua kali ----
+  const orderRet52 = (await call('POST', '/api/sales', {
+    order_date: '2025-11-10', channel: 'SHOPEE', shop_id: toko52.id, payment_status: 'PAID',
+    items: [{ product_id: prod52.id, qty: 10, price: 100000 }],
+  })).order;
+  await call('POST', '/api/sales/returns', {
+    return_date: '2025-11-12', order_id: orderRet52.id, product_id: prod52.id,
+    qty: 4, price: 100000, kondisi: 'BAGUS', reason: 'Uji batal ber-retur',
+  });
+  const stokSblmBatal = await stok52(sku52);
+  await call('DELETE', `/api/sales/${orderRet52.id}`);
+  // Terjual 10, 4 sudah kembali lewat retur: yang kembali karena batal hanya 6.
+  check('membatalkan order ber-retur tidak mengembalikan stok dua kali',
+    near((await stok52(sku52)) - stokSblmBatal, 6, 0.01),
+    `${stokSblmBatal} -> ${await stok52(sku52)}`);
+
+  const returSisa = await call('GET', '/api/sales/returns/list?from=2025-11-01&to=2025-11-30');
+  check('retur dari order yang dibatalkan ikut hilang',
+    !returSisa.rows.some((r) => r.order_id === orderRet52.id));
+
+  const tb52 = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+  check('neraca tetap seimbang setelah membatalkan order ber-retur',
+    Math.abs(tb52.totalDebit - tb52.totalCredit) < 0.01);
+
+  // ---- D. Hapus seluruh order satu periode ----
+  for (let i52 = 0; i52 < 3; i52 += 1) {
+    await call('POST', '/api/sales', {
+      order_date: '2025-11-2' + i52, channel: 'SHOPEE', shop_id: toko52.id, payment_status: 'PAID',
+      items: [{ product_id: prod52.id, qty: 2, price: 100000 }],
+    });
+  }
+  const orderPer = (await call('POST', '/api/sales', {
+    order_date: '2025-11-25', channel: 'SHOPEE', shop_id: toko52.id, payment_status: 'PAID',
+    items: [{ product_id: prod52.id, qty: 3, price: 100000 }],
+  })).order;
+  await call('POST', '/api/sales/returns', {
+    return_date: '2025-11-26', order_id: orderPer.id, product_id: prod52.id,
+    qty: 1, price: 100000, kondisi: 'RUSAK', reason: 'Uji hapus periode',
+  });
+
+  const lihat = await call('POST', '/api/sales/bersihkan-periode', {
+    from: '2025-11-01', to: '2025-11-30', terapkan: false,
+  });
+  const nPer = lihat.ringkas.orders;
+  check('pemeriksaan menghitung order pada periode itu', nPer >= 5,
+    JSON.stringify(lihat.ringkas));
+  check('pemeriksaan menunjukkan stok yang akan kembali',
+    lihat.stok.some((x) => x.sku === sku52) && lihat.ringkas.unitKembali > 0);
+  check('pemeriksaan menunjukkan rekening yang saldonya akan turun',
+    lihat.akun.some((a) => a.is_cash && a.perubahan < 0), JSON.stringify(lihat.akun));
+  check('pemeriksaan tidak membatalkan apa pun',
+    (await call('POST', '/api/sales/bersihkan-periode', {
+      from: '2025-11-01', to: '2025-11-30', terapkan: false,
+    })).ringkas.orders === nPer);
+
+  let tolakKonfirmasi = 0;
+  try {
+    await call('POST', '/api/sales/bersihkan-periode', {
+      from: '2025-11-01', to: '2025-11-30', terapkan: true, konfirmasi: 'HAPUS',
+    });
+  } catch (err) { tolakKonfirmasi = err.status; }
+  check('tanpa kata konfirmasi yang tepat, tidak ada yang dihapus',
+    tolakKonfirmasi === 422, `status ${tolakKonfirmasi}`);
+
+  const stokSblmHapus52 = await stok52(sku52);
+  const hapus52 = await call('POST', '/api/sales/bersihkan-periode', {
+    from: '2025-11-01', to: '2025-11-30', terapkan: true, konfirmasi: lihat.ringkas.kataKunci,
+  });
+  check('seluruh order periode itu terhapus', hapus52.dibatalkan === nPer,
+    `${hapus52.dibatalkan} vs ${nPer}`);
+
+  const sisaNov = await call('GET', '/api/sales?from=2025-11-01&to=2025-11-30&limit=5000');
+  check('order periode itu hilang dari daftar order', sisaNov.summary.orders === 0,
+    String(sisaNov.summary.orders));
+
+  // Stok yang kembali = seluruh yang terjual pada periode itu, dikurangi yang
+  // sudah kembali lebih dulu lewat retur BAGUS (retur RUSAK tidak mengembalikan).
+  check('stok bertambah sebesar yang terjual pada periode itu',
+    near((await stok52(sku52)) - stokSblmHapus52, lihat.ringkas.unitKembali, 0.01),
+    `${stokSblmHapus52} -> ${await stok52(sku52)}, harap +${lihat.ringkas.unitKembali}`);
+
+  const plNov = await call('GET', '/api/finance/reports/income-statement?from=2025-11-01&to=2025-11-30');
+  check('laba rugi periode itu tidak lagi memuat penjualan maupun retur',
+    near(plNov.grossSales, 0, 1) && near(plNov.salesReturn, 0, 1),
+    `kotor ${plNov.grossSales}, retur ${plNov.salesReturn}`);
+
+  const tbHapus52 = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+  check('neraca tetap seimbang setelah satu periode dihapus',
+    Math.abs(tbHapus52.totalDebit - tbHapus52.totalCredit) < 0.01);
+
+  // Bulan yang sudah ditutup buku tidak bisa dibersihkan.
+  await call('POST', '/api/sales', {
+    order_date: '2025-10-15', channel: 'SHOPEE', shop_id: toko52.id, payment_status: 'PAID',
+    items: [{ product_id: prod52.id, qty: 1, price: 100000 }],
+  });
+  await call('POST', '/api/riwayat/periode/kunci', { period: '2025-10', note: 'Uji hapus periode' });
+  const lihatKunci = await call('POST', '/api/sales/bersihkan-periode', {
+    from: '2025-10-01', to: '2025-10-31', terapkan: false,
+  });
+  check('bulan yang sudah ditutup buku ditandai sebagai penghalang',
+    lihatKunci.penghalang.some((x) => /ditutup buku/.test(x)), JSON.stringify(lihatKunci.penghalang));
+  let tolakKunci = 0;
+  try {
+    await call('POST', '/api/sales/bersihkan-periode', {
+      from: '2025-10-01', to: '2025-10-31', terapkan: true,
+      konfirmasi: lihatKunci.ringkas.kataKunci,
+    });
+  } catch (err) { tolakKunci = err.status; }
+  check('periode tertutup buku tidak bisa dihapus', tolakKunci === 409, `status ${tolakKunci}`);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakIzin52 = 0;
+  try {
+    await call('POST', '/api/sales/bersihkan-periode', { from: '2025-09-01', to: '2025-09-30' });
+  } catch (err) { tolakIzin52 = err.status; }
+  check('tim tanpa izin batal tidak bisa menghapus satu periode',
+    tolakIzin52 === 403, `status ${tolakIzin52}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

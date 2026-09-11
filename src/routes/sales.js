@@ -660,6 +660,24 @@ const cancelOrder = db.transaction((orderId) => {
     db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(r2(product.stock + it.qty), it.product_id);
   }
 
+  // Retur dari order ini ikut dibatalkan.
+  //
+  // Order yang dibatalkan berarti penjualannya tidak pernah terjadi, jadi
+  // returnya pun tidak. Membiarkannya berakibat dua kesalahan sekaligus: barang
+  // yang sudah kembali lewat retur ikut dikembalikan lagi oleh pembatalan —
+  // stoknya terhitung dua kali — dan jurnal returnya tetap mengurangi
+  // pendapatan dari penjualan yang sudah tidak ada.
+  //
+  // Dikerjakan SETELAH stok ordernya dikembalikan: pembalikan retur memeriksa
+  // bahwa barang yang dulu kembali masih ada di gudang, dan jumlah yang diretur
+  // tidak pernah melebihi yang terjual — jadi pada titik ini pemeriksaan itu
+  // tidak mungkin menolak tanpa alasan.
+  const returTerkait = db.prepare('SELECT * FROM sales_returns WHERE order_id = ?').all(orderId);
+  for (const r of returTerkait) {
+    batalkanEfekRetur(r);
+    db.prepare('DELETE FROM sales_returns WHERE id = ?').run(r.id);
+  }
+
   // Dikembalikan ke batch asalnya lewat catatan batch_moves, bukan ke batch
   // yang kebetulan paling dekat kedaluwarsanya — menebak akan membuat barang
   // "pindah" batch hanya karena ordernya dibatalkan.
@@ -812,6 +830,304 @@ router.put('/:id(\\d+)', butuhIzin('penjualan.ubah'), ah((req, res) => {
 router.delete('/:id', butuhIzin('penjualan.batal'), ah((req, res) => {
   const orderNo = cancelOrder(Number(req.params.id));
   res.json({ ok: true, message: `Order ${orderNo} dibatalkan, stok dikembalikan` });
+}));
+
+// ==================================================================
+// ALAT PEMBERSIHAN: kaitkan rekening order lama & hapus order satu periode
+// ==================================================================
+const TGL = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/** Bulan-bulan yang sudah ditutup — perubahan di dalamnya selalu ditolak. */
+function bulanTerkunci() {
+  return new Set(db.prepare('SELECT period FROM period_locks').all().map((r) => r.period));
+}
+
+/**
+ * Order lama yang belum punya rekening penerima.
+ *
+ * Order yang dicatat sebelum ada kolom rekening jurnalnya jatuh ke akun bawaan
+ * lama — Bank Operasional untuk marketplace, Kas Tunai untuk luring. Kalau
+ * tokonya sekarang sudah punya rekening, order itu bisa ikut dikaitkan.
+ * Yang tidak bisa dikaitkan dilaporkan beserta alasannya, bukan dilewati diam-
+ * diam: justru daftar itulah yang perlu dibetulkan satu per satu.
+ */
+function calonKaitkan(from, to) {
+  const kunci = bulanTerkunci();
+  const rows = db
+    .prepare(
+      `SELECT o.id, o.order_no, o.order_ref, o.order_date, o.channel, o.payment_status,
+              o.net_revenue, o.total_fees, o.shipping_non_mp, o.shop_id,
+              s.name AS shop_name, s.cash_code AS toko_cash_code, a.name AS rekening_nama
+         FROM sales_orders o
+         LEFT JOIN shops s    ON s.id = o.shop_id
+         LEFT JOIN accounts a ON a.code = s.cash_code AND a.is_cash = 1
+        WHERE o.status = 'POSTED'
+          AND o.order_date BETWEEN ? AND ?
+          AND (o.cash_code IS NULL OR o.cash_code = '')
+        ORDER BY o.order_date, o.id`
+    )
+    .all(from, to)
+    .map((o) => ({
+      ...o,
+      channel_label: CHANNEL_LABEL[o.channel] || o.channel,
+      nilai: r2(o.net_revenue - o.total_fees + (o.shipping_non_mp || 0)),
+    }));
+
+  const bisa = [];
+  const tanpaToko = [];
+  const tokoTanpaRekening = [];
+  const terkunci = [];
+  for (const o of rows) {
+    if (kunci.has(o.order_date.slice(0, 7))) terkunci.push(o);
+    else if (!o.shop_id) tanpaToko.push(o);
+    else if (!o.toko_cash_code || !o.rekening_nama) tokoTanpaRekening.push(o);
+    else bisa.push(o);
+  }
+  return { bisa, tanpaToko, tokoTanpaRekening, terkunci };
+}
+
+const kaitkanSchema = z.object({
+  from: TGL,
+  to: TGL,
+  terapkan: z.boolean().default(false),
+});
+
+const terapkanKaitan = db.transaction((daftar, userId) => {
+  let diubah = 0;
+  const dilewati = [];
+  for (const calon of daftar) {
+    const o = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(calon.id);
+    const baru = { ...o, cash_code: calon.toko_cash_code };
+
+    // Yang boleh berubah HANYA akun penerimanya. Jumlah jurnalnya dibandingkan
+    // sebelum dan sesudah; kalau berbeda, berarti ada yang lain ikut bergeser,
+    // dan order itu dilewati tanpa disentuh — dilaporkan, bukan dipaksakan.
+    const lama = db
+      .prepare(
+        `SELECT COALESCE(SUM(l.debit), 0) AS d FROM journal_lines l
+           JOIN journals j ON j.id = l.journal_id
+          WHERE j.source = 'SALES' AND j.source_id = ?`
+      )
+      .get(o.id).d;
+    const lines = buildSalesJournalLines(baru);
+    const totalBaru = r2(lines.reduce((s, l) => s + (l.debit || 0), 0));
+    if (Math.abs(r2(lama) - totalBaru) > 0.01) {
+      dilewati.push({
+        order_no: o.order_no,
+        alasan: `jurnal tersimpan ${r2(lama)} tidak sama dengan hitungan ulangnya ${totalBaru} — periksa lewat Ubah Pesanan`,
+      });
+      continue;
+    }
+
+    db.prepare('UPDATE sales_orders SET cash_code = ? WHERE id = ?').run(calon.toko_cash_code, o.id);
+    deleteJournalsBySource('SALES', o.id);
+    postJournal({
+      date: o.order_date,
+      description: `Penjualan ${o.order_no} — ${CHANNEL_LABEL[o.channel] || o.channel}`,
+      lines,
+      source: 'SALES',
+      sourceId: o.id,
+      userId,
+    });
+    diubah += 1;
+  }
+  return { diubah, dilewati };
+});
+
+/**
+ * POST /api/sales/kaitkan-rekening
+ *
+ * Tanpa `terapkan`, hanya memeriksa: berapa order bisa dikaitkan, ke rekening
+ * mana, dan mana yang tidak bisa beserta sebabnya. Dengan `terapkan`, rekening
+ * tokonya dipasang ke ordernya dan jurnalnya ditulis ulang — uangnya pindah
+ * dari akun bawaan lama ke rekening yang sebenarnya.
+ */
+router.post('/kaitkan-rekening', butuhIzin('penjualan.ubah'), ah((req, res) => {
+  const body = parse(kaitkanSchema, req.body);
+  const c = calonKaitkan(body.from, body.to);
+
+  const perRekening = {};
+  for (const o of c.bisa) {
+    const k = `${o.toko_cash_code} · ${o.rekening_nama}`;
+    perRekening[k] = perRekening[k] || { rekening: k, orders: 0, nilaiLunas: 0 };
+    perRekening[k].orders += 1;
+    if (o.payment_status === 'PAID') perRekening[k].nilaiLunas = r2(perRekening[k].nilaiLunas + o.nilai);
+  }
+
+  const ringkas = {
+    bisa: c.bisa.length,
+    tanpaToko: c.tanpaToko.length,
+    tokoTanpaRekening: c.tokoTanpaRekening.length,
+    terkunci: c.terkunci.length,
+    perRekening: Object.values(perRekening).sort((a, b) => b.orders - a.orders),
+    tokoBelumBerekening: [...new Set(c.tokoTanpaRekening.map((o) => o.shop_name))],
+  };
+
+  if (!body.terapkan) {
+    return res.json({
+      ok: true, dicoba: true, ringkas,
+      contoh: {
+        tanpaToko: c.tanpaToko.slice(0, 50),
+        tokoTanpaRekening: c.tokoTanpaRekening.slice(0, 50),
+      },
+    });
+  }
+
+  const { diubah, dilewati } = terapkanKaitan(c.bisa, req.user.id);
+  res.json({
+    ok: true, diubah, dilewati, ringkas,
+    message: `${diubah} order dikaitkan ke rekening tokonya` +
+      (dilewati.length ? `, ${dilewati.length} dilewati karena jurnalnya perlu diperiksa` : ''),
+  });
+}));
+
+/**
+ * Order satu periode yang akan dibersihkan, beserta seluruh akibatnya.
+ *
+ * "Menghapus" order di sini berarti MEMBATALKANNYA lewat jalur pembatalan yang
+ * sama dengan tombol batal: stok dikembalikan, returnya ikut dibalik, jurnalnya
+ * dihapus, dan order hilang dari seluruh daftar dan laporan. Barisnya sendiri
+ * tidak dibuang, sehingga jejaknya tetap bisa ditelusuri di Riwayat — tidak ada
+ * yang lenyap tanpa bekas.
+ *
+ * Akibatnya ditunjukkan SEBELUM dikerjakan, karena tiga di antaranya mudah
+ * terlewat: stok bertambah kembali, saldo rekening turun sebesar uang order
+ * yang dulu masuk, dan laba rugi bulan itu kehilangan pendapatannya.
+ */
+function calonBersihkan(from, to) {
+  const kunci = bulanTerkunci();
+  const orders = db
+    .prepare(
+      `SELECT o.id, o.order_no, o.order_ref, o.order_date, o.channel, o.gross_sales,
+              o.net_revenue, o.fulfillment_status, sh.name AS shop_name
+         FROM sales_orders o
+         LEFT JOIN shops sh ON sh.id = o.shop_id
+        WHERE o.status = 'POSTED' AND o.order_date BETWEEN ? AND ?
+        ORDER BY o.order_date, o.id`
+    )
+    .all(from, to);
+
+  // Order yang punya jurnal atau retur pada bulan tertutup tidak bisa dibatalkan.
+  const terkunci = orders.filter((o) => kunci.has(o.order_date.slice(0, 7)));
+
+  const retur = db
+    .prepare(
+      `SELECT r.id, r.return_no, r.return_date, r.kondisi, r.order_id, o.order_no,
+              b.status AS status_perbaikan
+         FROM sales_returns r
+         JOIN sales_orders o ON o.id = r.order_id
+         LEFT JOIN barang_perbaikan b ON b.return_id = r.id
+        WHERE o.status = 'POSTED' AND o.order_date BETWEEN ? AND ?`
+    )
+    .all(from, to);
+
+  // Retur yang barangnya sudah selesai dikemas ulang tidak bisa dibalik dari
+  // sini — akibatnya sudah menyebar ke stok dan jurnal perbaikan.
+  const returMacet = retur.filter(
+    (r) => (r.status_perbaikan && r.status_perbaikan !== 'MENUNGGU')
+      || kunci.has(String(r.return_date).slice(0, 7))
+  );
+
+  const stok = db
+    .prepare(
+      `SELECT p.id, p.sku, p.name, p.unit, SUM(i.qty) AS qty
+         FROM sales_items i
+         JOIN sales_orders o ON o.id = i.order_id
+         JOIN products p ON p.id = i.product_id
+        WHERE o.status = 'POSTED' AND o.order_date BETWEEN ? AND ?
+        GROUP BY p.id ORDER BY qty DESC`
+    )
+    .all(from, to)
+    .map((x) => ({ ...x, qty: r2(x.qty) }));
+
+  // Pengaruhnya pada saldo tiap akun: kebalikan dari yang dulu dibukukan.
+  const akun = db
+    .prepare(
+      `SELECT a.code, a.name, a.type, a.is_cash,
+              COALESCE(SUM(l.debit - l.credit), 0) AS saldo
+         FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+         JOIN sales_orders o ON o.id = j.source_id AND j.source = 'SALES'
+         JOIN accounts a ON a.id = l.account_id
+        WHERE o.status = 'POSTED' AND o.order_date BETWEEN ? AND ?
+        GROUP BY a.code ORDER BY a.code`
+    )
+    .all(from, to)
+    .map((a) => ({ ...a, perubahan: r2(-a.saldo) }))
+    .filter((a) => Math.abs(a.perubahan) >= 0.01);
+
+  return { orders, terkunci, retur, returMacet, stok, akun };
+}
+
+const bersihkanSchema = z.object({
+  from: TGL,
+  to: TGL,
+  terapkan: z.boolean().default(false),
+  // Diketik ulang oleh orangnya, berisi jumlah ordernya. Tombol yang bisa
+  // membatalkan ratusan order sekaligus tidak boleh bisa tertekan tidak sengaja.
+  konfirmasi: z.string().trim().optional(),
+});
+
+const jalankanBersihkan = db.transaction((ids) => {
+  for (const id of ids) cancelOrder(id);
+  return ids.length;
+});
+
+router.post('/bersihkan-periode', butuhIzin('penjualan.batal'), ah((req, res) => {
+  const body = parse(bersihkanSchema, req.body);
+  if (body.to < body.from) throw httpError(422, 'Tanggal akhir tidak boleh sebelum tanggal awal');
+
+  const c = calonBersihkan(body.from, body.to);
+  const kataKunci = `HAPUS ${c.orders.length}`;
+  const jumlah = (f) => r2(c.orders.reduce((s, o) => s + (o[f] || 0), 0));
+
+  const ringkas = {
+    from: body.from,
+    to: body.to,
+    orders: c.orders.length,
+    penjualanKotor: jumlah('gross_sales'),
+    pendapatan: jumlah('net_revenue'),
+    retur: c.retur.length,
+    terkunci: c.terkunci.length,
+    returMacet: c.returMacet.length,
+    unitKembali: r2(c.stok.reduce((s, x) => s + x.qty, 0)),
+    kataKunci,
+  };
+
+  const penghalang = [];
+  if (c.terkunci.length) {
+    penghalang.push(
+      `${c.terkunci.length} order berada di bulan yang sudah ditutup buku — buka dulu tutup bukunya`
+    );
+  }
+  if (c.returMacet.length) {
+    penghalang.push(
+      `${c.returMacet.length} retur tidak bisa dibalik (${c.returMacet.map((r) => r.return_no).slice(0, 5).join(', ')}` +
+        `${c.returMacet.length > 5 ? ', …' : ''}) — barangnya sudah selesai dikemas ulang atau returnya di bulan tertutup`
+    );
+  }
+
+  if (!body.terapkan) {
+    return res.json({
+      ok: true, dicoba: true, ringkas, penghalang,
+      stok: c.stok.slice(0, 30),
+      akun: c.akun,
+      contoh: c.orders.slice(0, 20),
+    });
+  }
+
+  if (!c.orders.length) throw httpError(422, 'Tidak ada order pada rentang tanggal itu');
+  if (penghalang.length) throw httpError(409, penghalang.join('. '));
+  if (body.konfirmasi !== kataKunci) {
+    throw httpError(422, `Ketik "${kataKunci}" persis untuk melanjutkan`);
+  }
+
+  const dibatalkan = jalankanBersihkan(c.orders.map((o) => o.id));
+  res.json({
+    ok: true, dibatalkan, ringkas,
+    message: `${dibatalkan} order ${body.from} s/d ${body.to} dihapus dari pembukuan` +
+      (c.retur.length ? `, termasuk ${c.retur.length} returnya` : ''),
+  });
 }));
 
 // ==================================================================

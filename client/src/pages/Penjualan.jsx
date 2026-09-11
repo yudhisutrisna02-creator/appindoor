@@ -7,6 +7,8 @@ import UbahOrder from './UbahOrder';
 import BarisVarian from '../components/BarisVarian';
 import { rupiah, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel, EKSPEDISI, MARKETPLACE } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import { tokoUntukRekening } from '../lib/rekening';
+import HapusPeriode from '../components/HapusPeriode';
 
 const emptyOrder = () => ({
   order_date: today(),
@@ -44,7 +46,8 @@ const emptyOrder = () => ({
 
 export default function Penjualan() {
   const toast = useToast();
-  const { canManage } = useAuth();
+  const { canManage, punya } = useAuth();
+  const [hapusPeriode, setHapusPeriode] = useState(false);
   const [range, setRange] = useState(defaultRange);
   const [channel, setChannel] = useState('');
   const [shopId, setShopId] = useState('');
@@ -156,35 +159,9 @@ export default function Penjualan() {
     }));
   }
 
-  /**
-   * Toko mana yang dimaksud saat sebuah rekening dipilih.
-   *
-   * Satu rekening memang sering dipakai beberapa toko, dan itu tidak selalu
-   * membingungkan. Urutan penyaringnya:
-   *
-   *   1. Kalau tokonya beda kanal — satu Shopee, satu TikTok, satu Lazada —
-   *      kanal yang sedang dipilih sudah cukup membedakan.
-   *   2. Kalau masih lebih dari satu, dipakai toko yang ditandai utama untuk
-   *      rekening itu.
-   *   3. Kalau tetap tidak jelas, TIDAK ditebak. Menebak berarti mencatat
-   *      order ke toko yang keliru, dan itu baru ketahuan saat laba per toko
-   *      dibaca berbulan-bulan kemudian.
-   */
-  function tokoUntukRekening(kode, kanal) {
-    const semua = shops.filter((s) => s.cash_code === kode);
-    if (semua.length === 1) return semua[0];
-
-    const seKanal = semua.filter((s) => s.channel === kanal);
-    if (seKanal.length === 1) return seKanal[0];
-
-    const dasar = seKanal.length ? seKanal : semua;
-    const utama = dasar.filter((s) => s.rekening_utama);
-    return utama.length === 1 ? utama[0] : null;
-  }
-
   function pilihRekening(kode) {
     setForm((f) => {
-      const toko = kode ? tokoUntukRekening(kode, f.channel) : null;
+      const toko = tokoUntukRekening(shops, kode, f.channel);
       return {
         ...f,
         cash_code: kode,
@@ -292,6 +269,11 @@ export default function Penjualan() {
         <Link className="btn-secondary" to="/penjualan/retur">
           <Undo2 size={16} /> Retur
         </Link>
+        {punya('penjualan.batal') && (
+          <button className="btn-secondary text-rose-600" onClick={() => setHapusPeriode(true)}>
+            <Trash2 size={16} /> Hapus Periode
+          </button>
+        )}
           <TombolEkspor path="/api/sales" params={{ ...range, channel, shop_id: shopId, q }} nama="order-penjualan" />
       </PageHeader>
 
@@ -807,9 +789,16 @@ export default function Penjualan() {
       </Modal>
 
       {/* ---------- DETAIL ORDER ---------- */}
+      <HapusPeriode
+        open={hapusPeriode}
+        onClose={() => setHapusPeriode(false)}
+        onSelesai={() => { load(); refreshProducts(); }}
+      />
+
       <UbahOrder
         order={ubah}
         shops={shops}
+        rekening={rekening}
         products={products}
         open={!!ubah}
         onClose={() => setUbah(null)}

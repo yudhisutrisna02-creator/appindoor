@@ -89,7 +89,12 @@ const ubahSchema = z.object({
   cash_code: z.string().trim().optional().nullable(),
 });
 
-/** Kolom yang hanya keterangan — mengubahnya tidak menyentuh angka mana pun. */
+/**
+ * Kolom yang tidak ikut menghitung laba. cash_code termasuk di sini karena
+ * nilainya tidak mengubah angka apa pun — tetapi ia MENENTUKAN akun mana yang
+ * menerima uangnya, dan jurnalnya memang selalu ditulis ulang tiap kali order
+ * disimpan, sehingga mengganti rekening benar-benar memindahkan uangnya.
+ */
 const KOLOM_KETERANGAN = [
   'customer', 'marketplace_ref', 'shop_id', 'order_ref', 'courier', 'tracking_no',
   'fulfillment_status', 'payout_date', 'buyer_name', 'buyer_account', 'buyer_phone',

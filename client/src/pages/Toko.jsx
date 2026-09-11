@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Store, TrendingUp, Link2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Store, TrendingUp, Link2, History } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
 import { api } from '../lib/api';
 import {
@@ -9,6 +9,7 @@ import {
 } from '../components/ui';
 import { rupiah, pct, CHANNEL_LABEL, CHART_COLORS } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import KaitkanOrderLama from '../components/KaitkanOrderLama';
 
 const EMPTY = { name: '', channel: 'SHOPEE', note: '', cash_code: '', rekening_utama: false, active: true };
 
@@ -29,6 +30,7 @@ export default function Toko() {
   const [taut, setTaut] = useState(null);
   const [hasilTaut, setHasilTaut] = useState(null);
   const [menyimpanTaut, setMenyimpanTaut] = useState(false);
+  const [orderLama, setOrderLama] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,6 +106,11 @@ export default function Toko() {
   return (
     <div>
       <PageHeader title="Toko / Akun Marketplace" subtitle="Bandingkan profitabilitas antar akun toko Anda">
+        {canManage && (
+          <button className="btn-secondary" onClick={() => setOrderLama(true)}>
+            <History size={16} /> Kaitkan Order Lama
+          </button>
+        )}
         {canManage && (
           <button className="btn-secondary" onClick={() => setTaut({ teks: '' })}>
             <Link2 size={16} /> Tautkan Rekening
@@ -217,6 +224,8 @@ export default function Toko() {
           </div>
         </>
       )}
+
+      <KaitkanOrderLama open={orderLama} onClose={() => setOrderLama(false)} onSelesai={load} />
 
       <Modal open={!!taut} onClose={() => setTaut(null)} title="Tautkan Toko ke Rekening" wide>
         {taut && (
