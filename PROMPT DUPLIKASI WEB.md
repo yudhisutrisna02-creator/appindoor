@@ -552,6 +552,18 @@ dibayar dua kali transfer dari BCA. Tiga langkah, urutannya penting:
 3. **Catat ulang pembayaran yang benar** di Utang & Piutang dengan tanggal dan
    rekening sesuai rekening koran.
 
+### Barang masuk lama → Pesanan Pembelian
+
+Barang masuk hasil impor dicatat lewat Mutasi Stok, jadi tidak muncul di menu
+Pembelian. Tombol **Jadikan PO** (Mutasi Stok, izin `pembelian.kelola`) →
+`POST /api/pembelian/dari-barang-masuk {move_id, order_date, unit_cost,
+biaya_tambahan, invoice_no, note}`: membuat PO berstatus SELESAI untuk supplier
+mutasi itu, memakai mutasi & jurnal yang sudah ada sebagai penerimaannya (stok
+TIDAK bertambah lagi), memberi mutasi nomor PO, dan — bila harganya berubah —
+memakai `koreksiHargaMasuk` (fungsi yang sama dengan tombol Harga). Semua dalam
+satu transaksi; ditolak bila utang supplier jadi minus, mutasi tanpa supplier,
+atau sudah ber-PO.
+
 ### Transaksi Utang & Piutang (tab Transaksi)
 
 Daftar per mitra hanya memuat mitra yang MASIH punya saldo, sehingga pembayaran
@@ -837,7 +849,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 845 pemeriksaan, 58 bagian
+npm run smoke            # 855 pemeriksaan, 59 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

@@ -23,7 +23,7 @@ const { dokumenPdf, tableCsv } = require('../utils/exporters');
 const { blokTtd, KIND } = require('../utils/ttd');
 const { isiDokumen } = require('../utils/dokumen');
 const { todayLocal } = require('../utils/time');
-const { applyMove } = require('./inventory');
+const { applyMove, koreksiHargaMasuk } = require('./inventory');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -433,6 +433,108 @@ const terimaBarang = db.transaction((poId, body, userId) => {
 
   return { diterima, status };
 });
+
+// ==================================================================
+// BARANG MASUK LAMA → PESANAN PEMBELIAN
+// ==================================================================
+const dariMasukSchema = z.object({
+  move_id: z.number().int().positive(),
+  order_date: tanggal.optional().nullable(),
+  // Harga per unit dari pabrik dan ongkos kirim total. Kosong = harga tetap.
+  unit_cost: z.number().nonnegative().optional().nullable(),
+  biaya_tambahan: z.number().nonnegative().default(0),
+  invoice_no: z.string().trim().max(60).optional().nullable(),
+  note: z.string().trim().max(300).optional().nullable(),
+});
+
+/**
+ * POST /api/pembelian/dari-barang-masuk — menjadikan barang masuk yang dulu
+ * dicatat lewat Mutasi Stok (misalnya hasil impor) sebagai pesanan pembelian.
+ *
+ * Stoknya TIDAK bertambah lagi: mutasi dan jurnalnya yang sudah ada dipakai
+ * sebagai penerimaan pesanan itu. Yang terjadi hanyalah pesanan berstatus
+ * Selesai dibuat untuk supplier-nya, mutasinya diberi nomor pesanan, dan —
+ * bila harganya ikut dibetulkan — nilai, utang, dan HPP-nya disesuaikan lewat
+ * jalur yang sama dengan tombol Harga di Mutasi Stok.
+ */
+router.post('/dari-barang-masuk', butuhIzin('pembelian.kelola'), ah((req, res) => {
+  const body = parse(dariMasukSchema, req.body);
+  const m = db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(body.move_id);
+  if (!m) throw httpError(404, 'Mutasi tidak ditemukan');
+  if (m.move_type !== 'IN' || m.source !== 'MANUAL') {
+    throw httpError(422, 'Yang bisa dijadikan pesanan hanya barang masuk yang dicatat lewat Mutasi Stok');
+  }
+  if (String(m.ref || '').startsWith('PO/')) {
+    throw httpError(409, `Barang masuk ini sudah tercatat sebagai ${m.ref}`);
+  }
+  if (!m.partner_id) {
+    throw httpError(422, 'Barang masuk ini tidak mencatat supplier-nya — tidak bisa dijadikan pesanan');
+  }
+  const produk = db.prepare('SELECT * FROM products WHERE id = ?').get(m.product_id);
+  const j = db.prepare("SELECT * FROM journals WHERE source = 'STOCK' AND source_id = ?").get(m.id);
+  const barisLawan = j
+    ? db.prepare(
+        `SELECT l.*, a.subtype, a.is_cash, a.code FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+          WHERE l.journal_id = ? AND l.credit > 0`
+      ).get(j.id)
+    : null;
+  const payment = barisLawan && barisLawan.subtype === 'PAYABLE' ? 'CREDIT' : barisLawan && barisLawan.is_cash ? 'BANK' : 'CREDIT';
+
+  const hasil = db.transaction(() => {
+    let harga = null;
+    const ubahHarga = body.unit_cost !== null && body.unit_cost !== undefined
+      && Math.abs(r2(m.qty * body.unit_cost + body.biaya_tambahan) - r2(m.qty * m.unit_cost)) >= 0.01;
+    if (ubahHarga) {
+      harga = koreksiHargaMasuk(m.id, {
+        unit_cost: body.unit_cost,
+        biaya_tambahan: body.biaya_tambahan,
+        alasan: body.note || 'Harga dibetulkan saat dijadikan pesanan pembelian',
+      }, req.user.id);
+    }
+    const kini = db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(m.id);
+    const tglPesan = body.order_date || m.move_date;
+    const poNo = nextNumber('PO', tglPesan.slice(0, 7));
+    const catatanHarga = body.biaya_tambahan
+      ? `Harga pabrik Rp ${Number(body.unit_cost).toLocaleString('id-ID')} + ongkir Rp ${body.biaya_tambahan.toLocaleString('id-ID')}`
+      : null;
+    const info = db
+      .prepare(
+        `INSERT INTO purchase_orders
+           (po_no, order_date, partner_id, status, payment, cash_code, invoice_no, note, user_id)
+         VALUES (?,?,?, 'SELESAI', ?,?,?,?,?)`
+      )
+      .run(
+        poNo, tglPesan, m.partner_id, payment,
+        payment === 'CREDIT' ? null : barisLawan.code,
+        body.invoice_no || null,
+        [body.note, catatanHarga, `Dari barang masuk ${m.move_date}${m.ref ? ` (${m.ref})` : ''}`]
+          .filter(Boolean).join(' · ').slice(0, 300),
+        req.user.id
+      );
+    db.prepare(
+      `INSERT INTO purchase_items (po_id, product_id, qty, unit_cost, qty_received, received_amount)
+       VALUES (?,?,?,?,?,?)`
+    ).run(info.lastInsertRowid, m.product_id, m.qty, kini.unit_cost, m.qty, r2(m.qty * kini.unit_cost));
+    db.prepare(
+      `UPDATE stock_moves
+          SET ref = ?, note = TRIM(COALESCE(note, '') || ' · Penerimaan pesanan pembelian ' || ?)
+        WHERE id = ?`
+    ).run(poNo, poNo, m.id);
+    return { id: info.lastInsertRowid, po_no: poNo, harga };
+  })();
+
+  const po = ambilPO(hasil.id);
+  res.status(201).json({
+    ok: true,
+    po,
+    harga: hasil.harga,
+    message:
+      `${po.po_no} dibuat untuk ${po.supplier_name}: ${m.qty} ${produk.unit} ${produk.name}, ` +
+      `Rp ${po.total.toLocaleString('id-ID')}` +
+      (hasil.harga ? ` (harga dibetulkan dari Rp ${hasil.harga.nilaiLama.toLocaleString('id-ID')})` : '') +
+      '. Stok tidak bertambah lagi.',
+  });
+}));
 
 router.post('/:id(\\d+)/terima', butuhIzin('pembelian.kelola'), ah((req, res) => {
   const body = parse(terimaSchema, req.body);

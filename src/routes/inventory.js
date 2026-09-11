@@ -633,7 +633,15 @@ const hargaSchema = z.object({
  */
 router.put('/moves/:id(\\d+)/harga', butuhIzin('gudang.produk'), ah((req, res) => {
   const body = parse(hargaSchema, req.body);
-  const m = db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(req.params.id);
+  res.json({ ok: true, ...koreksiHargaMasuk(Number(req.params.id), body, req.user.id) });
+}));
+
+/**
+ * Inti pembetulan harga barang masuk — dipakai juga saat barang masuk
+ * dijadikan pesanan pembelian dengan harga yang benar.
+ */
+function koreksiHargaMasuk(moveId, body, userId) {
+  const m = db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(moveId);
   if (!m) throw httpError(404, 'Mutasi tidak ditemukan');
   if (m.move_type !== 'IN' || m.source !== 'MANUAL') {
     throw httpError(
@@ -730,14 +738,13 @@ router.put('/moves/:id(\\d+)/harga', butuhIzin('gudang.produk'), ah((req, res) =
       })),
       source: 'STOCK',
       sourceId: m.id,
-      userId: req.user.id,
+      userId,
       entryNo: j.entry_no,
     });
   })();
 
   const rp = (n) => `Rp ${r2(n).toLocaleString('id-ID')}`;
-  res.json({
-    ok: true,
+  return {
     journal: hasil,
     nilaiLama, nilaiBaru, selisih,
     hppMasuk: r2(hppBaru),
@@ -745,8 +752,8 @@ router.put('/moves/:id(\\d+)/harga', butuhIzin('gudang.produk'), ah((req, res) =
     message:
       `Harga ${produk.name} dibetulkan: ${rp(nilaiLama)} → ${rp(nilaiBaru)} ` +
       `(${rp(hppBaru)}/${produk.unit}). HPP rata-rata sekarang ${rp(hppProduk)}.`,
-  });
-}));
+  };
+}
 
 /** GET /api/inventory/moves — kartu stok / log mutasi. */
 /**
@@ -1119,6 +1126,7 @@ router.get('/opname/:id', ah((req, res) => {
 // diterima — stok, HPP rata-rata, dan jurnalnya tidak boleh punya versi kedua.
 module.exports = router;
 module.exports.applyMove = applyMove;
+module.exports.koreksiHargaMasuk = koreksiHargaMasuk;
 // Dipakai Pusat Perhatian supaya peringatan kadaluarsa dan halamannya
 // menghitung dari fungsi yang sama, bukan dua query yang bisa berbeda.
 module.exports.ambilKadaluarsa = ambilKadaluarsa;

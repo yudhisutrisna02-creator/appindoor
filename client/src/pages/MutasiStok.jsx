@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, Plus, Package, Pencil } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Plus, Package, Pencil, ShoppingCart } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, today } from '../lib/format';
@@ -25,6 +25,9 @@ export default function MutasiStok() {
   const [menyimpanHarga, setMenyimpanHarga] = useState(false);
   const { punya } = useAuth();
   const bolehUbahHarga = punya('gudang.produk');
+  const bolehJadiPO = punya('pembelian.kelola');
+  const [jadiPO, setJadiPO] = useState(null);
+  const [menyimpanPO, setMenyimpanPO] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +69,31 @@ export default function MutasiStok() {
       toast.error(err.message);
     } finally {
       setMenyimpanHarga(false);
+    }
+  }
+
+  const nilaiPOBaru = jadiPO ? jadiPO.qty * (Number(jadiPO.unit_cost) || 0) + (Number(jadiPO.biaya_tambahan) || 0) : 0;
+
+  async function simpanPO(e) {
+    e.preventDefault();
+    setMenyimpanPO(true);
+    try {
+      const res = await api.post('/api/pembelian/dari-barang-masuk', {
+        move_id: jadiPO.id,
+        order_date: jadiPO.order_date || null,
+        unit_cost: Number(jadiPO.unit_cost),
+        biaya_tambahan: Number(jadiPO.biaya_tambahan) || 0,
+        invoice_no: jadiPO.invoice_no || null,
+        note: jadiPO.catatan || null,
+      });
+      toast.success(res.message);
+      setJadiPO(null);
+      load();
+      api.get('/api/inventory/products').then((d) => setProducts(d.products)).catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMenyimpanPO(false);
     }
   }
 
@@ -179,7 +207,7 @@ export default function MutasiStok() {
                   <thead>
                     <tr>
                       <th>Tanggal</th><th>Jenis</th><th>Produk</th><th>Qty</th>
-                      <th>HPP/Unit</th><th>Nilai</th><th>Saldo Akhir</th><th>Ref</th><th>Sumber</th><th>Petugas</th>{bolehUbahHarga && <th />}
+                      <th>HPP/Unit</th><th>Nilai</th><th>Saldo Akhir</th><th>Ref</th><th>Sumber</th><th>Petugas</th>{(bolehUbahHarga || bolehJadiPO) && <th />}
                     </tr>
                   </thead>
                   <tbody>
@@ -200,9 +228,21 @@ export default function MutasiStok() {
                         <td className="text-xs">{m.ref || '-'}</td>
                         <td className="text-xs text-slate-500">{m.source}</td>
                         <td className="text-xs text-slate-500">{m.user_name || '-'}</td>
-                        {bolehUbahHarga && (
-                          <td>
-                            {m.move_type === 'IN' && m.source === 'MANUAL' && (
+                        {(bolehUbahHarga || bolehJadiPO) && (
+                          <td className="whitespace-nowrap">
+                            {bolehJadiPO && m.move_type === 'IN' && m.source === 'MANUAL' && m.partner_id
+                              && !String(m.ref || '').startsWith('PO/') && (
+                              <button
+                                type="button" className="btn-ghost !px-2 !py-1 text-xs"
+                                title="Catat barang masuk ini sebagai pesanan pembelian ke supplier-nya"
+                                onClick={() => setJadiPO({
+                                  ...m, order_date: m.move_date, biaya_tambahan: '', invoice_no: '', catatan: '',
+                                })}
+                              >
+                                <ShoppingCart size={13} /> Jadikan PO
+                              </button>
+                            )}
+                            {bolehUbahHarga && m.move_type === 'IN' && m.source === 'MANUAL' && (
                               <button
                                 type="button" className="btn-ghost !px-2 !py-1 text-xs"
                                 title="Betulkan harga barang masuk ini"
@@ -346,6 +386,71 @@ export default function MutasiStok() {
             <div className="flex gap-2 sm:col-span-2">
               <button type="button" className="btn-secondary flex-1" onClick={() => setForm(null)}>Batal</button>
               <button type="submit" className="btn-primary flex-1"><Plus size={16} /> Simpan Mutasi</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ---------- JADIKAN PESANAN PEMBELIAN ---------- */}
+      <Modal open={!!jadiPO} onClose={() => setJadiPO(null)} title="Jadikan Pesanan Pembelian">
+        {jadiPO && (
+          <form onSubmit={simpanPO} className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm sm:col-span-2">
+              <p className="font-medium text-slate-900">{jadiPO.product_name}</p>
+              <p className="text-xs text-slate-500">
+                Barang masuk {jadiPO.move_date} · {num(jadiPO.qty)} {jadiPO.unit} · {jadiPO.ref || '-'} · tercatat{' '}
+                <strong>{rupiah(jadiPO.value)}</strong>
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Supplier diambil dari barang masuk ini. Stok <strong>tidak</strong> bertambah lagi — barang
+                masuk ini yang menjadi penerimaan pesanannya.
+              </p>
+            </div>
+            <Field label="Tanggal pesanan *">
+              <input
+                type="date" className="input" required value={jadiPO.order_date}
+                onChange={(e) => setJadiPO({ ...jadiPO, order_date: e.target.value })}
+              />
+            </Field>
+            <Field label="No. faktur supplier">
+              <input
+                className="input" maxLength={60} value={jadiPO.invoice_no}
+                onChange={(e) => setJadiPO({ ...jadiPO, invoice_no: e.target.value })}
+              />
+            </Field>
+            <Field label="Harga per unit dari pabrik *">
+              <input
+                type="number" min="0" step="any" className="input" required value={jadiPO.unit_cost}
+                onChange={(e) => setJadiPO({ ...jadiPO, unit_cost: e.target.value })}
+              />
+            </Field>
+            <Field label="Ongkir / biaya tambahan (total)" hint="Dibagi rata ke seluruh qty">
+              <input
+                type="number" min="0" step="any" className="input" value={jadiPO.biaya_tambahan} placeholder="0"
+                onChange={(e) => setJadiPO({ ...jadiPO, biaya_tambahan: e.target.value })}
+              />
+            </Field>
+            <Field label="Catatan" className="sm:col-span-2">
+              <input
+                className="input" maxLength={200} value={jadiPO.catatan}
+                placeholder="mis. Transfer ke FRASIANTO PRIHADI, DP 17/08 + pelunasan 20/08"
+                onChange={(e) => setJadiPO({ ...jadiPO, catatan: e.target.value })}
+              />
+            </Field>
+            <div className="rounded-xl bg-brand-50 p-3 text-xs leading-relaxed text-brand-800 sm:col-span-2">
+              Total pesanan <strong>{rupiah(nilaiPOBaru)}</strong>
+              {jadiPO.qty > 0 && <> ({rupiah(nilaiPOBaru / jadiPO.qty)}/{jadiPO.unit})</>}
+              {Math.abs(nilaiPOBaru - jadiPO.value) >= 0.01 && (
+                <>, harga dibetulkan dari {rupiah(jadiPO.value)} — utang supplier dan HPP ikut menyesuaikan.
+                  Bila pembayarannya sudah tercatat lebih besar dari nilai baru, hapus dulu pembayaran yang
+                  salah di Utang & Piutang → Transaksi.</>
+              )}
+            </div>
+            <div className="flex gap-2 sm:col-span-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setJadiPO(null)}>Batal</button>
+              <button type="submit" className="btn-primary flex-1" disabled={menyimpanPO}>
+                {menyimpanPO ? 'Menyimpan...' : 'Buat Pesanan Pembelian'}
+              </button>
             </div>
           </form>
         )}

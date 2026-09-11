@@ -5932,6 +5932,75 @@ async function main() {
   check('neraca saldo tetap seimbang', tb58.balanced === true);
 
 
+  console.log('\n59. Barang masuk lama dijadikan pesanan pembelian');
+
+  const cap59 = Date.now();
+  const sup59 = await call('POST', '/api/partners', {
+    name: `Supplier Jadi PO ${cap59}`, kind: 'SUPPLIER', phone: '0812000599', address: 'Jl. Uji 59',
+  });
+  const idSup59 = (sup59.partner || sup59).id;
+  const prod59 = (await call('POST', '/api/inventory/products', {
+    sku: `P59-${cap59}`, name: 'Produk Uji Jadi PO', cost: 0, price: 30000,
+  })).product;
+  const masuk59 = (await call('POST', '/api/inventory/moves', {
+    product_id: prod59.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 20000, payment: 'CREDIT', partner_id: idSup59, ref: 'BARANG MASUK IMPOR',
+  })).move;
+  const stok59 = async () => (await call('GET', `/api/inventory/products?q=P59-${cap59}`)).products[0].stock;
+  const utang59 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((r) => r.id === idSup59) || {}).utang || 0);
+  };
+  const bayarSalah59 = await call('POST', '/api/cashflow/settlements', {
+    entry_date: today, partner_id: idSup59, direction: 'PAY', amount: 200000, cash_code: '1000',
+  });
+
+  const permintaan59 = {
+    move_id: masuk59.id, order_date: today, unit_cost: 12000, biaya_tambahan: 5000,
+    invoice_no: `INV-59-${cap59}`, note: 'Harga asli pabrik + ongkir',
+  };
+  let tolakMinus59 = 0;
+  try { await call('POST', '/api/pembelian/dari-barang-masuk', permintaan59); }
+  catch (err) { tolakMinus59 = err.status; }
+  check('ditolak selama pembayaran salah membuat utang minus', tolakMinus59 === 422);
+  const poGagal59 = await call('GET', `/api/pembelian?from=${today}&to=${today}&partner_id=${idSup59}`);
+  check('penolakan tidak meninggalkan pesanan setengah jadi', poGagal59.rows.length === 0);
+
+  await call('DELETE', `/api/cashflow/settlements/${bayarSalah59.journal.id}`);
+  const jadi59 = await call('POST', '/api/pembelian/dari-barang-masuk', permintaan59);
+  check('pesanan pembelian terbentuk berstatus Selesai untuk supplier-nya',
+    jadi59.po.status === 'SELESAI' && jadi59.po.partner_id === idSup59 && near(jadi59.po.total, 125000, 1),
+    JSON.stringify({ s: jadi59.po.status, t: jadi59.po.total }));
+  check('stok tidak bertambah lagi', (await stok59()) === 10, String(await stok59()));
+  check('utang supplier mengikuti nilai pesanan', near(await utang59(), 125000, 1), String(await utang59()));
+  const mutasi59 = (await call('GET', `/api/inventory/moves?from=${today}&to=${today}&product_id=${prod59.id}`))
+    .rows.find((m) => m.id === masuk59.id);
+  check('barang masuknya kini bernomor pesanan', mutasi59.ref === jadi59.po.po_no, mutasi59.ref);
+
+  let tolakDua59 = 0;
+  try { await call('POST', '/api/pembelian/dari-barang-masuk', { move_id: masuk59.id }); }
+  catch (err) { tolakDua59 = err.status; }
+  check('barang masuk yang sama tidak bisa dijadikan pesanan dua kali', tolakDua59 === 409);
+
+  const tanpaMitra59 = (await call('POST', '/api/inventory/moves', {
+    product_id: prod59.id, move_date: today, move_type: 'IN', qty: 1, unit_cost: 12500,
+    payment: 'OPENING',
+  })).move;
+  let tolakTanpa59 = 0;
+  try { await call('POST', '/api/pembelian/dari-barang-masuk', { move_id: tanpaMitra59.id }); }
+  catch (err) { tolakTanpa59 = err.status; }
+  check('barang masuk tanpa supplier ditolak', tolakTanpa59 === 422);
+
+  for (const n of [62500, 62500]) {
+    await call('POST', '/api/cashflow/settlements', {
+      entry_date: today, partner_id: idSup59, direction: 'PAY', amount: n, cash_code: '1000',
+    });
+  }
+  check('dua pembayaran yang benar melunasi pesanannya', near(await utang59(), 0, 1));
+  const tb59 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb59.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
