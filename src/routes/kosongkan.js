@@ -349,11 +349,13 @@ const NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Jul
   'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
 /** Membawa utang/piutang mitra yang terbentuk di bulan ini sebagai saldo awal. */
-function bawaSaldoMitra(rencana, userId) {
+function bawaSaldoMitra(rencana, userId, mitraDibawa) {
   const [y, m, d] = rencana.to.split('-');
   const per = `${Number(d)} ${NAMA_BULAN[Number(m) - 1]} ${y}`;
   let n = 0;
   for (const s of rencana.saldoMitra) {
+    // Mitra yang tidak dicentang: utangnya ikut hilang bersama bulan itu.
+    if (mitraDibawa && !mitraDibawa.includes(s.partner_id)) continue;
     const nilai = Math.abs(s.nilai);
     const utang = s.subtype === 'PAYABLE';
     // Utang: Modal (D) lawan Utang mitra (K). Piutang: Piutang mitra (D) lawan Modal (K).
@@ -412,7 +414,7 @@ const jalankan = db.transaction((rencana, opsi) => {
     }
   }
 
-  const saldoAwal = opsi.bawaSaldoMitra ? bawaSaldoMitra(rencana, opsi.userId) : 0;
+  const saldoAwal = opsi.bawaSaldoMitra ? bawaSaldoMitra(rencana, opsi.userId, opsi.mitraDibawa) : 0;
   return { jurnal, saldoAwal };
 });
 
@@ -423,6 +425,8 @@ const schema = z.object({
   // Bawaan: utang/piutang mitra yang terbentuk bulan ini dibawa sebagai saldo
   // awal, supaya pembayaran di bulan berikutnya tetap punya utang yang dilunasi.
   bawa_saldo_mitra: z.boolean().default(true),
+  // Pilihan per mitra. Kosong/tidak dikirim = semua mitra dibawa.
+  mitra_dibawa: z.array(z.number().int().positive()).optional(),
 });
 
 router.post('/', ah(async (req, res) => {
@@ -445,7 +449,7 @@ router.post('/', ah(async (req, res) => {
   // Cadangan dulu. Kalau cadangan gagal, penghapusan tidak dijalankan.
   const cadangan = await buatCadangan('manual');
 
-  const hasilJalan = jalankan(rencana, { bawaSaldoMitra: body.bawa_saldo_mitra, userId: req.user.id });
+  const hasilJalan = jalankan(rencana, { bawaSaldoMitra: body.bawa_saldo_mitra, mitraDibawa: body.mitra_dibawa, userId: req.user.id });
   const r = hasil.ringkas;
   res.json({
     ok: true,

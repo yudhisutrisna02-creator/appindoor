@@ -26,12 +26,14 @@ export default function KosongkanBulan({ onSelesai }) {
   const [hasil, setHasil] = useState(null);
   const [memeriksa, setMemeriksa] = useState(false);
   const [konfirmasi, setKonfirmasi] = useState('');
-  const [bawaSaldo, setBawaSaldo] = useState(true);
+  // Mitra yang utang/piutangnya TIDAK dibawa sebagai saldo awal (bawaan: semua dibawa).
+  const [lepas, setLepas] = useState([]);
   const [menghapus, setMenghapus] = useState(false);
 
   async function periksa() {
     setMemeriksa(true);
     setKonfirmasi('');
+    setLepas([]);
     try {
       setHasil(await api.post('/api/kosongkan-bulan', { bulan }));
     } catch (err) {
@@ -45,7 +47,8 @@ export default function KosongkanBulan({ onSelesai }) {
     setMenghapus(true);
     try {
       const res = await api.post('/api/kosongkan-bulan', {
-        bulan, terapkan: true, konfirmasi, bawa_saldo_mitra: bawaSaldo,
+        bulan, terapkan: true, konfirmasi, bawa_saldo_mitra: true,
+        mitra_dibawa: [...new Set((hasil?.saldoMitra || []).map((x) => x.partner_id))].filter((id) => !lepas.includes(id)),
       });
       toast.success(res.message);
       setHasil(null);
@@ -127,18 +130,28 @@ export default function KosongkanBulan({ onSelesai }) {
 
           {hasil.saldoMitra.length > 0 && (
             <div className="rounded-xl bg-slate-50 p-3 text-xs">
-              <label className="flex items-start gap-2">
-                <input type="checkbox" className="mt-0.5" checked={bawaSaldo} onChange={(e) => setBawaSaldo(e.target.checked)} />
-                <span>
-                  <strong>Bawa sisa utang/piutang mitra sebagai saldo awal</strong> (disarankan). Pembayaran di
-                  bulan berikutnya sering melunasi utang bulan ini; tanpa saldo awal utangnya menjadi minus.
-                </span>
-              </label>
-              <ul className="mt-2 space-y-0.5 pl-6">
+              <p>
+                <strong>Sisa utang/piutang mitra yang dibawa sebagai saldo awal.</strong> Yang dicentang tetap
+                tercatat di bulan berikutnya; yang tidak dicentang ikut terhapus. Hapus centangnya hanya bila
+                pembayarannya di bulan berikutnya juga akan dihapus — kalau tidak, utangnya menjadi minus.
+              </p>
+              <ul className="mt-2 space-y-1">
                 {hasil.saldoMitra.map((s) => (
-                  <li key={`${s.partner_id}-${s.account_id}`} className="flex justify-between gap-3">
-                    <span>{s.jenis} {s.name}</span>
-                    <span className="tabular font-medium">{rupiah(s.nilai)}</span>
+                  <li key={`${s.partner_id}-${s.account_id}`}>
+                    <label className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox" checked={!lepas.includes(s.partner_id)}
+                          onChange={(e) => setLepas(e.target.checked
+                            ? lepas.filter((id) => id !== s.partner_id)
+                            : [...lepas, s.partner_id])}
+                        />
+                        {s.jenis} {s.name}
+                      </span>
+                      <span className={`tabular font-medium ${lepas.includes(s.partner_id) ? 'text-slate-400 line-through' : ''}`}>
+                        {rupiah(s.nilai)}
+                      </span>
+                    </label>
                   </li>
                 ))}
               </ul>

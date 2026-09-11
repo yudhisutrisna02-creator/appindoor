@@ -5814,6 +5814,46 @@ async function main() {
   check('neraca saldo tetap seimbang setelah dikosongkan', tb56.balanced === true);
 
 
+  console.log('\n57. Kosongkan bulan: saldo awal dipilih per mitra');
+
+  const cap57 = Date.now();
+  const bulan57 = `${Number(today.slice(0, 4)) - 1}-05`;
+  const buatSup57 = async (nama) => {
+    const x = await call('POST', '/api/partners', {
+      name: `${nama} ${cap57}`, kind: 'SUPPLIER', phone: '0812000577', address: 'Jl. Uji 57',
+    });
+    return (x.partner || x).id;
+  };
+  const supA57 = await buatSup57('Supplier Dibawa');
+  const supB57 = await buatSup57('Supplier Dilepas');
+  const prod57 = (await call('POST', '/api/inventory/products', {
+    sku: `P57-${cap57}`, name: 'Produk Uji Pilih Mitra', cost: 0, price: 20000,
+  })).product;
+  for (const [sup, qty] of [[supA57, 5], [supB57, 3]]) {
+    await call('POST', '/api/inventory/moves', {
+      product_id: prod57.id, move_date: `${bulan57}-07`, move_type: 'IN',
+      qty, unit_cost: 10000, payment: 'CREDIT', partner_id: sup,
+    });
+  }
+  const utang57 = async (id) => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang].find((r) => r.id === id) || {}).utang || 0);
+  };
+
+  const lihat57 = await call('POST', '/api/kosongkan-bulan', { bulan: bulan57 });
+  check('kedua mitra ditawarkan untuk dibawa',
+    [supA57, supB57].every((id) => lihat57.saldoMitra.some((s) => s.partner_id === id)));
+  await call('POST', '/api/kosongkan-bulan', {
+    bulan: bulan57, terapkan: true, konfirmasi: lihat57.ringkas.kataKunci, mitra_dibawa: [supA57],
+  });
+  check('utang mitra yang dicentang tetap ada sebagai saldo awal', near(await utang57(supA57), 50000, 1),
+    String(await utang57(supA57)));
+  check('utang mitra yang tidak dicentang ikut terhapus', near(await utang57(supB57), 0, 1),
+    String(await utang57(supB57)));
+  const tb57 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb57.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

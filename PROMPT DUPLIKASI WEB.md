@@ -570,7 +570,8 @@ status sendiri (mis. PAYROLL), PO yang penerimaannya di bulan lain, mutasi
 penjualan/retur yang tidak terhubung ke order bulan itu.
 
 Utang/piutang mitra yang TERBENTUK di bulan itu dibawa sebagai jurnal `AWAL`
-tertanggal akhir bulan (Modal lawan Utang/Piutang mitra) — tanpa ini,
+tertanggal akhir bulan (Modal lawan Utang/Piutang mitra), dipilih per mitra
+(`mitra_dibawa`; bawaan semua) — tanpa ini,
 pembayaran di bulan berikutnya untuk utang bulan itu membuat utang minus.
 Pratinjau memperingatkan dana marketplace yang belum cair (tidak akan
 tercatat saat masuk), retur bulan lain yang ikut terhapus, dan produk yang
@@ -824,7 +825,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 828 pemeriksaan, 56 bagian
+npm run smoke            # 832 pemeriksaan, 57 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
