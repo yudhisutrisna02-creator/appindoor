@@ -113,6 +113,29 @@ async function main() {
   token = login.token;
   check('login admin berhasil', !!token);
 
+  // ---------- PENJAGA: hanya boleh berjalan pada database kosong ----------
+  //
+  // Uji ini menulis ratusan produk, order, jurnal, dan akun tiruan. Dijalankan
+  // pada database yang sudah berisi data sungguhan, semua itu tercampur ke
+  // dalamnya dan tidak bisa dipisahkan lagi — ini benar-benar pernah terjadi
+  // pada salinan lokal, dan angka-angkanya sempat dipakai untuk menganalisis
+  // data pemilik usaha. Aturan "selalu pada database kosong" sudah tertulis
+  // sejak awal; sekarang ditegakkan, bukan hanya ditulis. Penjagaan ini juga
+  // yang mencegah uji diarahkan ke server produksi lewat SMOKE_BASE_URL.
+  const isiProduk = (await call('GET', '/api/inventory/products?limit=1')).products || [];
+  const isiOrder = (await call('GET', '/api/sales?from=2000-01-01&to=2099-12-31&limit=1')).summary;
+  if (isiProduk.length > 0 || (isiOrder && isiOrder.orders > 0)) {
+    console.error(
+      '\nDIHENTIKAN: database di ' + BASE + ' sudah berisi data ' +
+      `(${isiProduk.length ? 'ada produk' : ''}${isiProduk.length && isiOrder.orders ? ', ' : ''}` +
+      `${isiOrder && isiOrder.orders ? isiOrder.orders + ' order' : ''}).\n` +
+      'Uji asap hanya boleh dijalankan pada database KOSONG yang baru dibuat,\n' +
+      'dengan berkas database dan folder cadangan di luar folder data/ proyek.\n' +
+      'Contoh: DATABASE_URL=file:/tmp/uji.db BACKUP_DIR=/tmp/uji-cadangan node server.js\n'
+    );
+    process.exit(2);
+  }
+
   let rejected = false;
   try {
     await call('POST', '/api/auth/login', { email: login.user.email, password: 'salah-total' });
@@ -5438,6 +5461,49 @@ async function main() {
   check('tim tanpa izin batal tidak bisa menghapus satu periode',
     tolakIzin52 === 403, `status ${tolakIzin52}`);
   token = adminAkun;
+
+
+  console.log('\n53. Barang masuk dibayar dari rekening tertentu');
+
+  const cap53 = Date.now();
+  const saldo53 = async (kode) => {
+    const tb53 = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b53 = (tb53.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b53.debit || 0) - (b53.credit || 0));
+  };
+
+  const rek53 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BRI UJI BELI 333-${cap53}`], mulai_kode: '1800',
+  })).dibuat[0].code;
+  const prod53 = (await call('POST', '/api/inventory/products', {
+    sku: `P53-${cap53}`, name: 'Produk Uji Beli Rekening', cost: 0, price: 50000,
+  })).product;
+
+  const kasSblm53 = await saldo53('1000');
+  const bankSblm53 = await saldo53('1010');
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod53.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 20000, payment: 'BANK', cash_code: rek53,
+  });
+
+  // Pembelian yang dibayar transfer dari rekening tertentu harus mengurangi
+  // rekening itu — bukan Kas Tunai, dan bukan Bank Operasional.
+  check('barang masuk mengurangi rekening yang dipilih',
+    near(await saldo53(rek53), -200000, 1), String(await saldo53(rek53)));
+  check('kas tunai tidak ikut terpotong oleh pembelian lewat rekening',
+    near((await saldo53('1000')) - kasSblm53, 0, 1));
+  check('bank operasional tidak ikut terpotong',
+    near((await saldo53('1010')) - bankSblm53, 0, 1));
+
+  let tolakBukanKas53 = 0;
+  try {
+    await call('POST', '/api/inventory/moves', {
+      product_id: prod53.id, move_date: today, move_type: 'IN',
+      qty: 1, unit_cost: 20000, payment: 'BANK', cash_code: '4000',
+    });
+  } catch (err) { tolakBukanKas53 = err.status; }
+  check('akun non-kas ditolak sebagai sumber dana pembelian', tolakBukanKas53 === 422,
+    `status ${tolakBukanKas53}`);
 
 
   // ---------- Hasil ----------

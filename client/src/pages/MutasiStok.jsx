@@ -7,6 +7,9 @@ import { rupiah, num, today } from '../lib/format';
 const TYPE_BADGE = { IN: 'badge-green', OUT: 'badge-red', ADJ: 'badge-amber' };
 const TYPE_LABEL = { IN: 'Masuk', OUT: 'Keluar', ADJ: 'Koreksi' };
 
+/** Kode Kas Tunai pada bagan akun bawaan. */
+const KODE_KAS_TUNAI = '1000';
+
 export default function MutasiStok() {
   const toast = useToast();
   const [range, setRange] = useState(defaultRange);
@@ -14,6 +17,7 @@ export default function MutasiStok() {
   const [data, setData] = useState(null);
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [rekening, setRekening] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
 
@@ -34,6 +38,7 @@ export default function MutasiStok() {
   useEffect(() => {
     api.get('/api/inventory/products').then((d) => setProducts(d.products)).catch(() => {});
     api.get('/api/partners', { kind: 'SUPPLIER' }).then((d) => setSuppliers(d.partners)).catch(() => {});
+    api.get('/api/cashflow/options').then((d) => setRekening(d.cashAccounts || [])).catch(() => {});
   }, []);
 
   function openForm(type) {
@@ -45,7 +50,11 @@ export default function MutasiStok() {
       unit_cost: '',
       batch_kode: '',
       batch_kadaluarsa: '',
-      payment: 'CASH',
+      // Sengaja KOSONG. Dulu terisi Kas Tunai, sehingga setiap pembelian yang
+      // sebenarnya dibayar transfer tercatat mengurangi uang tunai di laci —
+      // itulah asal saldo Kas Tunai yang minus. Sekarang harus dipilih sendiri.
+      cara: '',
+      cash_code: '',
       partner_id: '',
       ref: '',
       note: '',
@@ -53,6 +62,19 @@ export default function MutasiStok() {
   }
 
   const selected = products.find((p) => p.id === Number(form?.product_id));
+
+  /**
+   * Cara bayar pembelian stok, diterjemahkan ke bentuk yang dipahami peladen.
+   *
+   * "Dibayar dari rekening" selalu membawa rekening yang dipilih — Kas Tunai
+   * hanyalah salah satu rekening di daftar, bukan pilihan bawaan.
+   */
+  function sumberDana() {
+    if (form.cara === 'REKENING') {
+      return { payment: form.cash_code === KODE_KAS_TUNAI ? 'CASH' : 'BANK', cash_code: form.cash_code };
+    }
+    return { payment: form.cara };
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -62,7 +84,7 @@ export default function MutasiStok() {
         move_date: form.move_date,
         move_type: form.move_type,
         qty: Number(form.qty),
-        payment: form.payment,
+        ...(form.move_type === 'IN' ? sumberDana() : {}),
         partner_id: form.partner_id ? Number(form.partner_id) : null,
         ref: form.ref || null,
         note: form.note || null,
@@ -233,12 +255,31 @@ export default function MutasiStok() {
             )}
 
             {form.move_type === 'IN' && (
-              <Field label="Sumber Dana" className="sm:col-span-2">
-                <select className="input" value={form.payment} onChange={(e) => setForm({ ...form, payment: e.target.value })}>
-                  <option value="CASH">Kas Tunai</option>
-                  <option value="BANK">Bank / Transfer</option>
+              <Field
+                label="Cara Bayar *"
+                hint="Menentukan uang siapa yang berkurang — pilih sesuai kenyataannya"
+                className={form.cara === 'REKENING' ? '' : 'sm:col-span-2'}
+              >
+                <select
+                  className="input" required value={form.cara}
+                  onChange={(e) => setForm({ ...form, cara: e.target.value, cash_code: '' })}
+                >
+                  <option value="">— pilih cara bayar —</option>
+                  <option value="REKENING">Dibayar dari rekening / kas</option>
                   <option value="CREDIT">Utang Supplier (tempo)</option>
                   <option value="OPENING">Saldo Awal (modal pemilik)</option>
+                </select>
+              </Field>
+            )}
+
+            {form.move_type === 'IN' && form.cara === 'REKENING' && (
+              <Field label="Dibayar dari *" hint="Rekening yang benar-benar dipakai membayar">
+                <select
+                  className="input" required value={form.cash_code}
+                  onChange={(e) => setForm({ ...form, cash_code: e.target.value })}
+                >
+                  <option value="">— pilih rekening —</option>
+                  {rekening.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
                 </select>
               </Field>
             )}

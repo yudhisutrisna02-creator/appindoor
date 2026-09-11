@@ -752,7 +752,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 773 pemeriksaan, 52 bagian
+npm run smoke            # 777 pemeriksaan, 53 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1211,6 +1211,9 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Membatalkan order yang sudah punya retur tanpa membalik returnya | Barang yang sudah kembali lewat retur dikembalikan lagi oleh pembatalan — stok terhitung dua kali — dan jurnal retur mengurangi pendapatan dari penjualan yang sudah tidak ada |
 | Tombol hapus massal yang langsung bekerja | Harus dua langkah: periksa akibatnya dulu (stok, saldo rekening, laba rugi), lalu ketik ulang jumlah ordernya |
 | Formulir ubah mengisi rekening dari toko saat dibuka | Membetulkan resi diam-diam memindahkan uang ke rekening lain; isi otomatis hanya saat tokonya diganti atau lewat tombol yang ditekan sendiri |
+| Formulir pembelian stok memilih Kas Tunai secara bawaan | Setiap pembelian yang dibayar transfer tercatat mengurangi uang tunai di laci; saldo Kas Tunai minus tanpa ada uang yang benar-benar hilang. Cara bayar harus dipilih sendiri |
+| Uji asap dijalankan pada database yang sudah berisi data | Ratusan produk, order, dan jurnal tiruan tercampur ke data sungguhan dan tidak bisa dipisahkan lagi — sempat dipakai menganalisis data pemilik usaha. Uji kini berhenti sendiri bila databasenya tidak kosong |
+| Database uji diletakkan di dalam folder data/ proyek | Cadangan otomatis tersimpan di sebelah databasenya, jadi cadangan hasil uji ikut bercampur dengan cadangan sungguhan. Letakkan database, cadangan, dan unggahan uji di folder sementara |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---
