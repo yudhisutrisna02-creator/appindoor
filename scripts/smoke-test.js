@@ -5854,6 +5854,84 @@ async function main() {
   check('neraca saldo tetap seimbang', tb57.balanced === true);
 
 
+  console.log('\n58. Transaksi utang & piutang: daftar per tanggal, ubah, hapus');
+
+  const cap58 = Date.now();
+  const rek58 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI TRANSAKSI 588-${cap58}`], mulai_kode: '1890',
+  })).dibuat[0].code;
+  const sup58 = await call('POST', '/api/partners', {
+    name: `Supplier Transaksi ${cap58}`, kind: 'SUPPLIER', phone: '0812000588', address: 'Jl. Uji 58',
+  });
+  const idSup58 = (sup58.partner || sup58).id;
+  const prod58 = (await call('POST', '/api/inventory/products', {
+    sku: `P58-${cap58}`, name: 'Produk Uji Transaksi Mitra', cost: 0, price: 20000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod58.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 10000, payment: 'CREDIT', partner_id: idSup58,
+  });
+  const bayar58 = await call('POST', '/api/cashflow/settlements', {
+    entry_date: today, partner_id: idSup58, direction: 'PAY', amount: 100000, cash_code: '1000',
+  });
+  const utang58 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((r) => r.id === idSup58) || {}).utang || 0);
+  };
+
+  const daftar58 = await call('GET',
+    `/api/cashflow/transaksi-mitra?from=${today}&to=${today}&partner_id=${idSup58}`);
+  const barisBayar58 = daftar58.rows.find((r) => r.journal_id === bayar58.journal.id);
+  const barisStok58 = daftar58.rows.find((r) => r.source === 'STOCK');
+  check('pelunasan muncul di daftar transaksi menurut tanggal',
+    !!barisBayar58 && barisBayar58.arah === 'BERKURANG' && near(barisBayar58.nominal, 100000, 1)
+      && barisBayar58.cash_code === '1000', JSON.stringify(barisBayar58));
+  check('pelunasan bisa diubah dan dihapus', barisBayar58.bisaUbah && barisBayar58.bisaHapus);
+  check('utang dari barang masuk tampil tetapi tidak bisa dihapus dari sini',
+    !!barisStok58 && barisStok58.arah === 'BERTAMBAH' && !barisStok58.bisaHapus);
+  const cari58 = await call('GET', `/api/cashflow/transaksi-mitra?from=${today}&to=${today}&q=${encodeURIComponent(`Transaksi ${cap58}`)}`);
+  check('pencarian nama mitra menemukan transaksinya', cari58.rows.length >= 2);
+
+  const ubah58 = await call('PUT', `/api/cashflow/settlements/${bayar58.journal.id}`, {
+    entry_date: today, amount: 60000, cash_code: rek58, note: 'Dibetulkan',
+  });
+  check('nominal & rekening pelunasan bisa diubah; nomor jurnal tetap',
+    ubah58.journal.entry_no === bayar58.journal.entry_no, JSON.stringify(ubah58.journal));
+  check('sisa utang ikut menyesuaikan', near(await utang58(), 40000, 1), String(await utang58()));
+  const ssdh58 = (await call('GET',
+    `/api/cashflow/transaksi-mitra?from=${today}&to=${today}&partner_id=${idSup58}`)).rows
+    .find((r) => r.source === 'SETTLEMENT');
+  check('rekening baru tercatat pada pelunasan', ssdh58 && ssdh58.cash_code === rek58);
+
+  let tolakLebih58 = 0;
+  try {
+    await call('PUT', `/api/cashflow/settlements/${ubah58.journal.id}`, {
+      entry_date: today, amount: 150000, cash_code: rek58,
+    });
+  } catch (err) { tolakLebih58 = err.status; }
+  check('nominal melebihi utang ditolak', tolakLebih58 === 422);
+
+  let tolakStok58 = 0;
+  try { await call('DELETE', `/api/cashflow/settlements/${barisStok58.journal_id}`); }
+  catch (err) { tolakStok58 = err.status; }
+  check('jurnal barang masuk tidak bisa dihapus lewat Utang & Piutang', tolakStok58 === 422);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakIzin58 = 0;
+  try { await call('DELETE', `/api/cashflow/settlements/${ubah58.journal.id}`); }
+  catch (err) { tolakIzin58 = err.status; }
+  check('tim tanpa izin kas tidak bisa menghapus pelunasan', tolakIzin58 === 403, `status ${tolakIzin58}`);
+  token = adminAkun;
+
+  await call('DELETE', `/api/cashflow/settlements/${ubah58.journal.id}`);
+  check('pelunasan terhapus; utang kembali terbuka penuh', near(await utang58(), 100000, 1),
+    String(await utang58()));
+  const ap58 = await call('GET', '/api/cashflow/ar-ap');
+  check('daftar utang & piutang membawa daftar lebih bayar', Array.isArray(ap58.lebihBayar));
+  const tb58 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb58.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

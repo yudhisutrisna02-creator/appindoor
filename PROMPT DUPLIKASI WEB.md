@@ -552,6 +552,18 @@ dibayar dua kali transfer dari BCA. Tiga langkah, urutannya penting:
 3. **Catat ulang pembayaran yang benar** di Utang & Piutang dengan tanggal dan
    rekening sesuai rekening koran.
 
+### Transaksi Utang & Piutang (tab Transaksi)
+
+Daftar per mitra hanya memuat mitra yang MASIH punya saldo, sehingga pembayaran
+yang salah pada mitra bersaldo nol/minus tidak bisa dijangkau. Tab Transaksi
+menampilkan semua jurnal utang/piutang menurut rentang tanggal (cari mitra /
+no. jurnal, filter jenis, ekspor). `GET /api/cashflow/transaksi-mitra`;
+`PUT /api/cashflow/settlements/:id` (tanggal, nominal ≤ sisa + nominal lama,
+rekening, catatan; nomor tetap bila bulannya sama) dan
+`DELETE /api/cashflow/settlements/:id` (hanya SETTLEMENT/AWAL), izin
+`keuangan.kas`, ditolak bila sudah direkonsiliasi. `ar-ap` juga membawa
+`lebihBayar` (saldo minus) yang ditampilkan sebagai peringatan.
+
 ### Kosongkan Satu Bulan (Sistem → Cadangan)
 
 Untuk memulai bersih dari bulan berikutnya ketika data sebuah bulan sudah
@@ -825,7 +837,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 832 pemeriksaan, 57 bagian
+npm run smoke            # 845 pemeriksaan, 58 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

@@ -166,6 +166,26 @@ function deleteJournalsBySource(source, sourceId) {
  * Pemeriksaan kunci periodenya tetap sama, supaya jalur ini tidak menjadi
  * celah untuk mengubah bulan yang sudah ditutup.
  */
+/**
+ * Baris jurnal yang sudah dipasangkan dengan rekening koran adalah bukti bahwa
+ * uang itu memang lewat rekening tersebut. Mengubah atau menghapusnya diam-diam
+ * akan memutus pasangan itu, jadi pasangannya harus dilepas dulu dengan sadar.
+ */
+function tolakBilaTerekonsiliasi(j) {
+  const terpasang = db
+    .prepare(
+      `SELECT COUNT(*) n FROM bank_statement_lines
+        WHERE journal_line_id IN (SELECT id FROM journal_lines WHERE journal_id = ?)`
+    )
+    .get(j.id).n;
+  if (terpasang) {
+    throw ruleError(
+      `${j.entry_no} sudah dicocokkan dengan rekening koran di Rekonsiliasi Bank. ` +
+        'Lepaskan pasangannya di sana dulu bila memang salah.'
+    );
+  }
+}
+
 function deleteJournalById(id) {
   const j = db.prepare('SELECT id, entry_no, entry_date FROM journals WHERE id = ?').get(id);
   if (!j) return 0;
@@ -263,6 +283,7 @@ module.exports = {
   postJournal,
   deleteJournalsBySource,
   deleteJournalById,
+  tolakBilaTerekonsiliasi,
   buildSalesJournalLines,
   pastikanTerbuka,
 };

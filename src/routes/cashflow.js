@@ -13,7 +13,9 @@ const { z } = require('zod');
 const { db } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, ACC, postJournal, deleteJournalsBySource, deleteJournalById, accountByCode } = require('../utils/accounting');
+const {
+  r2, ACC, postJournal, deleteJournalsBySource, deleteJournalById, accountByCode, tolakBilaTerekonsiliasi,
+} = require('../utils/accounting');
 const { todayLocal } = require('../utils/time');
 
 const router = express.Router();
@@ -614,10 +616,15 @@ function ambilUtangPiutang() {
 
   const piutang = rows.filter((r) => r.piutang > 0.004);
   const utang = rows.filter((r) => r.utang > 0.004);
+  // Saldo minus (lebih bayar) tidak masuk kedua daftar di atas, tetapi harus
+  // tetap kelihatan — kalau tidak, mitranya hilang dari layar dan pembayaran
+  // yang salah tidak bisa dijangkau untuk dibetulkan.
+  const lebihBayar = rows.filter((r) => r.utang < -0.004 || r.piutang < -0.004);
 
   return {
     piutang,
     utang,
+    lebihBayar,
     totalPiutang: r2(piutang.reduce((s, r) => s + r.piutang, 0)),
     totalUtang: r2(utang.reduce((s, r) => s + r.utang, 0)),
   };
@@ -716,6 +723,199 @@ router.post('/settlements', butuhIzin('keuangan.kas'), ah((req, res) => {
     sisa: r2(lawan.saldo - nilai),
     journal,
   });
+}));
+
+// ==================================================================
+// TRANSAKSI UTANG & PIUTANG — daftar per tanggal, ubah, hapus
+// ==================================================================
+const LABEL_TRANSAKSI = {
+  SETTLEMENT: 'Pelunasan', AWAL: 'Saldo awal', STOCK: 'Barang masuk', SALES: 'Penjualan',
+  PURCHASE_RETURN: 'Retur pembelian', RETURN: 'Retur penjualan', CASH: 'Kas masuk/keluar',
+  MANUAL: 'Jurnal manual', PAYROLL: 'Penggajian', ADS: 'Iklan',
+};
+// Hanya jurnal yang dokumennya adalah jurnal itu sendiri. Utang dari barang
+// masuk atau pesanan pembelian dibetulkan lewat dokumen asalnya.
+const BISA_HAPUS_MITRA = new Set(['SETTLEMENT', 'AWAL']);
+
+/**
+ * Pengambil transaksi utang/piutang — satu baris per jurnal per mitra.
+ * Kolom arah: bertambah = utang/piutang bertambah, berkurang = dilunasi.
+ */
+function ambilTransaksiMitra(req) {
+  const { from, to } = dateRange(req.query);
+  const params = [from, to];
+  let where = `WHERE j.posted = 1 AND j.entry_date BETWEEN ? AND ?
+                 AND a.subtype IN ('PAYABLE', 'RECEIVABLE')`;
+  if (req.query.partner_id) { where += ' AND l.partner_id = ?'; params.push(Number(req.query.partner_id)); }
+  if (req.query.jenis === 'utang') where += " AND a.subtype = 'PAYABLE'";
+  if (req.query.jenis === 'piutang') where += " AND a.subtype = 'RECEIVABLE'";
+  if (req.query.q) {
+    where += ' AND (p.name LIKE ? OR j.entry_no LIKE ? OR j.description LIKE ?)';
+    const q = `%${req.query.q}%`;
+    params.push(q, q, q);
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT j.id AS journal_id, j.entry_no, j.entry_date, j.description, j.source,
+              p.id AS partner_id, p.name AS partner_name, a.subtype,
+              SUM(l.debit) AS debit, SUM(l.credit) AS credit,
+              MAX(l.memo) AS memo,
+              (SELECT k.code || ' — ' || k.name
+                 FROM journal_lines lk JOIN accounts k ON k.id = lk.account_id
+                WHERE lk.journal_id = j.id AND k.is_cash = 1 LIMIT 1) AS rekening,
+              (SELECT k.code
+                 FROM journal_lines lk JOIN accounts k ON k.id = lk.account_id
+                WHERE lk.journal_id = j.id AND k.is_cash = 1 LIMIT 1) AS cash_code
+         FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+         JOIN accounts a ON a.id = l.account_id
+         JOIN partners p ON p.id = l.partner_id
+         ${where}
+        GROUP BY j.id, p.id, a.subtype
+        ORDER BY j.entry_date DESC, j.id DESC
+        LIMIT 2000`
+    )
+    .all(...params)
+    .map((r) => {
+      const utang = r.subtype === 'PAYABLE';
+      const bertambah = r2(utang ? r.credit - r.debit : r.debit - r.credit);
+      return {
+        ...r,
+        jenis: utang ? 'Utang' : 'Piutang',
+        label: LABEL_TRANSAKSI[r.source] || r.source,
+        nominal: Math.abs(bertambah),
+        arah: bertambah >= 0 ? 'BERTAMBAH' : 'BERKURANG',
+        bisaHapus: BISA_HAPUS_MITRA.has(r.source),
+        bisaUbah: r.source === 'SETTLEMENT',
+      };
+    });
+
+  return { from, to, rows };
+}
+
+router.get('/transaksi-mitra', ah((req, res) => res.json(ambilTransaksiMitra(req))));
+
+daftarkanEkspor(router, {
+  path: '/transaksi-mitra',
+  judul: 'Transaksi Utang & Piutang',
+  kolom: [
+    { header: 'Tanggal', key: 'entry_date', width: 12 },
+    { header: 'No. Jurnal', key: 'entry_no', width: 18 },
+    { header: 'Mitra', key: 'partner_name', width: 26 },
+    { header: 'Jenis', key: 'jenis', width: 10 },
+    { header: 'Transaksi', key: 'label', width: 16 },
+    { header: 'Arah', key: 'arah', width: 12 },
+    { header: 'Nominal', key: 'nominal', width: 16, money: true },
+    { header: 'Rekening', key: 'rekening', width: 30 },
+    { header: 'Keterangan', key: 'description', width: 40 },
+  ],
+  ambil: (req) => {
+    const d = ambilTransaksiMitra(req);
+    return { rows: d.rows, subtitle: `Periode ${d.from} s/d ${d.to}`, meta: [['Jumlah transaksi', d.rows.length]] };
+  },
+});
+
+/** Jurnal pelunasan beserta arah, mitra, dan nominalnya. */
+function ambilPelunasan(id) {
+  const j = db.prepare('SELECT * FROM journals WHERE id = ?').get(id);
+  if (!j) throw httpError(404, 'Transaksi tidak ditemukan');
+  const baris = db
+    .prepare(
+      `SELECT l.*, a.subtype, a.is_cash, a.code FROM journal_lines l
+         JOIN accounts a ON a.id = l.account_id WHERE l.journal_id = ? ORDER BY l.id`
+    )
+    .all(j.id);
+  const mitra = baris.find((l) => l.partner_id && ['PAYABLE', 'RECEIVABLE'].includes(l.subtype));
+  return { j, baris, mitra };
+}
+
+const ubahPelunasanSchema = z.object({
+  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount: z.number().positive(),
+  cash_code: z.string().trim().min(3),
+  note: z.string().trim().max(200).optional().nullable(),
+});
+
+/**
+ * PUT /api/cashflow/settlements/:id — membetulkan tanggal, nominal, rekening,
+ * atau catatan pelunasan. Jurnalnya ditulis ulang; nomornya tetap selama
+ * bulannya tidak berganti.
+ */
+router.put('/settlements/:id(\\d+)', butuhIzin('keuangan.kas'), ah((req, res) => {
+  const body = parse(ubahPelunasanSchema, req.body);
+  const { j, baris, mitra } = ambilPelunasan(req.params.id);
+  if (j.source !== 'SETTLEMENT' || !mitra) {
+    throw httpError(422, 'Yang bisa diubah di sini hanya pelunasan utang/piutang');
+  }
+  tolakBilaTerekonsiliasi(j);
+
+  const kas = accountByCode(body.cash_code);
+  if (!kas.is_cash) throw httpError(422, `${kas.code} bukan akun kas atau bank`);
+
+  const bayarUtang = mitra.subtype === 'PAYABLE';
+  const nilaiLama = r2(mitra.debit + mitra.credit);
+  const nilai = r2(body.amount);
+
+  // Batasnya: sisa sekarang ditambah nominal lama (yang akan dibatalkan).
+  const sisa = db
+    .prepare(
+      `SELECT COALESCE(SUM(CASE WHEN a.subtype = 'PAYABLE' THEN l.credit - l.debit ELSE l.debit - l.credit END), 0) s
+         FROM journal_lines l JOIN accounts a ON a.id = l.account_id JOIN journals jj ON jj.id = l.journal_id
+        WHERE l.partner_id = ? AND a.id = ? AND jj.posted = 1`
+    )
+    .get(mitra.partner_id, mitra.account_id).s;
+  const batas = r2(sisa + nilaiLama);
+  if (nilai > batas + 0.004) {
+    throw httpError(
+      422,
+      `Nominal melebihi ${bayarUtang ? 'utang' : 'piutang'} yang bisa dilunasi ` +
+        `(Rp ${batas.toLocaleString('id-ID')})`
+    );
+  }
+
+  const memo = body.note || mitra.memo || (bayarUtang ? 'Pembayaran utang' : 'Pelunasan piutang');
+  const bulanSama = j.entry_date.slice(0, 7) === body.entry_date.slice(0, 7);
+  const hasil = db.transaction(() => {
+    deleteJournalById(j.id);
+    return postJournal({
+      date: body.entry_date,
+      description: j.description,
+      lines: bayarUtang
+        ? [
+            { account_id: mitra.account_id, debit: nilai, credit: 0, memo, partner_id: mitra.partner_id },
+            { code: kas.code, debit: 0, credit: nilai, memo },
+          ]
+        : [
+            { code: kas.code, debit: nilai, credit: 0, memo },
+            { account_id: mitra.account_id, debit: 0, credit: nilai, memo, partner_id: mitra.partner_id },
+          ],
+      source: 'SETTLEMENT',
+      sourceId: j.source_id,
+      userId: req.user.id,
+      entryNo: bulanSama ? j.entry_no : null,
+    });
+  })();
+
+  res.json({
+    ok: true,
+    journal: hasil,
+    message: `${hasil.entry_no} diperbarui: Rp ${nilai.toLocaleString('id-ID')} dari ${kas.name}`,
+  });
+}));
+
+/** DELETE /api/cashflow/settlements/:id — hapus pelunasan atau saldo awal mitra. */
+router.delete('/settlements/:id(\\d+)', butuhIzin('keuangan.kas'), ah((req, res) => {
+  const { j, mitra } = ambilPelunasan(req.params.id);
+  if (!BISA_HAPUS_MITRA.has(j.source) || !mitra) {
+    throw httpError(
+      422,
+      `${j.entry_no} berasal dari ${LABEL_TRANSAKSI[j.source] || j.source} — betulkan lewat dokumen asalnya`
+    );
+  }
+  tolakBilaTerekonsiliasi(j);
+  deleteJournalById(j.id);
+  res.json({ ok: true, message: `${j.entry_no} dihapus — ${j.description}` });
 }));
 
 module.exports = router;

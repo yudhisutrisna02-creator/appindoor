@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { db, getSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { postJournal, deleteJournalById, r2 } = require('../utils/accounting');
+const { postJournal, deleteJournalById, tolakBilaTerekonsiliasi, r2 } = require('../utils/accounting');
 const { incomeStatement, balanceSheet, cashFlow, generalLedger, trialBalance, accountBalances } = require('../utils/reports');
 const { tableExcel, financialPdf } = require('../utils/exporters');
 const { daftarkanEkspor } = require('../utils/ekspor');
@@ -203,27 +203,6 @@ router.get('/journals/:id', ah((req, res) => {
 
   res.json({ journal, lines });
 }));
-
-/**
- * Baris jurnal yang sudah dipasangkan dengan rekening koran adalah bukti bahwa
- * uang itu memang lewat rekening tersebut. Mengubah atau menghapusnya diam-diam
- * akan memutus pasangan itu, jadi pasangannya harus dilepas dulu dengan sadar.
- */
-function tolakBilaTerekonsiliasi(j) {
-  const terpasang = db
-    .prepare(
-      `SELECT COUNT(*) n FROM bank_statement_lines
-        WHERE journal_line_id IN (SELECT id FROM journal_lines WHERE journal_id = ?)`
-    )
-    .get(j.id).n;
-  if (terpasang) {
-    throw httpError(
-      422,
-      `${j.entry_no} sudah dicocokkan dengan rekening koran di Rekonsiliasi Bank. ` +
-        'Lepaskan pasangannya di sana dulu bila memang salah.'
-    );
-  }
-}
 
 // Jurnal yang boleh dihapus dari sini. Pelunasan utang/piutang tidak punya
 // dokumen induk selain jurnalnya sendiri, jadi menghapus jurnalnya adalah

@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Receipt, Wallet, Eye, Trash2 } from 'lucide-react';
+import { HandCoins, Receipt, Wallet, Eye, Trash2, ListOrdered, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, today, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import TransaksiMitra from '../components/TransaksiMitra';
 
 /**
  * Saldo di sini dihitung langsung dari buku besar (baris jurnal yang menyentuh
@@ -20,7 +21,7 @@ export default function UtangPiutang() {
   const [detail, setDetail] = useState(null);
   const [saving, setSaving] = useState(false);
   const { punya } = useAuth();
-  const bolehHapus = punya('keuangan.jurnal');
+  const bolehHapus = punya('keuangan.kas');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,7 +86,7 @@ export default function UtangPiutang() {
       'Sisa utang/piutangnya bertambah lagi sebesar nominal ini, lalu catat ulang pembayaran yang benar.'
     )) return;
     try {
-      const res = await api.del(`/api/finance/journals/${e.journal_id}`);
+      const res = await api.del(`/api/cashflow/settlements/${e.journal_id}`);
       toast.success(res.message);
       setDetail(await api.get(`/api/partners/${detail.partner.id}/ledger`));
       load();
@@ -139,6 +140,7 @@ export default function UtangPiutang() {
             {[
               { key: 'piutang', label: `Piutang (${data.piutang.length})`, icon: Receipt },
               { key: 'utang', label: `Utang (${data.utang.length})`, icon: HandCoins },
+              { key: 'transaksi', label: 'Transaksi', icon: ListOrdered },
             ].map((t) => (
               <button
                 key={t.key} onClick={() => setTab(t.key)}
@@ -151,6 +153,30 @@ export default function UtangPiutang() {
             ))}
           </div>
 
+          {tab === 'transaksi' ? (
+            <TransaksiMitra onBerubah={load} cashAccounts={options?.cashAccounts || []} />
+          ) : (
+          <>
+          {(data.lebihBayar || []).length > 0 && (
+            <div className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+              <p className="mb-1 flex items-center gap-1.5 font-semibold">
+                <AlertTriangle size={14} /> Saldo minus (lebih bayar) — biasanya ada pembayaran yang salah
+              </p>
+              <ul className="space-y-1">
+                {data.lebihBayar.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-3">
+                    <span>
+                      {r.name}: {r.utang < 0 && <>utang <strong>{rupiah(r.utang)}</strong></>}
+                      {r.piutang < 0 && <> piutang <strong>{rupiah(r.piutang)}</strong></>}
+                    </span>
+                    <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => lihatRiwayat(r)}>
+                      <Eye size={13} /> Riwayat
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="card">
             {rows.length === 0 ? (
               <EmptyState
@@ -211,6 +237,8 @@ export default function UtangPiutang() {
               </div>
             )}
           </div>
+          </>
+          )}
         </>
       )}
 
