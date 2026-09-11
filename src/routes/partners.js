@@ -160,7 +160,7 @@ router.get('/:id/ledger', ah((req, res) => {
 
   const entries = db
     .prepare(
-      `SELECT j.entry_date, j.entry_no, j.description, j.source,
+      `SELECT j.id AS journal_id, j.entry_date, j.entry_no, j.description, j.source,
               a.code, a.name AS account_name, a.subtype,
               l.debit, l.credit, l.memo
          FROM journal_lines l

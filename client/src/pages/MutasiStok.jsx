@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, Plus, Package } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Plus, Package, Pencil } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, today } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 const TYPE_BADGE = { IN: 'badge-green', OUT: 'badge-red', ADJ: 'badge-amber' };
 const TYPE_LABEL = { IN: 'Masuk', OUT: 'Keluar', ADJ: 'Koreksi' };
@@ -20,6 +21,10 @@ export default function MutasiStok() {
   const [rekening, setRekening] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
+  const [harga, setHarga] = useState(null);
+  const [menyimpanHarga, setMenyimpanHarga] = useState(false);
+  const { punya } = useAuth();
+  const bolehUbahHarga = punya('gudang.produk');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,6 +45,29 @@ export default function MutasiStok() {
     api.get('/api/partners', { kind: 'SUPPLIER' }).then((d) => setSuppliers(d.partners)).catch(() => {});
     api.get('/api/cashflow/options').then((d) => setRekening(d.cashAccounts || [])).catch(() => {});
   }, []);
+
+  // Nilai baru = qty × harga per unit + biaya tambahan (ongkir dll).
+  const nilaiHargaBaru = harga ? harga.qty * (Number(harga.unit_cost) || 0) + (Number(harga.biaya_tambahan) || 0) : 0;
+
+  async function simpanHarga(e) {
+    e.preventDefault();
+    setMenyimpanHarga(true);
+    try {
+      const res = await api.put(`/api/inventory/moves/${harga.id}/harga`, {
+        unit_cost: Number(harga.unit_cost),
+        biaya_tambahan: Number(harga.biaya_tambahan) || 0,
+        alasan: harga.alasan,
+      });
+      toast.success(res.message);
+      setHarga(null);
+      load();
+      api.get('/api/inventory/products').then((d) => setProducts(d.products)).catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMenyimpanHarga(false);
+    }
+  }
 
   function openForm(type) {
     setForm({
@@ -151,7 +179,7 @@ export default function MutasiStok() {
                   <thead>
                     <tr>
                       <th>Tanggal</th><th>Jenis</th><th>Produk</th><th>Qty</th>
-                      <th>HPP/Unit</th><th>Nilai</th><th>Saldo Akhir</th><th>Ref</th><th>Sumber</th><th>Petugas</th>
+                      <th>HPP/Unit</th><th>Nilai</th><th>Saldo Akhir</th><th>Ref</th><th>Sumber</th><th>Petugas</th>{bolehUbahHarga && <th />}
                     </tr>
                   </thead>
                   <tbody>
@@ -172,6 +200,19 @@ export default function MutasiStok() {
                         <td className="text-xs">{m.ref || '-'}</td>
                         <td className="text-xs text-slate-500">{m.source}</td>
                         <td className="text-xs text-slate-500">{m.user_name || '-'}</td>
+                        {bolehUbahHarga && (
+                          <td>
+                            {m.move_type === 'IN' && m.source === 'MANUAL' && (
+                              <button
+                                type="button" className="btn-ghost !px-2 !py-1 text-xs"
+                                title="Betulkan harga barang masuk ini"
+                                onClick={() => setHarga({ ...m, biaya_tambahan: '', alasan: '' })}
+                              >
+                                <Pencil size={13} /> Harga
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -305,6 +346,54 @@ export default function MutasiStok() {
             <div className="flex gap-2 sm:col-span-2">
               <button type="button" className="btn-secondary flex-1" onClick={() => setForm(null)}>Batal</button>
               <button type="submit" className="btn-primary flex-1"><Plus size={16} /> Simpan Mutasi</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ---------- BETULKAN HARGA BARANG MASUK ---------- */}
+      <Modal open={!!harga} onClose={() => setHarga(null)} title="Betulkan Harga Barang Masuk">
+        {harga && (
+          <form onSubmit={simpanHarga} className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm sm:col-span-2">
+              <p className="font-medium text-slate-900">{harga.product_name}</p>
+              <p className="text-xs text-slate-500">
+                {harga.move_date} · {num(harga.qty)} {harga.unit} · {harga.ref || '-'} · tercatat{' '}
+                <strong>{rupiah(harga.value)}</strong>
+              </p>
+            </div>
+            <Field label="Harga per unit dari pabrik *">
+              <input
+                type="number" min="0" step="any" className="input" required value={harga.unit_cost}
+                onChange={(e) => setHarga({ ...harga, unit_cost: e.target.value })}
+              />
+            </Field>
+            <Field label="Ongkir / biaya tambahan (total)" hint="Dibagi rata ke seluruh qty">
+              <input
+                type="number" min="0" step="any" className="input" value={harga.biaya_tambahan}
+                placeholder="0"
+                onChange={(e) => setHarga({ ...harga, biaya_tambahan: e.target.value })}
+              />
+            </Field>
+            <Field label="Alasan *" className="sm:col-span-2">
+              <input
+                className="input" required minLength={3} value={harga.alasan}
+                placeholder="mis. Harga asli pabrik + ongkir"
+                onChange={(e) => setHarga({ ...harga, alasan: e.target.value })}
+              />
+            </Field>
+            <div className="rounded-xl bg-brand-50 p-3 text-xs leading-relaxed text-brand-800 sm:col-span-2">
+              Nilai baru <strong>{rupiah(nilaiHargaBaru)}</strong>
+              {harga.qty > 0 && <> ({rupiah(nilaiHargaBaru / harga.qty)}/{harga.unit})</>}, selisih{' '}
+              <strong>{rupiah(nilaiHargaBaru - harga.value)}</strong>. Utang supplier (atau rekening
+              pembayarnya) ikut menyesuaikan, dan selisihnya masuk ke HPP rata-rata stok yang tersisa.
+              Penjualan yang sudah tercatat tidak berubah.
+            </div>
+            <div className="flex gap-2 sm:col-span-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setHarga(null)}>Batal</button>
+              <button type="submit" className="btn-primary flex-1" disabled={menyimpanHarga}>
+                {menyimpanHarga ? 'Menyimpan...' : 'Simpan Harga'}
+              </button>
             </div>
           </form>
         )}

@@ -530,6 +530,28 @@ baris rekening kas pada jurnal itu. Aturannya:
 Hapus jurnal manual juga lewat `deleteJournalById`, supaya bulan yang sudah
 ditutup buku tidak bisa diubah dari tombol hapus.
 
+### Membetulkan pembayaran & harga barang masuk yang salah
+
+Kasus nyata: utang supplier Rp 8.735.000 (500 pack @17.470) dibayar dari Kas
+Tunai, padahal harga pabrik @12.470 + ongkir Rp 125.000 = Rp 6.360.000 dan
+dibayar dua kali transfer dari BCA. Tiga langkah, urutannya penting:
+
+1. **Hapus pembayaran salah** — Utang & Piutang → Riwayat mitra → ikon hapus
+   (juga dari Jurnal Umum). `DELETE /api/finance/journals/:id` kini menerima
+   sumber MANUAL dan SETTLEMENT; utangnya terbuka kembali. Ditolak bila baris
+   jurnalnya sudah dicocokkan di Rekonsiliasi Bank.
+2. **Betulkan harga barang masuk** — Mutasi Stok → tombol Harga pada baris
+   masuk. `PUT /api/inventory/moves/:id/harga {unit_cost, biaya_tambahan, alasan}`:
+   nilai = qty × harga + biaya tambahan; jurnal Persediaan/Utang ditulis ulang
+   dengan nomor & tanggal tetap; selisih nilai ditempelkan ke HPP rata-rata
+   stok yang TERSISA (nilai persediaan di buku besar tetap = Σ stok × HPP);
+   penjualan yang sudah tercatat tidak disentuh. Hanya untuk barang masuk
+   sumber MANUAL (penerimaan PO lewat PO-nya). Ditolak bila utang supplier
+   jadi minus (hapus pembayaran salah dulu), bila stok habis, atau bila jurnal
+   tidak lagi dua baris senilai mutasinya.
+3. **Catat ulang pembayaran yang benar** di Utang & Piutang dengan tanggal dan
+   rekening sesuai rekening koran.
+
 Pratinjau Hapus Periode menampilkan saldo akhir rekening sebelum → sesudah dan
 memperingatkan rekening/piutang yang akan minus: pemasukan periode itu hilang,
 tetapi pengeluarannya (bayar supplier, iklan) tetap tercatat.
@@ -778,7 +800,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 799 pemeriksaan, 54 bagian
+npm run smoke            # 813 pemeriksaan, 55 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1241,6 +1263,7 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Uji asap dijalankan pada database yang sudah berisi data | Ratusan produk, order, dan jurnal tiruan tercampur ke data sungguhan dan tidak bisa dipisahkan lagi — sempat dipakai menganalisis data pemilik usaha. Uji kini berhenti sendiri bila databasenya tidak kosong |
 | Database uji diletakkan di dalam folder data/ proyek | Cadangan otomatis tersimpan di sebelah databasenya, jadi cadangan hasil uji ikut bercampur dengan cadangan sungguhan. Letakkan database, cadangan, dan unggahan uji di folder sementara |
 | Formulir pelunasan utang/piutang memilih rekening kas pertama secara bawaan | Pembayaran Rp 8,7 juta ke supplier yang ditransfer dari bank tercatat dari Kas Tunai; saldo awal Kas Tunai bulan berikutnya minus Rp 4,5 juta. Rekening harus dipilih sendiri, dan jurnal yang terlanjur salah dipindah lewat Buku Besar |
+| Pembayaran utang dicatat sebesar nilai barang masuk yang salah harga | Utang tampak lunas, kas tampak berkurang Rp 8,7 juta padahal yang ditransfer Rp 6,36 juta; kesalahan harga tidak kelihatan karena utangnya sudah nol. Pembayaran harus dicocokkan dengan rekening koran, bukan dengan angka utang di layar |
 | Hapus jurnal manual memakai DELETE langsung | Bulan yang sudah ditutup buku tetap bisa berubah dari satu tombol; semua penghapusan jurnal harus lewat pintu yang memeriksa kunci periode |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 

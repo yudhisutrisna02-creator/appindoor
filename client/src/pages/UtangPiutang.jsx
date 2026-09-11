@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Receipt, Wallet, Eye } from 'lucide-react';
+import { HandCoins, Receipt, Wallet, Eye, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, today, dateID } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 /**
  * Saldo di sini dihitung langsung dari buku besar (baris jurnal yang menyentuh
@@ -18,6 +19,8 @@ export default function UtangPiutang() {
   const [bayar, setBayar] = useState(null);
   const [detail, setDetail] = useState(null);
   const [saving, setSaving] = useState(false);
+  const { punya } = useAuth();
+  const bolehHapus = punya('keuangan.jurnal');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,6 +74,23 @@ export default function UtangPiutang() {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Pembayaran yang salah nominal, tanggal, atau rekening dihapus lalu dicatat
+  // ulang. Utang/piutangnya terbuka kembali sebesar nominal itu.
+  async function hapusPembayaran(e) {
+    if (!window.confirm(
+      `Hapus pembayaran ${e.entry_no} (${dateID(e.entry_date)}, ${rupiah(e.debit || e.credit)})? ` +
+      'Sisa utang/piutangnya bertambah lagi sebesar nominal ini, lalu catat ulang pembayaran yang benar.'
+    )) return;
+    try {
+      const res = await api.del(`/api/finance/journals/${e.journal_id}`);
+      toast.success(res.message);
+      setDetail(await api.get(`/api/partners/${detail.partner.id}/ledger`));
+      load();
+    } catch (err) {
+      toast.error(err.message);
     }
   }
 
@@ -276,7 +296,7 @@ export default function UtangPiutang() {
               <div className="table-wrap">
                 <table className="table">
                   <thead>
-                    <tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Akun</th><th>Debit</th><th>Kredit</th></tr>
+                    <tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Akun</th><th>Debit</th><th>Kredit</th>{bolehHapus && <th />}</tr>
                   </thead>
                   <tbody>
                     {detail.entries.map((e, i) => (
@@ -287,6 +307,19 @@ export default function UtangPiutang() {
                         <td className="text-xs text-slate-500">{e.code}</td>
                         <td className="tabular">{e.debit ? rupiah(e.debit) : '-'}</td>
                         <td className="tabular">{e.credit ? rupiah(e.credit) : '-'}</td>
+                        {bolehHapus && (
+                          <td>
+                            {e.source === 'SETTLEMENT' && (
+                              <button
+                                type="button" className="btn-ghost !px-2 !py-1 text-rose-600"
+                                title="Hapus pembayaran ini" aria-label="Hapus pembayaran"
+                                onClick={() => hapusPembayaran(e)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

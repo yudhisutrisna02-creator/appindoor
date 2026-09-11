@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { db, nextNumber } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, ACC, postJournal, accountByCode } = require('../utils/accounting');
+const { r2, ACC, postJournal, deleteJournalById, accountByCode } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 const BATCH = require('../utils/batch');
@@ -608,6 +608,144 @@ const applyMove = db.transaction((body, userId) => {
 router.post('/moves', butuhIzin('gudang.mutasi'), ah((req, res) => {
   const body = parse(moveSchema, req.body);
   res.status(201).json({ ok: true, move: applyMove(body, req.user.id) });
+}));
+
+const hargaSchema = z.object({
+  unit_cost: z.number().min(0),
+  // Ongkir dan biaya lain pada pembelian yang sama, dibagi rata ke seluruh
+  // qty — HPP yang benar adalah harga pabrik ditambah ongkos sampai gudang.
+  biaya_tambahan: z.number().min(0).default(0),
+  alasan: z.string().trim().min(3, 'alasan wajib diisi').max(200),
+});
+
+/**
+ * PUT /api/inventory/moves/:id/harga — membetulkan harga barang masuk.
+ *
+ * Qty-nya tidak diubah; itu tugas koreksi stok. Yang dibetulkan adalah nilai:
+ *   - harga per unit pada mutasinya,
+ *   - jurnal Persediaan lawan Utang/Kas-nya (nomor & tanggal tetap),
+ *   - HPP rata-rata produk, dengan menambahkan selisih nilainya ke stok yang
+ *     tersisa sekarang. Dengan begitu nilai persediaan di buku besar tetap
+ *     sama dengan Σ stok × HPP; penjualan yang sudah tercatat tidak disentuh.
+ *
+ * Hanya untuk barang masuk yang dicatat lewat Mutasi Stok. Penerimaan pesanan
+ * pembelian dibetulkan lewat pesanan pembeliannya.
+ */
+router.put('/moves/:id(\\d+)/harga', butuhIzin('gudang.produk'), ah((req, res) => {
+  const body = parse(hargaSchema, req.body);
+  const m = db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(req.params.id);
+  if (!m) throw httpError(404, 'Mutasi tidak ditemukan');
+  if (m.move_type !== 'IN' || m.source !== 'MANUAL') {
+    throw httpError(
+      422,
+      'Yang bisa dibetulkan harganya di sini hanya barang masuk yang dicatat lewat Mutasi Stok. ' +
+        'Penerimaan pesanan pembelian dibetulkan lewat pesanan pembeliannya.'
+    );
+  }
+  const produk = db.prepare('SELECT * FROM products WHERE id = ?').get(m.product_id);
+
+  const nilaiLama = r2(m.qty * m.unit_cost);
+  const nilaiBaru = r2(m.qty * body.unit_cost + body.biaya_tambahan);
+  const hppBaru = m.qty > 0 ? nilaiBaru / m.qty : 0;
+  const selisih = r2(nilaiBaru - nilaiLama);
+  if (Math.abs(selisih) < 0.01) throw httpError(422, 'Nilainya sama dengan yang sudah tercatat');
+
+  const j = db.prepare("SELECT * FROM journals WHERE source = 'STOCK' AND source_id = ?").get(m.id);
+  if (!j) {
+    throw httpError(
+      422,
+      'Barang masuk ini dulu dicatat tanpa nilai, jadi tidak diketahui dibayar dari mana. ' +
+        'Betulkan lewat jurnal manual.'
+    );
+  }
+  const baris = db.prepare('SELECT * FROM journal_lines WHERE journal_id = ? ORDER BY id').all(j.id);
+  if (baris.length !== 2 || !baris.every((l) => Math.abs(l.debit + l.credit - nilaiLama) < 0.01)) {
+    throw httpError(409, `Jurnal ${j.entry_no} tidak lagi sesuai dengan barang masuk ini; betulkan lewat jurnal manual`);
+  }
+
+  // Utang supplier tidak boleh menjadi minus: kalau pembayarannya sudah
+  // tercatat lebih besar dari nilai barunya, pembayarannya yang dibetulkan dulu.
+  const barisUtang = baris.find((l) => l.credit > 0 && l.partner_id);
+  if (barisUtang && selisih < 0) {
+    const sisa = db
+      .prepare(
+        `SELECT COALESCE(SUM(l.credit - l.debit), 0) s
+           FROM journal_lines l
+           JOIN journals jj ON jj.id = l.journal_id
+           JOIN accounts a ON a.id = l.account_id
+          WHERE l.partner_id = ? AND jj.posted = 1 AND a.subtype = 'PAYABLE'`
+      )
+      .get(barisUtang.partner_id).s;
+    if (r2(sisa + selisih) < -0.004) {
+      const mitra = db.prepare('SELECT name FROM partners WHERE id = ?').get(barisUtang.partner_id);
+      throw httpError(
+        422,
+        `Utang ${mitra ? mitra.name : 'supplier'} tinggal Rp ${r2(sisa).toLocaleString('id-ID')}. ` +
+          `Menurunkan nilai Rp ${Math.abs(selisih).toLocaleString('id-ID')} membuatnya minus — ` +
+          'pembayarannya tercatat terlalu besar. Hapus pembayaran yang salah dulu di Utang & Piutang → Riwayat.'
+      );
+    }
+  }
+
+  // Selisih nilai masuk ke stok yang tersisa sekarang.
+  const stok = r2(produk.stock);
+  let hppProduk = produk.cost;
+  if (stok > 0) {
+    hppProduk = (stok * produk.cost + selisih) / stok;
+    if (hppProduk < 0) {
+      throw httpError(
+        422,
+        `Selisih Rp ${Math.abs(selisih).toLocaleString('id-ID')} lebih besar dari nilai stok ${produk.name} ` +
+          'yang tersisa. Betulkan lewat jurnal manual.'
+      );
+    }
+  } else {
+    throw httpError(
+      422,
+      `Stok ${produk.name} sudah habis, jadi selisih nilainya tidak bisa ditempelkan ke stok. ` +
+        'Betulkan lewat jurnal manual ke HPP.'
+    );
+  }
+
+  const hasil = db.transaction(() => {
+    db.prepare(
+      `UPDATE stock_moves
+          SET unit_cost = ?,
+              note = TRIM(COALESCE(note, '') || ' · Harga dibetulkan: ' || ?)
+        WHERE id = ?`
+    ).run(hppBaru, body.alasan, m.id);
+    db.prepare('UPDATE products SET cost = ? WHERE id = ?').run(hppProduk, produk.id);
+
+    deleteJournalById(j.id);
+    return postJournal({
+      date: j.entry_date,
+      description: j.description,
+      lines: baris.map((l) => ({
+        account_id: l.account_id,
+        debit: l.debit > 0 ? nilaiBaru : 0,
+        credit: l.credit > 0 ? nilaiBaru : 0,
+        memo: l.memo,
+        cashflow: l.cashflow,
+        partner_id: l.partner_id,
+      })),
+      source: 'STOCK',
+      sourceId: m.id,
+      userId: req.user.id,
+      entryNo: j.entry_no,
+    });
+  })();
+
+  const rp = (n) => `Rp ${r2(n).toLocaleString('id-ID')}`;
+  res.json({
+    ok: true,
+    journal: hasil,
+    nilaiLama, nilaiBaru, selisih,
+    hppMasuk: r2(hppBaru),
+    hppProduk: r2(hppProduk),
+    message:
+      `Harga ${produk.name} dibetulkan: ${rp(nilaiLama)} → ${rp(nilaiBaru)} ` +
+      `(${rp(hppBaru)}/${produk.unit}). HPP rata-rata sekarang ${rp(hppProduk)}.`,
+  });
 }));
 
 /** GET /api/inventory/moves — kartu stok / log mutasi. */

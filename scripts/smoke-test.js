@@ -5637,6 +5637,94 @@ async function main() {
     (lihat54.akun || []).every((a) => typeof a.saldoSebelum === 'number' && typeof a.saldoSesudah === 'number'));
 
 
+  console.log('\n55. Pembayaran salah nominal & harga barang masuk dibetulkan');
+
+  const cap55 = Date.now();
+  const rek55 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI KOREKSI 555-${cap55}`], mulai_kode: '1870',
+  })).dibuat[0].code;
+  const sup55 = await call('POST', '/api/partners', {
+    name: `Supplier Koreksi ${cap55}`, kind: 'SUPPLIER', phone: '0812000555', address: 'Jl. Uji 55',
+  });
+  const idSup55 = (sup55.partner || sup55).id;
+  const prod55 = (await call('POST', '/api/inventory/products', {
+    sku: `P55-${cap55}`, name: 'Produk Uji Koreksi Harga', cost: 0, price: 30000,
+  })).product;
+  const masuk55 = (await call('POST', '/api/inventory/moves', {
+    product_id: prod55.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 20000, payment: 'CREDIT', partner_id: idSup55,
+  })).move;
+  const utang55 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji((d.utang.find((r) => r.id === idSup55) || {}).utang || 0);
+  };
+
+  // Kejadian di data produksi: dibayar sebesar nilai yang salah, dari rekening yang salah.
+  const bayar55 = await call('POST', '/api/cashflow/settlements', {
+    entry_date: today, partner_id: idSup55, direction: 'PAY', amount: 200000, cash_code: '1000',
+  });
+  check('utang lunas oleh pembayaran yang salah', near(await utang55(), 0, 1));
+
+  const koreksi55 = { unit_cost: 12000, biaya_tambahan: 5000, alasan: 'Harga asli pabrik + ongkir' };
+  let tolakMinus55 = 0;
+  try { await call('PUT', `/api/inventory/moves/${masuk55.id}/harga`, koreksi55); }
+  catch (err) { tolakMinus55 = err.status; }
+  check('harga tidak bisa diturunkan selama pembayarannya membuat utang minus', tolakMinus55 === 422,
+    `status ${tolakMinus55}`);
+
+  const riwayat55 = await call('GET', `/api/partners/${idSup55}/ledger`);
+  const barisBayar55 = riwayat55.entries.find((e) => e.source === 'SETTLEMENT');
+  check('riwayat mitra membawa id jurnal pembayarannya',
+    !!barisBayar55 && barisBayar55.journal_id === bayar55.journal.id);
+
+  await call('DELETE', `/api/finance/journals/${bayar55.journal.id}`);
+  check('pembayaran yang salah bisa dihapus; utangnya terbuka kembali', near(await utang55(), 200000, 1),
+    String(await utang55()));
+
+  const jurnalStok55 = (await call('GET', `/api/finance/journals?from=${today}&to=${today}&source=STOCK`))
+    .rows.find((j) => j.source_id === masuk55.id);
+  let tolakHapusStok55 = 0;
+  try { await call('DELETE', `/api/finance/journals/${jurnalStok55.id}`); }
+  catch (err) { tolakHapusStok55 = err.status; }
+  check('jurnal barang masuk tetap tidak bisa dihapus dari menu jurnal', tolakHapusStok55 === 422);
+
+  const hasil55 = await call('PUT', `/api/inventory/moves/${masuk55.id}/harga`, koreksi55);
+  check('nilai barang masuk menjadi qty × harga + ongkir',
+    near(hasil55.nilaiBaru, 125000, 0.01) && near(hasil55.hppMasuk, 12500, 0.01), JSON.stringify(hasil55));
+  check('nomor jurnal barang masuk tetap', hasil55.journal.entry_no === jurnalStok55.entry_no);
+  check('utang supplier ikut turun ke nilai yang benar', near(await utang55(), 125000, 1),
+    String(await utang55()));
+  const produk55 = (await call('GET', '/api/inventory/products')).products.find((p) => p.id === prod55.id);
+  check('HPP rata-rata produk ikut dibetulkan', near(produk55.cost, 12500, 0.01), String(produk55.cost));
+  const mutasi55 = (await call('GET', `/api/inventory/moves?from=${today}&to=${today}&product_id=${prod55.id}`))
+    .rows.find((m) => m.id === masuk55.id);
+  check('harga di kartu stok ikut berubah dan alasannya tercatat',
+    near(mutasi55.unit_cost, 12500, 0.01) && /Harga dibetulkan/.test(mutasi55.note || ''), JSON.stringify(mutasi55));
+
+  let tolakSama55 = 0;
+  try { await call('PUT', `/api/inventory/moves/${masuk55.id}/harga`, koreksi55); }
+  catch (err) { tolakSama55 = err.status; }
+  check('nilai yang sama ditolak', tolakSama55 === 422);
+
+  const keluar55 = (await call('POST', '/api/inventory/moves', {
+    product_id: prod55.id, move_date: today, move_type: 'OUT', qty: 1,
+  })).move;
+  let tolakKeluar55 = 0;
+  try { await call('PUT', `/api/inventory/moves/${keluar55.id}/harga`, { unit_cost: 1, alasan: 'uji' }); }
+  catch (err) { tolakKeluar55 = err.status; }
+  check('harga barang keluar tidak bisa dibetulkan dari sini', tolakKeluar55 === 422);
+
+  // Catat ulang dua transfer yang benar dari rekening yang benar.
+  for (const tgl of [today, today]) {
+    await call('POST', '/api/cashflow/settlements', {
+      entry_date: tgl, partner_id: idSup55, direction: 'PAY', amount: 62500, cash_code: rek55,
+    });
+  }
+  check('dua pembayaran yang benar melunasi utangnya', near(await utang55(), 0, 1));
+  const tb55 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang setelah koreksi', tb55.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

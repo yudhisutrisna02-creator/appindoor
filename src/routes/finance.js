@@ -204,12 +204,40 @@ router.get('/journals/:id', ah((req, res) => {
   res.json({ journal, lines });
 }));
 
+/**
+ * Baris jurnal yang sudah dipasangkan dengan rekening koran adalah bukti bahwa
+ * uang itu memang lewat rekening tersebut. Mengubah atau menghapusnya diam-diam
+ * akan memutus pasangan itu, jadi pasangannya harus dilepas dulu dengan sadar.
+ */
+function tolakBilaTerekonsiliasi(j) {
+  const terpasang = db
+    .prepare(
+      `SELECT COUNT(*) n FROM bank_statement_lines
+        WHERE journal_line_id IN (SELECT id FROM journal_lines WHERE journal_id = ?)`
+    )
+    .get(j.id).n;
+  if (terpasang) {
+    throw httpError(
+      422,
+      `${j.entry_no} sudah dicocokkan dengan rekening koran di Rekonsiliasi Bank. ` +
+        'Lepaskan pasangannya di sana dulu bila memang salah.'
+    );
+  }
+}
+
+// Jurnal yang boleh dihapus dari sini. Pelunasan utang/piutang tidak punya
+// dokumen induk selain jurnalnya sendiri, jadi menghapus jurnalnya adalah
+// satu-satunya cara membetulkan nominal atau tanggal yang salah ketik —
+// utang/piutang mitranya otomatis terbuka kembali sebesar nominal itu.
+const BISA_DIHAPUS = { MANUAL: true, SETTLEMENT: true };
+
 router.delete('/journals/:id', butuhIzin('keuangan.jurnal'), ah((req, res) => {
   const journal = db.prepare('SELECT * FROM journals WHERE id = ?').get(req.params.id);
   if (!journal) throw httpError(404, 'Jurnal tidak ditemukan');
-  if (journal.source !== 'MANUAL') {
+  if (!BISA_DIHAPUS[journal.source]) {
     throw httpError(422, `Jurnal otomatis dari modul ${journal.source} harus dibatalkan lewat dokumen sumbernya`);
   }
+  tolakBilaTerekonsiliasi(journal);
   // Lewat pintu yang menjaga tutup buku. DELETE langsung dulu melewatinya,
   // sehingga jurnal manual di bulan yang sudah ditutup tetap bisa dihapus.
   deleteJournalById(journal.id);
@@ -269,22 +297,7 @@ router.post('/journals/:id(\\d+)/pindah-rekening', butuhIzin('keuangan.jurnal'),
     throw httpError(422, `${j.entry_no} tidak memakai ${dari.code} · ${dari.name}`);
   }
 
-  // Baris yang sudah dipasangkan dengan rekening koran adalah bukti bahwa uang
-  // itu memang lewat rekening ini. Memindahkannya diam-diam akan memutus
-  // pasangan tersebut, jadi pasangannya harus dilepas dulu dengan sadar.
-  const terpasang = db
-    .prepare(
-      `SELECT COUNT(*) n FROM bank_statement_lines
-        WHERE journal_line_id IN (SELECT id FROM journal_lines WHERE journal_id = ?)`
-    )
-    .get(j.id).n;
-  if (terpasang) {
-    throw httpError(
-      422,
-      `${j.entry_no} sudah dicocokkan dengan rekening koran di Rekonsiliasi Bank. ` +
-        'Lepaskan pasangannya di sana dulu bila memang salah rekening.'
-    );
-  }
+  tolakBilaTerekonsiliasi(j);
 
   const hasil = db.transaction(() => {
     deleteJournalById(j.id);
