@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { db, getSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { postJournal, r2 } = require('../utils/accounting');
+const { postJournal, deleteJournalById, r2 } = require('../utils/accounting');
 const { incomeStatement, balanceSheet, cashFlow, generalLedger, trialBalance, accountBalances } = require('../utils/reports');
 const { tableExcel, financialPdf } = require('../utils/exporters');
 const { daftarkanEkspor } = require('../utils/ekspor');
@@ -210,8 +210,107 @@ router.delete('/journals/:id', butuhIzin('keuangan.jurnal'), ah((req, res) => {
   if (journal.source !== 'MANUAL') {
     throw httpError(422, `Jurnal otomatis dari modul ${journal.source} harus dibatalkan lewat dokumen sumbernya`);
   }
-  db.prepare('DELETE FROM journals WHERE id = ?').run(journal.id);
+  // Lewat pintu yang menjaga tutup buku. DELETE langsung dulu melewatinya,
+  // sehingga jurnal manual di bulan yang sudah ditutup tetap bisa dihapus.
+  deleteJournalById(journal.id);
   res.json({ ok: true, message: `Jurnal ${journal.entry_no} dihapus` });
+}));
+
+/**
+ * POST /api/finance/journals/:id/pindah-rekening
+ *
+ * Memindahkan sisi kas/bank sebuah jurnal ke rekening lain — untuk pembayaran
+ * yang tercatat dari rekening yang keliru. Contoh nyatanya: pembayaran utang
+ * Rp 8.735.000 ke supplier tercatat dari Kas Tunai karena formulirnya memilih
+ * rekening pertama di daftar, padahal Kas Tunai hanya pernah menerima
+ * Rp 4,2 juta; saldo tunai jadi minus tanpa ada uang yang benar-benar hilang.
+ *
+ * Yang berubah HANYA rekeningnya. Nominal, tanggal, keterangan, mitra, dan
+ * NOMOR JURNALNYA tetap sama — nomor itu sudah beredar di catatan dan
+ * tangkapan layar. Utang atau piutang yang sudah dilunasi tetap lunas.
+ *
+ * Hanya untuk jurnal yang berdiri sendiri. Jurnal penjualan, pembelian stok,
+ * retur, dan gaji dibentuk ulang dari dokumennya setiap kali dokumennya
+ * diubah; mengubah jurnalnya langsung akan tertimpa kembali, dan tempat
+ * membetulkannya adalah dokumen itu sendiri.
+ */
+const BISA_DIPINDAH = {
+  SETTLEMENT: 'pelunasan utang/piutang',
+  CASH: 'kas masuk/keluar',
+  MANUAL: 'jurnal manual',
+};
+
+const pindahSchema = z.object({
+  dari: z.string().trim().min(3),
+  ke: z.string().trim().min(3),
+});
+
+router.post('/journals/:id(\\d+)/pindah-rekening', butuhIzin('keuangan.jurnal'), ah((req, res) => {
+  const body = parse(pindahSchema, req.body);
+  const j = db.prepare('SELECT * FROM journals WHERE id = ?').get(req.params.id);
+  if (!j) throw httpError(404, 'Jurnal tidak ditemukan');
+
+  if (!BISA_DIPINDAH[j.source]) {
+    throw httpError(
+      422,
+      `Jurnal ${j.entry_no} berasal dari modul ${j.source}. Rekeningnya dibetulkan lewat dokumen ` +
+        'sumbernya — misalnya Ubah Pesanan untuk penjualan — karena jurnalnya dibentuk ulang dari sana.'
+    );
+  }
+
+  const dari = db.prepare('SELECT * FROM accounts WHERE code = ?').get(body.dari);
+  const ke = db.prepare('SELECT * FROM accounts WHERE code = ?').get(body.ke);
+  if (!dari || !ke) throw httpError(404, 'Rekening tidak ditemukan');
+  if (!dari.is_cash || !ke.is_cash) throw httpError(422, 'Keduanya harus rekening kas/bank');
+  if (dari.id === ke.id) throw httpError(422, 'Rekening asal dan tujuan sama');
+
+  const baris = db.prepare('SELECT * FROM journal_lines WHERE journal_id = ? ORDER BY id').all(j.id);
+  if (!baris.some((l) => l.account_id === dari.id)) {
+    throw httpError(422, `${j.entry_no} tidak memakai ${dari.code} · ${dari.name}`);
+  }
+
+  // Baris yang sudah dipasangkan dengan rekening koran adalah bukti bahwa uang
+  // itu memang lewat rekening ini. Memindahkannya diam-diam akan memutus
+  // pasangan tersebut, jadi pasangannya harus dilepas dulu dengan sadar.
+  const terpasang = db
+    .prepare(
+      `SELECT COUNT(*) n FROM bank_statement_lines
+        WHERE journal_line_id IN (SELECT id FROM journal_lines WHERE journal_id = ?)`
+    )
+    .get(j.id).n;
+  if (terpasang) {
+    throw httpError(
+      422,
+      `${j.entry_no} sudah dicocokkan dengan rekening koran di Rekonsiliasi Bank. ` +
+        'Lepaskan pasangannya di sana dulu bila memang salah rekening.'
+    );
+  }
+
+  const hasil = db.transaction(() => {
+    deleteJournalById(j.id);
+    return postJournal({
+      date: j.entry_date,
+      description: j.description,
+      lines: baris.map((l) => ({
+        account_id: l.account_id === dari.id ? ke.id : l.account_id,
+        debit: l.debit,
+        credit: l.credit,
+        memo: l.memo,
+        cashflow: l.cashflow,
+        partner_id: l.partner_id,
+      })),
+      source: j.source,
+      sourceId: j.source_id,
+      userId: req.user.id,
+      entryNo: j.entry_no,
+    });
+  })();
+
+  res.json({
+    ok: true,
+    journal: hasil,
+    message: `${j.entry_no} (${BISA_DIPINDAH[j.source]}) dipindahkan dari ${dari.name} ke ${ke.name}`,
+  });
 }));
 
 // ==================================================================

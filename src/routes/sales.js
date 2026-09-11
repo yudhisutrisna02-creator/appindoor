@@ -1041,10 +1041,20 @@ function calonBersihkan(from, to) {
     .map((x) => ({ ...x, qty: r2(x.qty) }));
 
   // Pengaruhnya pada saldo tiap akun: kebalikan dari yang dulu dibukukan.
+  //
+  // Saldo AKHIR periode sesudah dihapus ikut dihitung, bukan hanya
+  // perubahannya. Menghapus order sebulan berarti menghapus seluruh
+  // pemasukannya, sementara pengeluaran bulan itu — bayar supplier, iklan
+  // yang dipotong saldo marketplace — tetap tercatat. Rekening yang tadinya
+  // positif bisa menjadi minus puluhan juta, dan itu hanya terlihat bila
+  // saldo akhirnya ditunjukkan; angka perubahan saja tidak memberi tahu.
   const akun = db
     .prepare(
-      `SELECT a.code, a.name, a.type, a.is_cash,
-              COALESCE(SUM(l.debit - l.credit), 0) AS saldo
+      `SELECT a.code, a.name, a.type, a.is_cash, a.subtype,
+              COALESCE(SUM(l.debit - l.credit), 0) AS saldo,
+              (SELECT COALESCE(SUM(l2.debit - l2.credit), 0)
+                 FROM journal_lines l2 JOIN journals j2 ON j2.id = l2.journal_id
+                WHERE l2.account_id = a.id AND j2.entry_date <= ?) AS saldo_akhir
          FROM journal_lines l
          JOIN journals j ON j.id = l.journal_id
          JOIN sales_orders o ON o.id = j.source_id AND j.source = 'SALES'
@@ -1052,8 +1062,13 @@ function calonBersihkan(from, to) {
         WHERE o.status = 'POSTED' AND o.order_date BETWEEN ? AND ?
         GROUP BY a.code ORDER BY a.code`
     )
-    .all(from, to)
-    .map((a) => ({ ...a, perubahan: r2(-a.saldo) }))
+    .all(to, from, to)
+    .map((a) => ({
+      ...a,
+      perubahan: r2(-a.saldo),
+      saldoSebelum: r2(a.saldo_akhir),
+      saldoSesudah: r2(a.saldo_akhir - a.saldo),
+    }))
     .filter((a) => Math.abs(a.perubahan) >= 0.01);
 
   return { orders, terkunci, retur, returMacet, stok, akun };
@@ -1107,9 +1122,19 @@ router.post('/bersihkan-periode', butuhIzin('penjualan.batal'), ah((req, res) =>
     );
   }
 
+  // Bukan penghalang — pemiliknya mungkin memang berniat memasukkan saldo awal
+  // sesudahnya — tetapi harus diketahui SEBELUM tombolnya ditekan.
+  const jadiMinus = c.akun.filter(
+    (a) => (a.is_cash || a.subtype === 'RECEIVABLE') && a.saldoSesudah < -0.01
+  );
+  const peringatan = jadiMinus.map(
+    (a) => `${a.code} ${a.name} akan menjadi minus Rp ${Math.abs(a.saldoSesudah).toLocaleString('id-ID')} ` +
+      `per ${body.to} (sekarang Rp ${a.saldoSebelum.toLocaleString('id-ID')})`
+  );
+
   if (!body.terapkan) {
     return res.json({
-      ok: true, dicoba: true, ringkas, penghalang,
+      ok: true, dicoba: true, ringkas, penghalang, peringatan,
       stok: c.stok.slice(0, 30),
       akun: c.akun,
       contoh: c.orders.slice(0, 20),

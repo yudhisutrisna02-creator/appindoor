@@ -346,7 +346,7 @@ dan API-nya juga menolak — bukan sekadar disembunyikan.
 - **Proyeksi Arus Kas**
 - **Utang & Piutang**
 - **Laporan Keuangan** — neraca, laba rugi, arus kas, neraca saldo
-- **Buku Besar & Jurnal**
+- **Buku Besar & Jurnal** — bila rekening kas/bank bersaldo awal minus, panel di atas buku besar menunjukkan asalnya per sumber, lengkap dengan tombol **Pindahkan rekening** untuk pembayaran yang tercatat dari rekening yang salah
 - **Chart of Accounts**
 
 ### Laporan
@@ -507,6 +507,32 @@ Catatan teknis: jurnal pemindahan tidak punya dokumen induk, sehingga
 `source_id`-nya kosong. Menghapusnya lewat `deleteJournalsBySource` akan
 **menyapu seluruh pemindahan sekaligus** — sediakan `deleteJournalById(id)`
 dengan pemeriksaan kunci periode yang sama.
+
+### Saldo awal minus & pindah rekening
+
+Saldo awal buku besar adalah jumlah semua catatan SEBELUM tanggal awal, jadi
+catatan penyebabnya tidak tampil sebagai baris. Kalau rekening kas/bank
+bersaldo awal minus — mustahil secara fisik — laporan buku besar menyertakan
+`asalSaldoAwal`: ringkasan per sumber jurnal dan daftar pembayaran yang bisa
+dipindah (15 terbesar).
+
+`POST /api/finance/journals/:id/pindah-rekening {dari, ke}` mengganti HANYA
+baris rekening kas pada jurnal itu. Aturannya:
+- Hanya sumber SETTLEMENT, CASH, MANUAL. Jurnal penjualan/stok dibangun ulang
+  dari dokumennya, jadi rekeningnya diubah di dokumen itu (Ubah Pesanan).
+- Keduanya harus rekening kas/bank, tidak boleh sama, dan jurnal harus
+  memakai rekening asal.
+- Ditolak bila baris jurnalnya sudah dicocokkan di Rekonsiliasi Bank.
+- Lewat `deleteJournalById` + `postJournal({ entryNo })` dalam satu transaksi:
+  nomor jurnal, tanggal, nominal, dan mitra (utang/piutang) tetap; kunci
+  periode ikut menjaga. `postJournal` menerima `entryNo` untuk keperluan ini.
+
+Hapus jurnal manual juga lewat `deleteJournalById`, supaya bulan yang sudah
+ditutup buku tidak bisa diubah dari tombol hapus.
+
+Pratinjau Hapus Periode menampilkan saldo akhir rekening sebelum → sesudah dan
+memperingatkan rekening/piutang yang akan minus: pemasukan periode itu hilang,
+tetapi pengeluarannya (bayar supplier, iklan) tetap tercatat.
 
 ### Koreksi stok
 
@@ -752,7 +778,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 777 pemeriksaan, 53 bagian
+npm run smoke            # 799 pemeriksaan, 54 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1214,10 +1240,12 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Formulir pembelian stok memilih Kas Tunai secara bawaan | Setiap pembelian yang dibayar transfer tercatat mengurangi uang tunai di laci; saldo Kas Tunai minus tanpa ada uang yang benar-benar hilang. Cara bayar harus dipilih sendiri |
 | Uji asap dijalankan pada database yang sudah berisi data | Ratusan produk, order, dan jurnal tiruan tercampur ke data sungguhan dan tidak bisa dipisahkan lagi — sempat dipakai menganalisis data pemilik usaha. Uji kini berhenti sendiri bila databasenya tidak kosong |
 | Database uji diletakkan di dalam folder data/ proyek | Cadangan otomatis tersimpan di sebelah databasenya, jadi cadangan hasil uji ikut bercampur dengan cadangan sungguhan. Letakkan database, cadangan, dan unggahan uji di folder sementara |
+| Formulir pelunasan utang/piutang memilih rekening kas pertama secara bawaan | Pembayaran Rp 8,7 juta ke supplier yang ditransfer dari bank tercatat dari Kas Tunai; saldo awal Kas Tunai bulan berikutnya minus Rp 4,5 juta. Rekening harus dipilih sendiri, dan jurnal yang terlanjur salah dipindah lewat Buku Besar |
+| Hapus jurnal manual memakai DELETE langsung | Bulan yang sudah ditutup buku tetap bisa berubah dari satu tombol; semua penghapusan jurnal harus lewat pintu yang memeriksa kunci periode |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 
 ---
 
-*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 7 September 2026.
+*Dokumen ini menggambarkan aplikasi sebagaimana adanya pada 11 September 2026.
 Saat aplikasinya berkembang, perbarui dokumen ini bersamaan — panduan duplikasi
 yang tertinggal dari kenyataan lebih menyesatkan daripada tidak ada panduan.*

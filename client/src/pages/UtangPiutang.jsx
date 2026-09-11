@@ -44,7 +44,10 @@ export default function UtangPiutang() {
       sisa: tab === 'piutang' ? row.piutang : row.utang,
       entry_date: today(),
       amount: tab === 'piutang' ? row.piutang : row.utang,
-      cash_code: options?.cashAccounts?.[0]?.code || '',
+      // Sengaja KOSONG. Dulu terisi rekening pertama di daftar — yaitu Kas
+      // Tunai — sehingga pembayaran utang Rp 8.735.000 yang sebenarnya lewat
+      // bank tercatat dari laci, dan saldo tunai menjadi minus. Harus dipilih.
+      cash_code: '',
       note: '',
     });
   }
@@ -229,6 +232,7 @@ export default function UtangPiutang() {
                 className="input" required value={bayar.cash_code}
                 onChange={(e) => setBayar({ ...bayar, cash_code: e.target.value })}
               >
+                <option value="">— pilih rekening yang benar-benar dipakai —</option>
                 {(options?.cashAccounts || []).map((k) => (
                   <option key={k.code} value={k.code}>{k.code} — {k.name}</option>
                 ))}

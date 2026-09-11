@@ -44,7 +44,7 @@ function accountById(id) {
  *
  * Melempar Error bila total debit ≠ total kredit, atau bila jurnal kosong.
  */
-function postJournal({ date, description, lines, source = 'MANUAL', sourceId = null, userId = null }) {
+function postJournal({ date, description, lines, source = 'MANUAL', sourceId = null, userId = null, entryNo: nomorTetap = null }) {
   if (!date) throw ruleError('Tanggal jurnal wajib diisi', 400);
   if (!Array.isArray(lines) || lines.length < 2) {
     throw ruleError('Jurnal minimal terdiri dari 2 baris (debit dan kredit)', 400);
@@ -86,7 +86,10 @@ function postJournal({ date, description, lines, source = 'MANUAL', sourceId = n
 
   const period = String(date).slice(0, 7);
   pastikanTerbuka(period, date);
-  const entryNo = nextNumber('JV', period);
+  // Nomor lama boleh dipakai ulang HANYA saat jurnalnya ditulis ulang di
+  // tempat (jurnal lamanya sudah dihapus lebih dulu). Nomor itu sudah beredar
+  // di catatan dan tangkapan layar; menggantinya memutus penelusurannya.
+  const entryNo = nomorTetap || nextNumber('JV', period);
 
   const info = db
     .prepare(

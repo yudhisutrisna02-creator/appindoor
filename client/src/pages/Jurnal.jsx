@@ -14,9 +14,35 @@ const emptyEntry = () => ({
   ],
 });
 
+// Nama sumber jurnal dalam bahasa sehari-hari.
+const LABEL_SUMBER = {
+  SALES: 'Penjualan',
+  RETURN: 'Retur penjualan',
+  PURCHASE_RETURN: 'Retur pembelian',
+  SETTLEMENT: 'Pelunasan utang/piutang',
+  CASH: 'Kas masuk/keluar',
+  MANUAL: 'Jurnal manual',
+  STOCK: 'Barang masuk',
+  TRANSFER: 'Pindah saldo',
+  ADS: 'Biaya iklan',
+  PAYROLL: 'Penggajian',
+  AWAL: 'Saldo awal',
+  KOREKSI: 'Koreksi',
+  OPNAME: 'Stok opname',
+  REPAIR: 'Perbaikan barang',
+  REPAIR_LOSS: 'Barang rusak',
+};
+
+// Hanya jurnal berdiri sendiri yang boleh dipindah rekeningnya. Jurnal
+// penjualan/stok dibangun ulang dari dokumennya, jadi rekeningnya diubah di
+// dokumen itu (Ubah Pesanan), bukan di sini. Harus sama dengan BISA_DIPINDAH
+// di src/routes/finance.js.
+const LABEL_SUMBER_PINDAH = { SETTLEMENT: true, CASH: true, MANUAL: true };
+
 export default function Jurnal() {
   const toast = useToast();
-  const { canManage, isAdmin } = useAuth();
+  const { canManage, isAdmin, punya } = useAuth();
+  const bolehPindah = punya('keuangan.jurnal');
   const [tab, setTab] = useState('journals');
   const [range, setRange] = useState(defaultRange);
   const [rows, setRows] = useState([]);
@@ -28,6 +54,8 @@ export default function Jurnal() {
   // Buku besar
   const [accountId, setAccountId] = useState('');
   const [ledger, setLedger] = useState(null);
+  const [pindah, setPindah] = useState(null);
+  const [memindah, setMemindah] = useState(false);
 
   const loadJournals = useCallback(async () => {
     setLoading(true);
@@ -59,6 +87,27 @@ export default function Jurnal() {
   }, [accountId, range]);
 
   useEffect(() => { if (tab === 'ledger') loadLedger(); }, [tab, loadLedger]);
+
+  const bisaPindahDiSini = bolehPindah && !!ledger?.account?.is_cash;
+  const rekeningTujuan = accounts.filter((a) => a.is_cash && a.active && a.code !== ledger?.account?.code);
+
+  async function pindahkan(e) {
+    e.preventDefault();
+    if (!pindah.ke) return toast.error('Pilih rekening tujuan');
+    setMemindah(true);
+    try {
+      const res = await api.post(`/api/finance/journals/${pindah.journal_id}/pindah-rekening`, {
+        dari: ledger.account.code, ke: pindah.ke,
+      });
+      toast.success(res.message);
+      setPindah(null);
+      loadLedger();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMemindah(false);
+    }
+  }
 
   // ---------- Jurnal manual ----------
   const totalDebit = form?.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0) || 0;
@@ -214,6 +263,63 @@ export default function Jurnal() {
             <StatCard label="Saldo Akhir" value={rupiah(ledger.closing)} tone="green" />
           </div>
 
+          {/* Saldo awal adalah jumlah seluruh catatan SEBELUM tanggal awal, dan
+              catatan itu tidak tampil sebagai baris. Kalau rekening kas/bank
+              bersaldo awal minus — keadaan yang mustahil secara fisik —
+              penyebabnya ditunjukkan di sini, bersama tombol untuk
+              membetulkan rekeningnya. */}
+          {ledger.asalSaldoAwal && (
+            <div className="card mb-4 border-2 border-amber-200 bg-amber-50/50 dark:bg-amber-400/5">
+              <h2 className="mb-1 font-bold text-slate-900">
+                Saldo awal minus — asalnya dari catatan sebelum {dateID(range.from)}
+              </h2>
+              <p className="mb-3 text-xs leading-relaxed text-slate-600">
+                Uang tunai atau saldo bank tidak mungkin minus. Biasanya ada pembayaran yang
+                sebenarnya lewat rekening lain, tetapi tercatat dari rekening ini.
+              </p>
+
+              <div className="mb-3 flex flex-wrap gap-2">
+                {ledger.asalSaldoAwal.perSumber.map((s) => (
+                  <span key={s.source} className="rounded-lg bg-surface px-2.5 py-1.5 text-xs ring-1 ring-slate-200">
+                    <span className="font-medium text-slate-700">{LABEL_SUMBER[s.source] || s.source}</span>
+                    {s.masuk > 0 && <span className="ml-2 text-emerald-600">+{rupiah(s.masuk)}</span>}
+                    {s.keluar > 0 && <span className="ml-2 text-rose-600">−{rupiah(s.keluar)}</span>}
+                  </span>
+                ))}
+              </div>
+
+              {ledger.asalSaldoAwal.dapatDipindah.length > 0 && (
+                <div className="table-wrap">
+                  <table className="table text-sm">
+                    <thead>
+                      <tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th className="text-right">Keluar</th><th /></tr>
+                    </thead>
+                    <tbody>
+                      {ledger.asalSaldoAwal.dapatDipindah.map((d) => (
+                        <tr key={d.journal_id}>
+                          <td className="tabular">{dateID(d.entry_date)}</td>
+                          <td className="font-mono text-xs">{d.entry_no}</td>
+                          <td className="max-w-[280px] truncate">{d.description}</td>
+                          <td className="tabular text-right font-semibold text-rose-600">{rupiah(d.credit)}</td>
+                          <td className="text-right">
+                            {bolehPindah && (
+                              <button
+                                type="button" className="btn-secondary !py-1 text-xs"
+                                onClick={() => setPindah({ ...d, ke: '' })}
+                              >
+                                Pindahkan rekening
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="card">
             <h2 className="mb-3 font-bold text-slate-900">
               {ledger.account.code} — {ledger.account.name}
@@ -226,11 +332,12 @@ export default function Jurnal() {
             ) : (
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th></tr></thead>
+                  <thead><tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th>{bisaPindahDiSini && <th />}</tr></thead>
                   <tbody>
                     <tr className="bg-slate-50">
                       <td colSpan={5} className="px-3 py-2 font-semibold">Saldo Awal</td>
                       <td className="tabular px-3 py-2 font-semibold">{rupiah(ledger.opening)}</td>
+                      {bisaPindahDiSini && <td />}
                     </tr>
                     {ledger.entries.map((e, i) => (
                       <tr key={i}>
@@ -240,6 +347,19 @@ export default function Jurnal() {
                         <td className="tabular">{e.debit ? rupiah(e.debit) : '-'}</td>
                         <td className="tabular">{e.credit ? rupiah(e.credit) : '-'}</td>
                         <td className="tabular font-semibold">{rupiah(e.balance)}</td>
+                        {bisaPindahDiSini && (
+                          <td className="text-right">
+                            {LABEL_SUMBER_PINDAH[e.source] && (
+                              <button
+                                type="button" className="btn-ghost !px-2 !py-1 text-xs"
+                                title="Pindahkan ke rekening lain"
+                                onClick={() => setPindah({ journal_id: e.journal_id, entry_no: e.entry_no, entry_date: e.entry_date, description: e.description, credit: e.credit || e.debit, ke: '' })}
+                              >
+                                Pindah
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -321,6 +441,37 @@ export default function Jurnal() {
             <div className="flex gap-2">
               <button type="button" className="btn-secondary flex-1" onClick={() => setForm(null)}>Batal</button>
               <button type="submit" className="btn-primary flex-1" disabled={!balanced}>Posting Jurnal</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ---------- PINDAH REKENING ---------- */}
+      <Modal open={!!pindah} onClose={() => setPindah(null)} title={`Pindahkan ${pindah?.entry_no || ''}`}>
+        {pindah && ledger && (
+          <form onSubmit={pindahkan} className="grid gap-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm">
+              <p className="font-medium text-slate-900">{pindah.description}</p>
+              <p className="text-xs text-slate-500">
+                {dateID(pindah.entry_date)} · {rupiah(pindah.credit)} · sekarang tercatat di{' '}
+                <strong>{ledger.account.code} {ledger.account.name}</strong>
+              </p>
+            </div>
+            <Field label="Pindahkan ke rekening *" hint="Rekening yang benar-benar dipakai waktu itu">
+              <select className="input" required value={pindah.ke} onChange={(e) => setPindah({ ...pindah, ke: e.target.value })}>
+                <option value="">— pilih rekening —</option>
+                {rekeningTujuan.map((a) => <option key={a.id} value={a.code}>{a.code} — {a.name}</option>)}
+              </select>
+            </Field>
+            <p className="text-xs leading-relaxed text-slate-500">
+              Hanya baris rekeningnya yang berganti. Nomor jurnal, tanggal, nominal, dan utang/piutang
+              mitranya tetap sama.
+            </p>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setPindah(null)}>Batal</button>
+              <button type="submit" className="btn-primary flex-1" disabled={memindah}>
+                {memindah ? 'Memindahkan...' : 'Pindahkan'}
+              </button>
             </div>
           </form>
         )}

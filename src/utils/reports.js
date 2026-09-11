@@ -287,6 +287,50 @@ function prevDay(dateStr) {
 }
 
 /** Buku Besar satu akun: saldo awal + mutasi + saldo berjalan. */
+/**
+ * Dari mana saldo awal sebuah rekening kas/bank berasal.
+ *
+ * Saldo awal buku besar adalah jumlah SELURUH catatan sebelum tanggal awal
+ * yang dipilih — dan catatan-catatan itu tidak tampil sebagai baris. Kalau
+ * angkanya minus, orang melihat angka yang mustahil tanpa bisa melihat
+ * penyebabnya. Di sini rinciannya dikembalikan: per sumber, ditambah
+ * pengeluaran terbesar yang rekeningnya masih bisa dipindahkan.
+ *
+ * Hanya dihitung untuk rekening kas/bank yang saldo awalnya minus, karena
+ * hanya itu keadaan yang mustahil secara fisik.
+ */
+const SUMBER_BISA_DIPINDAH = ['SETTLEMENT', 'CASH', 'MANUAL'];
+
+function asalSaldoAwal(account, from, opening) {
+  if (!from || !account.is_cash || opening >= 0) return null;
+
+  const perSumber = db
+    .prepare(
+      `SELECT j.source, COUNT(*) AS baris,
+              COALESCE(SUM(l.debit), 0) AS masuk, COALESCE(SUM(l.credit), 0) AS keluar
+         FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+        WHERE l.account_id = ? AND j.posted = 1 AND j.entry_date < ?
+        GROUP BY j.source
+        ORDER BY (SUM(l.debit) - SUM(l.credit))`
+    )
+    .all(account.id, from)
+    .map((r) => ({ ...r, masuk: r2(r.masuk), keluar: r2(r.keluar), bersih: r2(r.masuk - r.keluar) }));
+
+  const tanda = SUMBER_BISA_DIPINDAH.map(() => '?').join(',');
+  const dapatDipindah = db
+    .prepare(
+      `SELECT j.id AS journal_id, j.entry_no, j.entry_date, j.description, j.source, l.credit
+         FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+        WHERE l.account_id = ? AND j.posted = 1 AND j.entry_date < ? AND l.credit > 0
+          AND j.source IN (${tanda})
+        ORDER BY l.credit DESC LIMIT 15`
+    )
+    .all(account.id, from, ...SUMBER_BISA_DIPINDAH)
+    .map((r) => ({ ...r, credit: r2(r.credit) }));
+
+  return { perSumber, dapatDipindah };
+}
+
 function generalLedger(accountId, from, to) {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId);
   if (!account) throw ruleError('Akun tidak ditemukan', 404);
@@ -309,7 +353,7 @@ function generalLedger(accountId, from, to) {
 
   const entries = db
     .prepare(
-      `SELECT j.entry_date, j.entry_no, j.description, j.source, l.debit, l.credit, l.memo
+      `SELECT j.id AS journal_id, j.entry_date, j.entry_no, j.description, j.source, l.debit, l.credit, l.memo
          FROM journal_lines l JOIN journals j ON j.id = l.journal_id
          ${where}
         ORDER BY j.entry_date, j.id, l.id`
@@ -323,6 +367,7 @@ function generalLedger(accountId, from, to) {
   return {
     account,
     opening,
+    asalSaldoAwal: asalSaldoAwal(account, from, opening),
     entries,
     closing: running,
     totalDebit: r2(entries.reduce((s, e) => s + e.debit, 0)),

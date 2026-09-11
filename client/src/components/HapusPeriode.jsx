@@ -112,15 +112,39 @@ export default function HapusPeriode({ open, onClose, onSelesai }) {
               </div>
             )}
 
+            {hasil.peringatan?.length > 0 && (
+              <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                <p className="mb-1 flex items-center gap-1.5 font-semibold">
+                  <AlertTriangle size={14} /> Saldo ini akan menjadi minus
+                </p>
+                <ul className="list-disc pl-5">
+                  {hasil.peringatan.map((p) => <li key={p}>{p}</li>)}
+                </ul>
+                <p className="mt-1.5">
+                  Pemasukan periode ini ikut terhapus, tetapi pengeluarannya — bayar supplier, iklan
+                  yang dipotong saldo marketplace — tetap tercatat. Saldo minus ini baru beres setelah
+                  saldo awal rekening dimasukkan sesudahnya.
+                </p>
+              </div>
+            )}
+
             {akunKas.length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-semibold text-slate-700">Saldo yang ikut berubah</p>
                 <p className="mb-2 text-xs text-slate-500">
-                  Uang dari order-order ini ikut keluar dari pembukuan. Rekening yang dulu menerima
-                  uangnya akan turun sebesar ini.
+                  Uang dari order-order ini ikut keluar dari pembukuan. Kolom kanan adalah saldo pada
+                  akhir periode sesudah dihapus — itulah yang nanti tampil sebagai saldo awal bulan
+                  berikutnya.
                 </p>
                 <div className="table-wrap">
                   <table className="table text-sm">
+                    <thead>
+                      <tr>
+                        <th>Rekening</th>
+                        <th className="text-right">Berubah</th>
+                        <th className="text-right">Saldo akhir: sekarang → sesudah</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {akunKas.map((a) => (
                         <tr key={a.code}>
@@ -129,6 +153,13 @@ export default function HapusPeriode({ open, onClose, onSelesai }) {
                           </td>
                           <td className={`tabular text-right font-medium ${a.perubahan < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
                             {a.perubahan > 0 ? '+' : ''}{rupiah(a.perubahan)}
+                          </td>
+                          <td className="tabular text-right text-xs">
+                            <span className="text-slate-500">{rupiah(a.saldoSebelum)}</span>
+                            {' → '}
+                            <span className={a.saldoSesudah < 0 ? 'font-semibold text-rose-600' : 'font-semibold text-slate-900'}>
+                              {rupiah(a.saldoSesudah)}
+                            </span>
                           </td>
                         </tr>
                       ))}

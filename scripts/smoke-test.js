@@ -5506,6 +5506,137 @@ async function main() {
     `status ${tolakBukanKas53}`);
 
 
+  console.log('\n54. Saldo awal minus dan pindah rekening pembayaran');
+
+  const cap54 = Date.now();
+  const thn54 = Number(today.slice(0, 4)) - 2;
+  const bulan54 = `${thn54}-04`;
+  const rek54 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI PINDAH 444-${cap54}`], mulai_kode: '1850',
+  })).dibuat[0].code;
+  const sup54 = await call('POST', '/api/partners', {
+    name: `Supplier Pindah ${cap54}`, kind: 'SUPPLIER', phone: '0812000544', address: 'Jl. Uji 54',
+  });
+  const idSup54 = (sup54.partner || sup54).id;
+  const prod54 = (await call('POST', '/api/inventory/products', {
+    sku: `P54-${cap54}`, name: 'Produk Uji Pindah Rekening', cost: 0, price: 30000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod54.id, move_date: `${bulan54}-05`, move_type: 'IN',
+    qty: 10, unit_cost: 10000, payment: 'CREDIT', partner_id: idSup54,
+  });
+  const utang54 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji((d.utang.find((r) => r.id === idSup54) || {}).utang || 0);
+  };
+  check('barang masuk kredit membentuk utang supplier', near(await utang54(), 100000, 1),
+    String(await utang54()));
+
+  // Pembayaran utang yang tercatat dari rekening yang salah — persis kejadian
+  // di data produksi: rekening itu jadi bersaldo minus.
+  const bayar54 = await call('POST', '/api/cashflow/settlements', {
+    entry_date: `${bulan54}-10`, partner_id: idSup54, direction: 'PAY',
+    amount: 100000, cash_code: rek54,
+  });
+  const idJurnal54 = bayar54.journal.id;
+  const noJurnal54 = bayar54.journal.entry_no;
+  check('pembayaran utang lunas', near(await utang54(), 0, 1));
+
+  const coa54 = await call('GET', '/api/finance/accounts');
+  const akun54 = (kode) => coa54.accounts.find((a) => a.code === kode);
+  const buku54 = () => call('GET',
+    `/api/finance/reports/ledger/${akun54(rek54).id}?from=${bulan54}-11&to=${today}`);
+
+  const sblm54 = await buku54();
+  check('rekening itu bersaldo awal minus', near(sblm54.opening, -100000, 1), String(sblm54.opening));
+  check('asal saldo awal minus ditunjukkan per sumber',
+    !!sblm54.asalSaldoAwal &&
+    sblm54.asalSaldoAwal.perSumber.some((s) => s.source === 'SETTLEMENT' && near(s.keluar, 100000, 1)),
+    JSON.stringify(sblm54.asalSaldoAwal));
+  check('pembayaran penyebabnya muncul sebagai yang bisa dipindah',
+    (sblm54.asalSaldoAwal?.dapatDipindah || []).some((d) => d.journal_id === idJurnal54 && d.entry_no === noJurnal54));
+
+  const bankSblm54 = await call('GET',
+    `/api/finance/reports/ledger/${akun54('1010').id}?from=${bulan54}-11&to=${today}`);
+
+  // Penolakan dulu, supaya jurnal aslinya masih utuh saat diuji.
+  const tolak54 = async (id, body) => {
+    try { await call('POST', `/api/finance/journals/${id}/pindah-rekening`, body); return 0; }
+    catch (err) { return err.status; }
+  };
+  check('rekening asal dan tujuan yang sama ditolak',
+    (await tolak54(idJurnal54, { dari: rek54, ke: rek54 })) === 422);
+  check('tujuan yang bukan rekening kas/bank ditolak',
+    (await tolak54(idJurnal54, { dari: rek54, ke: '4000' })) === 422);
+  check('rekening asal yang tidak dipakai jurnal itu ditolak',
+    (await tolak54(idJurnal54, { dari: '1000', ke: '1010' })) === 422);
+
+  const daftar54 = await call('GET', `/api/finance/journals?from=2000-01-01&to=${today}`);
+  const jurnalJual54 = daftar54.rows.find((j) => j.source === 'SALES');
+  if (jurnalJual54) {
+    check('jurnal penjualan tidak bisa dipindah dari sini (lewat Ubah Pesanan)',
+      (await tolak54(jurnalJual54.id, { dari: '1010', ke: '1000' })) === 422);
+  }
+
+  // Bulan tertutup: pintu yang sama dengan hapus jurnal harus ikut menjaga.
+  const manual54 = await call('POST', '/api/finance/journals', {
+    entry_date: `${bulan54}-20`, description: 'Uji jurnal manual bulan akan ditutup',
+    lines: [
+      { account_id: akun54('1000').id, debit: 1000, credit: 0 },
+      { account_id: akun54('3000').id, debit: 0, credit: 1000 },
+    ],
+  });
+  await call('POST', '/api/riwayat/periode/kunci', { period: bulan54, note: 'Uji pindah rekening' });
+  check('pindah rekening pada bulan tertutup ditolak',
+    (await tolak54(idJurnal54, { dari: rek54, ke: '1010' })) === 409);
+  let tolakHapus54 = 0;
+  try { await call('DELETE', `/api/finance/journals/${manual54.journal.id}`); }
+  catch (err) { tolakHapus54 = err.status; }
+  check('jurnal manual pada bulan tertutup tidak bisa dihapus', tolakHapus54 === 409,
+    `status ${tolakHapus54}`);
+  await call('DELETE', `/api/riwayat/periode/${bulan54}`);
+  await call('DELETE', `/api/finance/journals/${manual54.journal.id}`);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  check('tim tanpa izin jurnal tidak bisa memindah rekening',
+    (await tolak54(idJurnal54, { dari: rek54, ke: '1010' })) === 403);
+  token = adminAkun;
+
+  const pindah54 = await call('POST', `/api/finance/journals/${idJurnal54}/pindah-rekening`, {
+    dari: rek54, ke: '1010',
+  });
+  check('nomor dan tanggal jurnal tetap sama setelah dipindah',
+    pindah54.journal.entry_no === noJurnal54, JSON.stringify(pindah54.journal));
+  const detail54 = await call('GET', `/api/finance/journals/${pindah54.journal.id}`);
+  check('tanggal jurnal tidak bergeser', detail54.journal.entry_date === `${bulan54}-10`);
+  check('hanya baris rekeningnya yang berganti',
+    detail54.lines.some((l) => l.code === '1010' && near(l.credit, 100000, 1)) &&
+    detail54.lines.every((l) => l.code !== rek54) &&
+    detail54.lines.some((l) => l.debit > 0 && l.code !== '1010'));
+  check('utang supplier tetap lunas setelah dipindah', near(await utang54(), 0, 1),
+    String(await utang54()));
+
+  const ssdh54 = await buku54();
+  check('saldo awal rekening yang salah kembali nol', near(ssdh54.opening, 0, 1), String(ssdh54.opening));
+  check('panel asal saldo minus hilang setelah beres', ssdh54.asalSaldoAwal === null);
+  const bankSsdh54 = await call('GET',
+    `/api/finance/reports/ledger/${akun54('1010').id}?from=${bulan54}-11&to=${today}`);
+  check('rekening yang benar menanggung pembayarannya',
+    near(bankSsdh54.opening, bankSblm54.opening - 100000, 1),
+    `${bankSblm54.opening} → ${bankSsdh54.opening}`);
+
+  const tb54 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang setelah pindah rekening', tb54.balanced === true);
+
+  const lihat54 = await call('POST', '/api/sales/bersihkan-periode', {
+    from: `${bulan54}-01`, to: `${bulan54}-30`, terapkan: false,
+  });
+  check('pratinjau hapus periode membawa daftar peringatan saldo minus',
+    Array.isArray(lihat54.peringatan));
+  check('pratinjau hapus periode menyertakan saldo sebelum & sesudah',
+    (lihat54.akun || []).every((a) => typeof a.saldoSebelum === 'number' && typeof a.saldoSesudah === 'number'));
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
