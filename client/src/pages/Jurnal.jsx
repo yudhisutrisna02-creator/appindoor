@@ -148,7 +148,7 @@ export default function Jurnal() {
   }
 
   async function removeJournal(j) {
-    const pesan = j.source === 'SETTLEMENT'
+    const pesan = j.source !== 'MANUAL'
       ? `Hapus pembayaran ${j.entry_no}? Utang/piutang mitranya terbuka kembali sebesar nominal ini, lalu catat ulang pembayaran yang benar di Utang & Piutang.`
       : `Hapus jurnal ${j.entry_no}?`;
     if (!window.confirm(pesan)) return;
@@ -240,7 +240,7 @@ export default function Jurnal() {
                             >
                               <Eye size={14} />
                             </button>
-                            {isAdmin && (j.source === 'MANUAL' || j.source === 'SETTLEMENT') && (
+                            {isAdmin && ['MANUAL', 'SETTLEMENT', 'AWAL'].includes(j.source) && (
                               <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => removeJournal(j)} aria-label="Hapus">
                                 <Trash2 size={14} />
                               </button>

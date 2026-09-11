@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { DatabaseBackup, Download, Trash2, ShieldAlert, Clock, HardDrive } from 'lucide-react';
 import { api } from '../lib/api';
+import KosongkanBulan from '../components/KosongkanBulan';
 import {
   PageHeader, StatCard, Spinner, EmptyState, useToast,
 } from '../components/ui';
@@ -233,6 +234,8 @@ export default function Cadangan() {
           </div>
         )}
       </div>
+
+      <KosongkanBulan onSelesai={load} />
     </div>
   );
 }

@@ -5725,6 +5725,95 @@ async function main() {
   check('neraca saldo tetap seimbang setelah koreksi', tb55.balanced === true);
 
 
+  console.log('\n56. Kosongkan satu bulan');
+
+  const cap56 = Date.now();
+  const thn56 = Number(today.slice(0, 4)) - 1;
+  const bulan56 = `${thn56}-02`;
+  const sup56 = await call('POST', '/api/partners', {
+    name: `Supplier Kosongkan ${cap56}`, kind: 'SUPPLIER', phone: '0812000566', address: 'Jl. Uji 56',
+  });
+  const idSup56 = (sup56.partner || sup56).id;
+  const prod56 = (await call('POST', '/api/inventory/products', {
+    sku: `P56-${cap56}`, name: 'Produk Uji Kosongkan', cost: 0, price: 25000,
+  })).product;
+  const stok56 = async () => (await call('GET', `/api/inventory/products?q=P56-${cap56}`)).products[0].stock;
+  const utang56 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    const baris = [...d.utang, ...d.piutang].find((r) => r.id === idSup56);
+    return r2Uji(baris ? baris.utang : 0);
+  };
+
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod56.id, move_date: `${bulan56}-03`, move_type: 'IN',
+    qty: 10, unit_cost: 10000, payment: 'CREDIT', partner_id: idSup56,
+  });
+  const order56 = await call('POST', '/api/sales', {
+    order_date: `${bulan56}-10`, channel: 'WEBSITE',
+    items: [{ product_id: prod56.id, qty: 2, price: 25000 }],
+  });
+  const idOrder56 = (order56.order || order56).id;
+  await call('POST', '/api/iklan', {
+    spend_date: `${bulan56}-12`, channel: 'WEBSITE', platform: 'Meta Ads',
+    amount: 50000, payment: 'BANK', note: 'Uji kosongkan',
+  });
+  await call('POST', '/api/cashflow/settlements', {
+    entry_date: `${bulan56}-20`, partner_id: idSup56, direction: 'PAY', amount: 40000, cash_code: '1000',
+  });
+  // Sisa utang bulan ini dilunasi di bulan berikutnya — kasus TURRIMA.
+  await call('POST', '/api/cashflow/settlements', {
+    entry_date: `${thn56}-03-01`, partner_id: idSup56, direction: 'PAY', amount: 60000, cash_code: '1000',
+  });
+  check('persiapan: stok 8 dan utang lunas', (await stok56()) === 8 && near(await utang56(), 0, 1));
+
+  const lihat56 = await call('POST', '/api/kosongkan-bulan', { bulan: bulan56 });
+  const r56 = lihat56.ringkas;
+  check('pratinjau menghitung order, mutasi, iklan, dan jurnal bulan itu',
+    r56.orders >= 1 && r56.barangMasuk >= 1 && r56.iklan >= 1 && r56.jurnal >= 4,
+    JSON.stringify(r56));
+  check('sisa utang mitra bulan itu ditawarkan sebagai saldo awal',
+    lihat56.saldoMitra.some((s) => s.partner_id === idSup56 && near(s.nilai, 60000, 1)),
+    JSON.stringify(lihat56.saldoMitra));
+  check('kata kuncinya menyebut bulannya', r56.kataKunci === `KOSONGKAN ${bulan56}`);
+  check('pratinjau tidak mengubah apa pun', (await stok56()) === 8);
+
+  let tolakKata56 = 0;
+  try { await call('POST', '/api/kosongkan-bulan', { bulan: bulan56, terapkan: true, konfirmasi: 'HAPUS' }); }
+  catch (err) { tolakKata56 = err.status; }
+  check('kata kunci yang salah ditolak', tolakKata56 === 422);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakIzin56 = 0;
+  try { await call('POST', '/api/kosongkan-bulan', { bulan: bulan56 }); }
+  catch (err) { tolakIzin56 = err.status; }
+  check('tim tanpa izin cadangan tidak bisa mengosongkan bulan', tolakIzin56 === 403, `status ${tolakIzin56}`);
+  token = adminAkun;
+
+  await call('POST', '/api/riwayat/periode/kunci', { period: bulan56, note: 'Uji kosongkan' });
+  const kunci56 = await call('POST', '/api/kosongkan-bulan', { bulan: bulan56 });
+  check('bulan yang sudah ditutup buku menjadi penghalang',
+    kunci56.penghalang.some((p) => /ditutup buku/.test(p)));
+  await call('DELETE', `/api/riwayat/periode/${bulan56}`);
+
+  const jalan56 = await call('POST', '/api/kosongkan-bulan', {
+    bulan: bulan56, terapkan: true, konfirmasi: r56.kataKunci,
+  });
+  check('cadangan dibuat sebelum penghapusan', /^erp-.*\.db$/.test(jalan56.cadangan || ''), jalan56.cadangan);
+  check('stok kembali seperti sebelum bulan itu', (await stok56()) === 0, String(await stok56()));
+  const sesudah56 = await call('POST', '/api/kosongkan-bulan', { bulan: bulan56 });
+  check('tidak ada order, mutasi, atau iklan tersisa di bulan itu',
+    sesudah56.ringkas.orders === 0 && sesudah56.ringkas.mutasiStok === 0 && sesudah56.ringkas.iklan === 0,
+    JSON.stringify(sesudah56.ringkas));
+  check('yang tersisa hanya jurnal saldo awal mitra',
+    sesudah56.ringkas.perSumber.every((s) => s.source === 'AWAL'), JSON.stringify(sesudah56.ringkas.perSumber));
+  const detOrder56 = await call('GET', `/api/sales/${idOrder56}`);
+  check('order bulan itu berstatus dibatalkan', (detOrder56.order || detOrder56).status === 'CANCELLED');
+  check('pembayaran bulan berikutnya tetap melunasi utang (tidak minus)', near(await utang56(), 0, 1),
+    String(await utang56()));
+  const tb56 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang setelah dikosongkan', tb56.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

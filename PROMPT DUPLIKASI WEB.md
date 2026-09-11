@@ -552,6 +552,30 @@ dibayar dua kali transfer dari BCA. Tiga langkah, urutannya penting:
 3. **Catat ulang pembayaran yang benar** di Utang & Piutang dengan tanggal dan
    rekening sesuai rekening koran.
 
+### Kosongkan Satu Bulan (Sistem → Cadangan)
+
+Untuk memulai bersih dari bulan berikutnya ketika data sebuah bulan sudah
+terlanjur bercampur. `POST /api/kosongkan-bulan {bulan, terapkan, konfirmasi,
+bawa_saldo_mitra}`, izin `sistem.cadangan`. Yang dihapus pada bulan itu:
+- order penjualan — lewat `cancelOrder` (stok kembali, retur ikut dibalik,
+  termasuk retur bertanggal bulan berikutnya),
+- mutasi stok selain penjualan/retur — stok produk dikurangi sebesar
+  pengaruhnya; arah mutasi ADJ diambil dari `stock_opname_lines.diff_qty`
+  atau catatan "Koreksi stok A → B",
+- dokumen stok opname, belanja iklan, pesanan pembelian bulan itu,
+- SEMUA jurnal bertanggal bulan itu (via `deleteJournalById`).
+
+Penghalang: bulan ditutup buku, retur macet, jurnal modul lain yang punya
+status sendiri (mis. PAYROLL), PO yang penerimaannya di bulan lain, mutasi
+penjualan/retur yang tidak terhubung ke order bulan itu.
+
+Utang/piutang mitra yang TERBENTUK di bulan itu dibawa sebagai jurnal `AWAL`
+tertanggal akhir bulan (Modal lawan Utang/Piutang mitra) — tanpa ini,
+pembayaran di bulan berikutnya untuk utang bulan itu membuat utang minus.
+Pratinjau memperingatkan dana marketplace yang belum cair (tidak akan
+tercatat saat masuk), retur bulan lain yang ikut terhapus, dan produk yang
+stoknya jadi minus. Cadangan otomatis dibuat tepat sebelum penghapusan.
+
 Pratinjau Hapus Periode menampilkan saldo akhir rekening sebelum → sesudah dan
 memperingatkan rekening/piutang yang akan minus: pemasukan periode itu hilang,
 tetapi pengeluarannya (bayar supplier, iklan) tetap tercatat.
@@ -800,7 +824,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 813 pemeriksaan, 55 bagian
+npm run smoke            # 828 pemeriksaan, 56 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1264,6 +1288,7 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Database uji diletakkan di dalam folder data/ proyek | Cadangan otomatis tersimpan di sebelah databasenya, jadi cadangan hasil uji ikut bercampur dengan cadangan sungguhan. Letakkan database, cadangan, dan unggahan uji di folder sementara |
 | Formulir pelunasan utang/piutang memilih rekening kas pertama secara bawaan | Pembayaran Rp 8,7 juta ke supplier yang ditransfer dari bank tercatat dari Kas Tunai; saldo awal Kas Tunai bulan berikutnya minus Rp 4,5 juta. Rekening harus dipilih sendiri, dan jurnal yang terlanjur salah dipindah lewat Buku Besar |
 | Pembayaran utang dicatat sebesar nilai barang masuk yang salah harga | Utang tampak lunas, kas tampak berkurang Rp 8,7 juta padahal yang ditransfer Rp 6,36 juta; kesalahan harga tidak kelihatan karena utangnya sudah nol. Pembayaran harus dicocokkan dengan rekening koran, bukan dengan angka utang di layar |
+| Menghapus satu bulan tanpa membawa sisa utang mitra | Pembayaran supplier tanggal 1 bulan berikutnya (untuk barang bulan yang dihapus) membuat Utang Usaha minus Rp 25 juta. Sisa utang/piutang bulan itu harus dibawa sebagai saldo awal |
 | Hapus jurnal manual memakai DELETE langsung | Bulan yang sudah ditutup buku tetap bisa berubah dari satu tombol; semua penghapusan jurnal harus lewat pintu yang memeriksa kunci periode |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 

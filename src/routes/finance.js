@@ -229,7 +229,7 @@ function tolakBilaTerekonsiliasi(j) {
 // dokumen induk selain jurnalnya sendiri, jadi menghapus jurnalnya adalah
 // satu-satunya cara membetulkan nominal atau tanggal yang salah ketik —
 // utang/piutang mitranya otomatis terbuka kembali sebesar nominal itu.
-const BISA_DIHAPUS = { MANUAL: true, SETTLEMENT: true };
+const BISA_DIHAPUS = { MANUAL: true, SETTLEMENT: true, AWAL: true };
 
 router.delete('/journals/:id', butuhIzin('keuangan.jurnal'), ah((req, res) => {
   const journal = db.prepare('SELECT * FROM journals WHERE id = ?').get(req.params.id);

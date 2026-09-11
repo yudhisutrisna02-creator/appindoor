@@ -1746,3 +1746,5 @@ module.exports = router;
 // Dipakai Laporan Penjualan supaya angka returnya berasal dari fungsi yang
 // SAMA dengan menu Retur Penjualan — bukan dihitung ulang dengan query sendiri.
 module.exports.ambilRetur = ambilRetur;
+module.exports.calonBersihkan = calonBersihkan;
+module.exports.cancelOrder = cancelOrder;

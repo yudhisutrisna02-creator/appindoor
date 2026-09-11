@@ -309,7 +309,7 @@ export default function UtangPiutang() {
                         <td className="tabular">{e.credit ? rupiah(e.credit) : '-'}</td>
                         {bolehHapus && (
                           <td>
-                            {e.source === 'SETTLEMENT' && (
+                            {(e.source === 'SETTLEMENT' || e.source === 'AWAL') && (
                               <button
                                 type="button" className="btn-ghost !px-2 !py-1 text-rose-600"
                                 title="Hapus pembayaran ini" aria-label="Hapus pembayaran"

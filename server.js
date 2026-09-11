@@ -184,6 +184,7 @@ app.use('/api/branding', require('./src/routes/branding'));
 app.use('/api/verifikasi', require('./src/routes/verifikasi'));
 app.use('/api/dokumen', halaman('sistem.dokumen'), require('./src/routes/dokumen'));
 app.use('/api/cadangan', require('./src/routes/cadangan'));
+app.use('/api/kosongkan-bulan', require('./src/routes/kosongkan'));
 // Pusat Perhatian menyaring isinya sendiri menurut izin pembacanya, jadi cukup
 // menuntut sudah login di sini.
 app.use('/api/perhatian', require('./src/routes/perhatian'));
