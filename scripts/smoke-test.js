@@ -5065,8 +5065,14 @@ async function main() {
     return r2Uji((b.debit || 0) - (b.credit || 0));
   };
 
-  // Order tanpa memilih rekening: ikut rekening bawaan tokonya.
+  // Alur baru: SEMUA uang order marketplace masuk ke rekening penampung
+  // BANK MP INDOOR, bukan ke rekening toko — lalu ditarik lewat Tarik Saldo.
+  const kodeMp = (await call('GET', '/api/cashflow/options')).rekeningMp.code;
+  check('rekening penampung BANK MP INDOOR tersedia',
+    !!kodeMp && kodeMp !== '1010', String(kodeMp));
+
   const sblmA = await saldoAkun50(kodeA);
+  const sblmMp = await saldoAkun50(kodeMp);
   const orderRO = (await call('POST', '/api/sales', {
     order_date: today, channel: 'SHOPEE', shop_id: tokoA.id,
     customer: 'Pembeli Rekening', buyer_name: 'Pembeli Rekening',
@@ -5074,58 +5080,64 @@ async function main() {
     payment_status: 'PAID',
     items: [{ product_id: prodRO.id, qty: 2, price: 100000 }],
   })).order;
-  check('rekening order terisi dari bawaan tokonya',
-    orderRO.cash_code === kodeA, String(orderRO.cash_code));
+  check('order marketplace tercatat ke BANK MP INDOOR',
+    orderRO.cash_code === kodeMp, String(orderRO.cash_code));
+  check('uangnya masuk ke penampung, bukan ke rekening toko',
+    near((await saldoAkun50(kodeMp)) - sblmMp, 200000, 1)
+      && near((await saldoAkun50(kodeA)) - sblmA, 0, 1));
 
-  const ssdhA = await saldoAkun50(kodeA);
-  check('uang order masuk ke rekening tokonya, bukan kas tunai',
-    near(ssdhA - sblmA, 200000, 1), `${sblmA} -> ${ssdhA}`);
-
-  // Rekening yang dipilih pada ordernya menang atas bawaan tokonya.
+  // Rekening yang dikirim form diabaikan untuk marketplace.
   const sblmB = await saldoAkun50(kodeB);
   const orderRO2 = (await call('POST', '/api/sales', {
     order_date: today, channel: 'SHOPEE', shop_id: tokoA.id, cash_code: kodeB,
     customer: 'Pembeli Rekening 2', payment_status: 'PAID',
     items: [{ product_id: prodRO.id, qty: 1, price: 100000 }],
   })).order;
-  check('rekening yang dipilih pada order menang atas bawaan toko',
-    orderRO2.cash_code === kodeB, String(orderRO2.cash_code));
-  check('uangnya masuk ke rekening yang dipilih',
-    near((await saldoAkun50(kodeB)) - sblmB, 100000, 1));
+  check('marketplace tetap ke BANK MP INDOOR walau rekening lain dikirim',
+    orderRO2.cash_code === kodeMp && near((await saldoAkun50(kodeB)) - sblmB, 0, 1),
+    String(orderRO2.cash_code));
+
+  // Penjualan luring memilih rekeningnya sendiri.
+  const orderLuringB = (await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', cash_code: kodeB,
+    customer: 'Pembeli Luring Transfer', payment_status: 'PAID',
+    items: [{ product_id: prodRO.id, qty: 1, price: 100000 }],
+  })).order;
+  check('penjualan luring masuk ke rekening yang dipilih',
+    orderLuringB.cash_code === kodeB && near((await saldoAkun50(kodeB)) - sblmB, 100000, 1));
 
   let tolakRekOrder = 0;
   try {
     await call('POST', '/api/sales', {
-      order_date: today, channel: 'SHOPEE', shop_id: tokoA.id, cash_code: '4000',
+      order_date: today, channel: 'OFFLINE_WA', cash_code: '4000',
       items: [{ product_id: prodRO.id, qty: 1, price: 100000 }],
     });
   } catch (err) { tolakRekOrder = err.status; }
-  check('akun non-kas ditolak sebagai rekening order', tolakRekOrder === 422,
+  check('akun non-kas ditolak sebagai rekening order luring', tolakRekOrder === 422,
     `status ${tolakRekOrder}`);
 
-  // ---- Pengembalian dana retur ----
-  // Pembeli marketplace tidak pernah menerima uang tunai dari kita: dananya
-  // dipotong dari saldo toko tempat ia membeli.
+  // ---- Pengembalian dana retur marketplace: dipotong dari penampung ----
   const kasSblmRetur = await saldoAkun50('1000');
+  const mpSblmRetur = await saldoAkun50(kodeMp);
   const rekSblmRetur = await saldoAkun50(kodeA);
 
   const returRO = await call('POST', '/api/sales/returns', {
     return_date: today, order_id: orderRO.id, product_id: prodRO.id,
     qty: 1, price: 100000, kondisi: 'BAGUS', reason: 'Uji pengembalian dana',
+    cash_code: kodeA,
   });
   check('retur dari order tersimpan', returRO.ok === true);
 
-  check('dana retur dipotong dari rekening tokonya',
-    near((await saldoAkun50(kodeA)) - rekSblmRetur, -100000, 1),
-    'rekening toko terpotong');
-  check('kas tunai TIDAK ikut terpotong oleh retur marketplace',
-    near((await saldoAkun50('1000')) - kasSblmRetur, 0, 1),
-    'kas tunai tidak berubah');
+  check('dana retur marketplace dipotong dari BANK MP INDOOR',
+    near((await saldoAkun50(kodeMp)) - mpSblmRetur, -100000, 1));
+  check('rekening toko dan kas tunai TIDAK ikut terpotong',
+    near((await saldoAkun50(kodeA)) - rekSblmRetur, 0, 1)
+      && near((await saldoAkun50('1000')) - kasSblmRetur, 0, 1));
 
   const daftarReturRO = await call('GET', `/api/sales/returns/list?from=${today}&to=${today}`);
   const barisReturRO = daftarReturRO.rows.find((r) => r.return_no === returRO.return_no);
-  check('rekening pengembalian ikut tercatat pada returnya',
-    barisReturRO && barisReturRO.cash_code === kodeA, String(barisReturRO && barisReturRO.cash_code));
+  check('rekening pengembalian tercatat BANK MP INDOOR pada returnya',
+    barisReturRO && barisReturRO.cash_code === kodeMp, String(barisReturRO && barisReturRO.cash_code));
 
   // Retur penjualan luring tetap jatuh ke kas tunai.
   const kasSblmLuring = await saldoAkun50('1000');
@@ -5240,8 +5252,10 @@ async function main() {
     payment_status: 'PAID',
     items: [{ product_id: prodTT.id, qty: 1, price: 50000 }],
   })).order;
-  check('order toko non-utama tetap memakai rekening bersamanya',
-    orderSandy.cash_code === kodeBersama, String(orderSandy.cash_code));
+  // Rekening toko kini hanya tujuan tarik saldo; ordernya tetap ke penampung.
+  const kodeMp51 = (await call('GET', '/api/cashflow/options')).rekeningMp.code;
+  check('order toko yang punya rekening tujuan tetap masuk BANK MP INDOOR',
+    orderSandy.cash_code === kodeMp51, String(orderSandy.cash_code));
 
   const bsTT = await call('GET', `/api/finance/reports/balance-sheet?asOf=${today}`);
   check('neraca tetap seimbang setelah penautan massal', bsTT.balanced);
@@ -5281,67 +5295,51 @@ async function main() {
     name: `Sh Uji Lama ${cap52}`, channel: 'SHOPEE',
   })).shop;
 
-  // Dicatat SEBELUM tokonya punya rekening: uangnya jatuh ke Bank Operasional.
-  const bankSblm = await saldo52('1010');
+  const kodeMp52 = (await call('GET', '/api/cashflow/options')).rekeningMp.code;
+  const mpSblm52 = await saldo52(kodeMp52);
   const orderLama52 = (await call('POST', '/api/sales', {
     order_date: '2025-11-03', channel: 'SHOPEE', shop_id: toko52.id,
     order_ref: `SPX-LAMA-${cap52}`, payment_status: 'PAID',
     items: [{ product_id: prod52.id, qty: 1, price: 100000 }],
   })).order;
-  check('order lama tanpa rekening jatuh ke akun bawaan lama',
-    !orderLama52.cash_code && near((await saldo52('1010')) - bankSblm, 100000, 1));
-
-  const orderTanpaToko = (await call('POST', '/api/sales', {
-    order_date: '2025-11-04', channel: 'SHOPEE', payment_status: 'PAID',
-    items: [{ product_id: prod52.id, qty: 1, price: 100000 }],
-  })).order;
-  void orderTanpaToko;
+  check('order marketplace tanpa rekening masuk BANK MP INDOOR',
+    orderLama52.cash_code === kodeMp52 && near((await saldo52(kodeMp52)) - mpSblm52, 100000, 1));
 
   const rek52 = (await call('POST', '/api/cashflow/rekening', {
     nama: [`BCA UJI LAMA 111-${cap52}`], mulai_kode: '1700',
   })).dibuat[0].code;
-  await call('PUT', `/api/shops/${toko52.id}`, {
-    name: toko52.name, channel: 'SHOPEE', cash_code: rek52,
-  });
 
+  // Alat "Pindahkan order ke MP": order yang sudah di penampung tidak ditawarkan,
+  // dan order luring tidak pernah disentuh.
+  const luring52 = (await call('POST', '/api/sales', {
+    order_date: '2025-11-05', channel: 'OFFLINE_WA', cash_code: rek52, payment_status: 'PAID',
+    items: [{ product_id: prod52.id, qty: 1, price: 100000 }],
+  })).order;
   const cek52 = await call('POST', '/api/sales/kaitkan-rekening', {
     from: '2025-11-01', to: '2025-11-30', terapkan: false,
   });
-  check('pemeriksaan menemukan order yang bisa dikaitkan',
-    cek52.ringkas.bisa >= 1, JSON.stringify(cek52.ringkas));
-  check('order tanpa toko dilaporkan, bukan dilewati diam-diam',
-    cek52.ringkas.tanpaToko >= 1 && cek52.contoh.tanpaToko.length >= 1);
-  check('pemeriksaan tidak mengubah apa pun',
-    near(await saldo52(rek52), 0, 1));
-
-  const bankSblmKait = await saldo52('1010');
+  check('pemeriksaan pindah-ke-MP menunjuk BANK MP INDOOR sebagai tujuan',
+    cek52.ringkas.tujuan && cek52.ringkas.tujuan.code === kodeMp52, JSON.stringify(cek52.ringkas));
+  check('order yang sudah di penampung dan order luring tidak ditawarkan',
+    cek52.ringkas.bisa === 0, JSON.stringify(cek52.ringkas));
   const kait52 = await call('POST', '/api/sales/kaitkan-rekening', {
     from: '2025-11-01', to: '2025-11-30', terapkan: true,
   });
-  check('order lama berhasil dikaitkan', kait52.diubah >= 1 && kait52.dilewati.length === 0,
-    JSON.stringify({ diubah: kait52.diubah, dilewati: kait52.dilewati }));
-  check('uangnya pindah dari akun bawaan lama ke rekening tokonya',
-    near(await saldo52(rek52), 100000, 1)
-      && near((await saldo52('1010')) - bankSblmKait, -100000, 1),
-    `rek ${await saldo52(rek52)}`);
+  check('menerapkan tanpa calon tidak mengubah apa pun',
+    kait52.diubah === 0 && near(await saldo52(rek52), 100000, 1));
 
-  const detail52 = await call('GET', `/api/sales/${orderLama52.id}`);
-  check('rekening tercatat pada ordernya', detail52.order.cash_code === rek52);
-
-  const lagi52 = await call('POST', '/api/sales/kaitkan-rekening', {
-    from: '2025-11-01', to: '2025-11-30', terapkan: false,
-  });
-  check('order yang sudah dikaitkan tidak ditawarkan lagi',
-    !lagi52.ringkas.perRekening.some((x) => x.rekening.startsWith(rek52)));
-
-  // ---- B. Rekening bisa diganti lewat Ubah Pesanan, dan uangnya ikut pindah ----
+  // ---- B. Rekening order luring bisa diganti lewat Ubah Pesanan ----
   const rek52b = (await call('POST', '/api/cashflow/rekening', {
     nama: [`BNI UJI UBAH 222-${cap52}`], mulai_kode: '1700',
   })).dibuat[0].code;
-  await call('PUT', `/api/sales/${orderLama52.id}`, { cash_code: rek52b });
-  check('mengganti rekening lewat ubah pesanan memindahkan uangnya',
+  await call('PUT', `/api/sales/${luring52.id}`, { cash_code: rek52b });
+  check('mengganti rekening order luring lewat ubah pesanan memindahkan uangnya',
     near(await saldo52(rek52b), 100000, 1) && near(await saldo52(rek52), 0, 1),
     `${await saldo52(rek52)} -> ${await saldo52(rek52b)}`);
+  await call('PUT', `/api/sales/${orderLama52.id}`, { cash_code: rek52b });
+  const detail52 = await call('GET', `/api/sales/${orderLama52.id}`);
+  check('order marketplace tidak bisa dipindah dari penampung lewat ubah pesanan',
+    detail52.order.cash_code === kodeMp52 && near(await saldo52(rek52b), 100000, 1));
 
   // ---- C. Membatalkan order yang punya retur tidak menghitung stok dua kali ----
   const orderRet52 = (await call('POST', '/api/sales', {
@@ -5999,6 +5997,88 @@ async function main() {
   check('dua pembayaran yang benar melunasi pesanannya', near(await utang59(), 0, 1));
   const tb59 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
   check('neraca saldo tetap seimbang', tb59.balanced === true);
+
+
+  console.log('\n60. BANK MP INDOOR & tarik saldo ke rekening bank');
+
+  const cap60 = Date.now();
+  const saldo60 = async (kode) => {
+    const tb = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31`);
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const kodeMp60 = (await call('GET', '/api/cashflow/options')).rekeningMp.code;
+  const rekT60 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI TARIK 600-${cap60}`], mulai_kode: '1910',
+  })).dibuat[0].code;
+  const toko60 = (await call('POST', '/api/shops', {
+    name: `Sh Uji Tarik ${cap60}`, channel: 'SHOPEE', cash_code: rekT60,
+  })).shop;
+  const prod60 = (await call('POST', '/api/inventory/products', {
+    sku: `P60-${cap60}`, name: 'Produk Uji Tarik Saldo', cost: 0, price: 100000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod60.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 30000, payment: 'CASH',
+  });
+
+  const mpAwal60 = await saldo60(kodeMp60);
+  await call('POST', '/api/sales', {
+    order_date: today, channel: 'SHOPEE', shop_id: toko60.id, payment_status: 'PAID',
+    items: [{ product_id: prod60.id, qty: 1, price: 100000 }],
+  });
+  check('dana order yang cair masuk BANK MP INDOOR, rekening toko belum berubah',
+    near((await saldo60(kodeMp60)) - mpAwal60, 100000, 1) && near(await saldo60(rekT60), 0, 1));
+
+  const lihat60 = await call('GET', `/api/cashflow/tarik-mp?from=${today}&to=${today}`);
+  const baris60 = lihat60.perToko.find((t) => t.shop_id === toko60.id);
+  check('sisa dana per toko terlihat, lengkap dengan rekening tujuannya',
+    !!baris60 && near(baris60.masuk, 100000, 1) && near(baris60.sisa, 100000, 1)
+      && baris60.rekening_tujuan === rekT60, JSON.stringify(baris60));
+  check('rekening penampung tidak ditawarkan sebagai tujuan',
+    !lihat60.rekening.some((k) => k.code === kodeMp60));
+
+  const tolak60 = async (body) => {
+    try { await call('POST', '/api/cashflow/tarik-mp', body); return 0; }
+    catch (err) { return err.status; }
+  };
+  check('tarik ke BANK MP INDOOR sendiri ditolak',
+    (await tolak60({ entry_date: today, ke: kodeMp60, amount: 1000 })) === 422);
+  check('tarik ke akun non-kas ditolak',
+    (await tolak60({ entry_date: today, ke: '4000', amount: 1000 })) === 422);
+
+  const admin60 = await saldo60('6000');
+  const tarik60 = await call('POST', '/api/cashflow/tarik-mp', {
+    entry_date: today, shop_id: toko60.id, ke: rekT60, amount: 95000, potongan: 5000,
+    note: 'Pencairan Shopee',
+  });
+  check('nominal yang diterima masuk ke rekening bank',
+    near(await saldo60(rekT60), 95000, 1));
+  check('penampung berkurang sebesar diterima + potongan',
+    near((await saldo60(kodeMp60)) - mpAwal60, 0, 1));
+  check('potongan dicatat sebagai biaya admin marketplace',
+    near((await saldo60('6000')) - admin60, 5000, 1));
+  const lagi60 = await call('GET', `/api/cashflow/tarik-mp?from=${today}&to=${today}`);
+  const riwayat60 = lagi60.rows.find((r) => r.id === tarik60.journal.id);
+  check('riwayat tarik saldo mencatat toko, nominal, dan potongannya',
+    !!riwayat60 && riwayat60.shop_id === toko60.id && near(riwayat60.nominal, 95000, 1)
+      && near(riwayat60.potongan, 5000, 1), JSON.stringify(riwayat60));
+  check('sisa dana toko itu menjadi nol',
+    near(lagi60.perToko.find((t) => t.shop_id === toko60.id).sisa, 0, 1));
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakIzin60 = 0;
+  try { await call('DELETE', `/api/cashflow/tarik-mp/${tarik60.journal.id}`); }
+  catch (err) { tolakIzin60 = err.status; }
+  check('tim tanpa izin kas tidak bisa membatalkan tarik saldo', tolakIzin60 === 403);
+  token = adminAkun;
+
+  await call('DELETE', `/api/cashflow/tarik-mp/${tarik60.journal.id}`);
+  check('membatalkan tarik saldo ikut menghapus potongannya',
+    near(await saldo60(rekT60), 0, 1) && near((await saldo60('6000')) - admin60, 0, 1)
+      && near((await saldo60(kodeMp60)) - mpAwal60, 100000, 1));
+  const tb60 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb60.balanced === true);
 
 
   // ---------- Hasil ----------

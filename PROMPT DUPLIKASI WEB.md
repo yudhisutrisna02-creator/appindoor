@@ -564,6 +564,30 @@ memakai `koreksiHargaMasuk` (fungsi yang sama dengan tombol Harga). Semua dalam
 satu transaksi; ditolak bila utang supplier jadi minus, mutasi tanpa supplier,
 atau sudah ber-PO.
 
+### BANK MP INDOOR — rekening penampung marketplace
+
+Dana pencairan marketplace hampir tidak pernah sama dengan nilai transaksinya
+(potongan & penyesuaian platform). Karena itu:
+- SEMUA uang order marketplace (SHOPEE, TOKOPEDIA, TIKTOK_SHOP, LAZADA) masuk ke
+  satu rekening penampung, kodenya di pengaturan `rekening_mp` (migrasi
+  membuat akun "BANK MP INDOOR" di kode bebas pertama mulai 1030).
+  `rekeningMarketplace()` di utils/accounting dipakai oleh: pembuatan order,
+  Ubah Pesanan (dipaksa untuk kanal marketplace), jurnal penjualan bawaan,
+  dan pengembalian dana retur marketplace.
+- Penjualan luring memilih rekeningnya sendiri (bawaan Kas Tunai).
+- `shops.cash_code` kini berarti **rekening tujuan tarik saldo** — tidak lagi
+  memengaruhi order. Migrasi `lepas_rekening_toko_v1` sekali melepas semua
+  pemasangan lama (alur lama: uang order langsung ke rekening toko).
+- **Tarik Saldo** (Pencairan Dana): `POST /api/cashflow/tarik-mp {entry_date,
+  shop_id, ke, amount, potongan, note}` → jurnal TRANSFER (D bank / K MP,
+  source_id = id toko) + bila ada potongan, jurnal CASH (D 6000 / K MP,
+  source_id = id jurnal tarik). `GET /tarik-mp` memberi saldo MP, sisa per
+  toko (masuk dari SALES/RETURN − ditarik − potongan) dan riwayat;
+  `DELETE /tarik-mp/:id` (juga DELETE /pindah/:id) ikut menghapus potongannya.
+- Alat "Pindahkan Order ke MP" (Toko → `POST /api/sales/kaitkan-rekening`)
+  memindahkan order marketplace lama yang belum di penampung; jurnal ditulis
+  ulang dengan invarian total debit sama.
+
 ### Transaksi Utang & Piutang (tab Transaksi)
 
 Daftar per mitra hanya memuat mitra yang MASIH punya saldo, sehingga pembayaran
@@ -849,7 +873,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 855 pemeriksaan, 59 bagian
+npm run smoke            # 866 pemeriksaan, 60 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1314,6 +1338,7 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Formulir pelunasan utang/piutang memilih rekening kas pertama secara bawaan | Pembayaran Rp 8,7 juta ke supplier yang ditransfer dari bank tercatat dari Kas Tunai; saldo awal Kas Tunai bulan berikutnya minus Rp 4,5 juta. Rekening harus dipilih sendiri, dan jurnal yang terlanjur salah dipindah lewat Buku Besar |
 | Pembayaran utang dicatat sebesar nilai barang masuk yang salah harga | Utang tampak lunas, kas tampak berkurang Rp 8,7 juta padahal yang ditransfer Rp 6,36 juta; kesalahan harga tidak kelihatan karena utangnya sudah nol. Pembayaran harus dicocokkan dengan rekening koran, bukan dengan angka utang di layar |
 | Menghapus satu bulan tanpa membawa sisa utang mitra | Pembayaran supplier tanggal 1 bulan berikutnya (untuk barang bulan yang dihapus) membuat Utang Usaha minus Rp 25 juta. Sisa utang/piutang bulan itu harus dibawa sebagai saldo awal |
+| Uang order marketplace dicatat langsung ke rekening bank toko | Nominal pencairan dari platform selalu berbeda dari nilai transaksi, jadi saldo rekening di aplikasi tidak pernah cocok dengan mutasi bank. Tampung dulu di satu rekening marketplace, lalu catat tarik saldo dengan nominal yang benar-benar diterima |
 | Hapus jurnal manual memakai DELETE langsung | Bulan yang sudah ditutup buku tetap bisa berubah dari satu tombol; semua penghapusan jurnal harus lewat pintu yang memeriksa kunci periode |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 

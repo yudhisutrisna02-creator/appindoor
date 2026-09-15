@@ -4,7 +4,6 @@ import { api } from '../lib/api';
 import { Modal, Field, useToast } from '../components/ui';
 import BarisVarian from '../components/BarisVarian';
 import { STATUS_PESANAN, CHANNEL_LABEL, rupiah, EKSPEDISI, MARKETPLACE } from '../lib/format';
-import { tokoUntukRekening } from '../lib/rekening';
 
 /**
  * Formulir ubah order.
@@ -15,7 +14,7 @@ import { tokoUntukRekening } from '../lib/rekening';
  * disentuh ikut ditulis ulang, dan perbedaan pembulatan kecil pun bisa
  * menggeser angka yang sebenarnya tidak diapa-apakan.
  */
-export default function UbahOrder({ order, shops = [], rekening = [], products = [], open, onClose, onSaved }) {
+export default function UbahOrder({ order, shops = [], rekening = [], rekeningMp = null, products = [], open, onClose, onSaved }) {
   const toast = useToast();
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -225,36 +224,20 @@ export default function UbahOrder({ order, shops = [], rekening = [], products =
 
   const ubah = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-  const tokoTerpilih = shops.find((s) => String(s.id) === String(form.shop_id)) || null;
-  const namaRekening = (kode) => {
-    const k = rekening.find((x) => x.code === kode);
-    return k ? `${k.code} · ${k.name}` : kode;
-  };
+  const orderMp = MARKETPLACE.includes(order.channel);
 
   // Akun yang dipakai jurnal selama rekening belum dipilih — sama persis
   // dengan aturan di peladen, supaya yang tertulis di layar tidak menyesatkan.
   const bawaanLama = form.payment_status !== 'PAID'
     ? 'Piutang Marketplace (dana belum cair)'
-    : MARKETPLACE.includes(order.channel)
-      ? 'Bank Operasional (akun bawaan lama)'
-      : 'Kas Tunai (akun bawaan lama)';
+    : 'Kas Tunai (akun bawaan)';
 
-  /** Mengganti toko ikut menarik rekening bawaannya — sama seperti order baru. */
   function gantiToko(nilai) {
-    const sh = shops.find((x) => String(x.id) === String(nilai));
-    setForm((f) => ({
-      ...f,
-      shop_id: nilai,
-      cash_code: sh && sh.cash_code ? sh.cash_code : f.cash_code,
-    }));
+    setForm((f) => ({ ...f, shop_id: nilai }));
   }
 
-  /** Mengganti rekening ikut memilih tokonya bila tokonya jelas. */
   function gantiRekening(kode) {
-    setForm((f) => {
-      const toko = tokoUntukRekening(shops, kode, order.channel);
-      return { ...f, cash_code: kode, ...(toko ? { shop_id: String(toko.id) } : {}) };
-    });
+    setForm((f) => ({ ...f, cash_code: kode }));
   }
 
   return (
@@ -322,37 +305,27 @@ export default function UbahOrder({ order, shops = [], rekening = [], products =
           </select>
         </Field>
 
-        {/* Order yang dicatat sebelum ada kolom rekening masih kosong di sini,
-            dan uangnya tercatat di akun bawaan lama. Mengganti rekening di sini
-            benar-benar memindahkan uangnya: jurnal order ditulis ulang setiap
-            kali disimpan. */}
-        <Field
-          label="Rekening Penerima"
-          hint={
-            form.cash_code
-              ? 'Ke mana uang order ini masuk'
-              : `Belum dipilih — tercatat di ${bawaanLama}`
-          }
-        >
-          <select className="input" value={form.cash_code} onChange={(e) => gantiRekening(e.target.value)} disabled={batal}>
-            <option value="">— belum dipilih —</option>
-            {rekening.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
-          </select>
-        </Field>
-
-        {!batal && !form.cash_code && tokoTerpilih?.cash_code && (
-          <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-brand-50 px-3 py-2 text-xs text-brand-900">
-            <span>
-              Toko <strong>{tokoTerpilih.name}</strong> memakai rekening{' '}
-              <strong>{namaRekening(tokoTerpilih.cash_code)}</strong>.
-            </span>
-            <button
-              type="button" className="btn-secondary !py-1 text-xs"
-              onClick={() => setForm({ ...form, cash_code: tokoTerpilih.cash_code })}
-            >
-              Pakai rekening toko ini
-            </button>
-          </div>
+        {/* Order marketplace selalu lewat BANK MP INDOOR; menyimpan order ini
+            ikut memindahkan jurnalnya ke sana. Penjualan lain memilih
+            rekeningnya sendiri — jurnalnya ditulis ulang setiap disimpan. */}
+        {orderMp ? (
+          <Field label="Rekening Penerima" hint="Ditarik ke bank lewat Pencairan Dana → Tarik Saldo">
+            <div className="input bg-slate-50 text-slate-700">
+              {rekeningMp ? `${rekeningMp.code} — ${rekeningMp.name}` : 'BANK MP INDOOR'} (penampung marketplace)
+            </div>
+          </Field>
+        ) : (
+          <Field
+            label="Rekening Penerima"
+            hint={form.cash_code ? 'Ke mana uang order ini masuk' : `Belum dipilih — tercatat di ${bawaanLama}`}
+          >
+            <select className="input" value={form.cash_code} onChange={(e) => gantiRekening(e.target.value)} disabled={batal}>
+              <option value="">— belum dipilih —</option>
+              {rekening
+                .filter((k) => !rekeningMp || k.code !== rekeningMp.code)
+                .map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
+            </select>
+          </Field>
         )}
 
         <Field label="No. Pesanan">

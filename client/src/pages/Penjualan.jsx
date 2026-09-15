@@ -7,7 +7,6 @@ import UbahOrder from './UbahOrder';
 import BarisVarian from '../components/BarisVarian';
 import { rupiah, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel, EKSPEDISI, MARKETPLACE } from '../lib/format';
 import { useAuth } from '../lib/auth';
-import { tokoUntukRekening } from '../lib/rekening';
 import HapusPeriode from '../components/HapusPeriode';
 
 const emptyOrder = () => ({
@@ -60,6 +59,7 @@ export default function Penjualan() {
   const [partners, setPartners] = useState([]);
   const [shops, setShops] = useState([]);
   const [rekening, setRekening] = useState([]);
+  const [rekeningMp, setRekeningMp] = useState(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -88,7 +88,10 @@ export default function Penjualan() {
   useEffect(() => {
     api.get('/api/partners', { kind: 'CUSTOMER' }).then((d) => setPartners(d.partners)).catch(() => {});
     api.get('/api/shops').then((d) => setShops(d.shops)).catch(() => {});
-    api.get('/api/cashflow/options').then((d) => setRekening(d.cashAccounts || [])).catch(() => {});
+    api.get('/api/cashflow/options').then((d) => {
+      setRekening(d.cashAccounts || []);
+      setRekeningMp(d.rekeningMp || null);
+    }).catch(() => {});
   }, []);
 
   // ---------- Kalkulasi margin langsung di browser (cermin logika server) ----------
@@ -141,33 +144,17 @@ export default function Penjualan() {
    */
   const butuhToko = form ? MARKETPLACE.includes(form.channel) : false;
 
-  /** Toko-toko yang memakai rekening yang sedang dipilih. */
-  const tokoDariRekening = form?.cash_code
-    ? shops.filter((s) => s.cash_code === form.cash_code)
-    : [];
-
   function pilihToko(nilai) {
     const sh = shops.find((x) => x.id === Number(nilai));
     setForm((f) => ({
       ...f,
       shop_id: nilai ? Number(nilai) : null,
       channel: sh ? sh.channel : f.channel,
-      // Rekening ikut tertarik dari tokonya. Kalau tokonya belum punya
-      // rekening bawaan, pilihan yang sudah ada dibiarkan — jangan
-      // mengosongkan apa yang sudah diketik orang.
-      cash_code: sh && sh.cash_code ? sh.cash_code : f.cash_code,
     }));
   }
 
   function pilihRekening(kode) {
-    setForm((f) => {
-      const toko = tokoUntukRekening(shops, kode, f.channel);
-      return {
-        ...f,
-        cash_code: kode,
-        ...(toko ? { shop_id: toko.id, channel: toko.channel } : {}),
-      };
-    });
+    setForm((f) => ({ ...f, cash_code: kode }));
   }
 
   function setItem(index, patch) {
@@ -695,28 +682,30 @@ export default function Penjualan() {
                 <input type="date" className="input" value={form.payout_date} onChange={(e) => setForm({ ...form, payout_date: e.target.value })} />
               </Field>
 
-              {/* Uang order hampir tidak pernah masuk ke kas tunai: pembeli
-                  mentransfer, dan marketplace mencairkan ke rekening tertentu
-                  milik tokonya. Memilih toko mengisi rekening ini, dan memilih
-                  rekening mengisi tokonya — dua arah, karena yang mengetik
-                  kadang ingat tokonya, kadang ingat rekeningnya. */}
-              <Field
-                label={`Rekening Penerima${butuhToko ? ' *' : ''}`}
-                className="sm:col-span-2"
-                hint={
-                  tokoDariRekening.length > 1 && !form.shop_id
-                    ? `Dipakai ${tokoDariRekening.length} toko — pilih tokonya sendiri`
-                    : 'Ke mana uang order ini masuk'
-                }
-              >
-                <select
-                  className="input" required={butuhToko} value={form.cash_code || ''}
-                  onChange={(e) => pilihRekening(e.target.value)}
-                >
-                  <option value="">— ikut bawaan toko —</option>
-                  {rekening.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
-                </select>
-              </Field>
+              {/* Marketplace: uangnya SELALU masuk ke rekening penampung BANK MP
+                  INDOOR. Nominal pencairan dari platform hampir tidak pernah sama
+                  dengan nilai transaksi, jadi pemindahan ke bank dicatat terpisah
+                  lewat Pencairan Dana → Tarik Saldo. Penjualan lain memilih
+                  rekeningnya sendiri. */}
+              {butuhToko ? (
+                <Field label="Rekening Penerima" className="sm:col-span-2" hint="Ditarik ke bank lewat Pencairan Dana → Tarik Saldo">
+                  <div className="input bg-slate-50 text-slate-700">
+                    {rekeningMp ? `${rekeningMp.code} — ${rekeningMp.name}` : 'BANK MP INDOOR'} (penampung marketplace)
+                  </div>
+                </Field>
+              ) : (
+                <Field label="Rekening Penerima" className="sm:col-span-2" hint="Ke mana uang order ini masuk">
+                  <select
+                    className="input" value={form.cash_code || ''}
+                    onChange={(e) => pilihRekening(e.target.value)}
+                  >
+                    <option value="">— Kas Tunai (bawaan) —</option>
+                    {rekening
+                      .filter((k) => !rekeningMp || k.code !== rekeningMp.code)
+                      .map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
+                  </select>
+                </Field>
+              )}
             </div>
 
             {/* ---- Data pembeli ---- */}
@@ -799,6 +788,7 @@ export default function Penjualan() {
         order={ubah}
         shops={shops}
         rekening={rekening}
+        rekeningMp={rekeningMp}
         products={products}
         open={!!ubah}
         onClose={() => setUbah(null)}

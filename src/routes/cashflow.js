@@ -15,6 +15,7 @@ const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const {
   r2, ACC, postJournal, deleteJournalsBySource, deleteJournalById, accountByCode, tolakBilaTerekonsiliasi,
+  rekeningMarketplace,
 } = require('../utils/accounting');
 const { todayLocal } = require('../utils/time');
 
@@ -94,6 +95,13 @@ function categoryAccounts(direction) {
 router.get('/options', ah((req, res) => {
   res.json({
     cashAccounts: cashAccounts(),
+    // Rekening penampung marketplace — form penjualan menampilkannya sebagai
+    // rekening tetap untuk order marketplace.
+    rekeningMp: (() => {
+      const kode = rekeningMarketplace();
+      const a = db.prepare('SELECT code, name FROM accounts WHERE code = ?').get(kode);
+      return a || { code: kode, name: kode };
+    })(),
     incomeCategories: categoryAccounts('IN'),
     expenseCategories: categoryAccounts('OUT'),
     today: todayLocal(),
@@ -256,9 +264,217 @@ router.delete('/pindah/:id(\\d+)', butuhIzin('keuangan.kas'), ah((req, res) => {
 
   // Lewat pintu yang sama dengan penghapusan jurnal lain, supaya kunci periode
   // tetap berlaku: pemindahan di bulan yang sudah ditutup tidak bisa dihapus.
-  deleteJournalById(j.id);
+  // Potongan milik tarik saldo marketplace ikut terhapus bersama tariknya.
+  db.transaction(() => {
+    for (const p of db.prepare("SELECT id FROM journals WHERE source = 'CASH' AND source_id = ?").all(j.id)) {
+      deleteJournalById(p.id);
+    }
+    deleteJournalById(j.id);
+  })();
 
   res.json({ ok: true, message: `Pemindahan ${j.entry_no} dibatalkan` });
+}));
+
+// ==================================================================
+// TARIK SALDO MARKETPLACE — BANK MP INDOOR → rekening bank
+// ==================================================================
+/**
+ * Uang order marketplace yang sudah cair ditampung di BANK MP INDOOR. Saat
+ * platform mentransfer ke bank, nominalnya hampir tidak pernah sama dengan
+ * nilai transaksi — jadi pemindahannya dicatat di sini dengan nominal yang
+ * BENAR-BENAR diterima, ditambah potongan (bila ada) sebagai biaya.
+ *
+ * Penanda: jurnal TRANSFER yang source_id-nya id toko (pindah saldo biasa
+ * source_id-nya kosong). Potongan dicatat sebagai jurnal CASH yang source_id-nya
+ * id jurnal tarik tersebut, supaya ikut terhapus bila tariknya dibatalkan.
+ */
+const tarikSchema = z.object({
+  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  shop_id: z.number().int().positive().optional().nullable(),
+  ke: z.string().trim().min(3),
+  amount: z.number().positive('nominal yang diterima harus lebih dari nol'),
+  potongan: z.number().min(0).default(0),
+  note: z.string().trim().max(200).optional().nullable(),
+});
+
+function akunMp() {
+  const code = rekeningMarketplace();
+  return db.prepare('SELECT * FROM accounts WHERE code = ?').get(code);
+}
+
+/** Saldo satu akun kas (debit − kredit) sampai tanggal tertentu (opsional). */
+function saldoKas(accountId, sampai) {
+  return r2(db
+    .prepare(
+      `SELECT COALESCE(SUM(l.debit - l.credit), 0) s FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+        WHERE l.account_id = ? AND j.posted = 1 ${sampai ? 'AND j.entry_date <= ?' : ''}`
+    )
+    .get(...[accountId, sampai].filter(Boolean)).s);
+}
+
+function ambilTarikMp(req) {
+  const { from, to } = dateRange(req.query);
+  const mp = akunMp();
+
+  // Dana per toko: masuk dari order yang cair (dan retur yang dipotong),
+  // keluar lewat tarik saldo dan potongannya.
+  const masuk = db
+    .prepare(
+      `SELECT o.shop_id, COALESCE(SUM(l.debit - l.credit), 0) AS n
+         FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+         LEFT JOIN sales_returns r ON j.source = 'RETURN' AND r.id = j.source_id
+         JOIN sales_orders o ON o.id = CASE WHEN j.source = 'SALES' THEN j.source_id ELSE r.order_id END
+        WHERE l.account_id = ? AND j.posted = 1 AND j.source IN ('SALES', 'RETURN')
+        GROUP BY o.shop_id`
+    )
+    .all(mp.id);
+  const ditarik = db
+    .prepare(
+      `SELECT j.source_id AS shop_id, COALESCE(SUM(l.credit - l.debit), 0) AS n
+         FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+        WHERE l.account_id = ? AND j.posted = 1 AND j.source = 'TRANSFER'
+        GROUP BY j.source_id`
+    )
+    .all(mp.id);
+  const potongan = db
+    .prepare(
+      `SELECT t.source_id AS shop_id, COALESCE(SUM(l.credit - l.debit), 0) AS n
+         FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+         JOIN journals t ON t.id = j.source_id AND t.source = 'TRANSFER'
+        WHERE l.account_id = ? AND j.posted = 1 AND j.source = 'CASH'
+        GROUP BY t.source_id`
+    )
+    .all(mp.id);
+
+  const peta = new Map();
+  const baris = (id) => {
+    const k = id || 0;
+    if (!peta.has(k)) peta.set(k, { shop_id: id || null, masuk: 0, ditarik: 0, potongan: 0 });
+    return peta.get(k);
+  };
+  for (const x of masuk) baris(x.shop_id).masuk = r2(x.n);
+  for (const x of ditarik) baris(x.shop_id).ditarik = r2(x.n);
+  for (const x of potongan) baris(x.shop_id).potongan = r2(x.n);
+
+  const toko = new Map(db.prepare('SELECT id, name, channel, cash_code FROM shops').all().map((s) => [s.id, s]));
+  const perToko = [...peta.values()]
+    .map((x) => {
+      const t = toko.get(x.shop_id) || {};
+      return {
+        ...x,
+        shop_name: t.name || 'Tanpa toko / lainnya',
+        channel: t.channel || null,
+        rekening_tujuan: t.cash_code || null,
+        sisa: r2(x.masuk - x.ditarik - x.potongan),
+      };
+    })
+    .sort((a, b) => b.sisa - a.sisa);
+
+  const rows = db
+    .prepare(
+      `SELECT j.id, j.entry_no, j.entry_date, j.description, j.source_id AS shop_id,
+              s.name AS shop_name,
+              (SELECT a.code || ' — ' || a.name FROM journal_lines l2 JOIN accounts a ON a.id = l2.account_id
+                WHERE l2.journal_id = j.id AND l2.debit > 0 LIMIT 1) AS ke,
+              (SELECT SUM(l2.credit) FROM journal_lines l2 WHERE l2.journal_id = j.id AND l2.account_id = ?) AS nominal,
+              (SELECT COALESCE(SUM(l3.credit), 0) FROM journals p JOIN journal_lines l3 ON l3.journal_id = p.id
+                WHERE p.source = 'CASH' AND p.source_id = j.id AND l3.account_id = ?) AS potongan
+         FROM journals j
+         JOIN journal_lines l ON l.journal_id = j.id AND l.account_id = ? AND l.credit > 0
+         LEFT JOIN shops s ON s.id = j.source_id
+        WHERE j.source = 'TRANSFER' AND j.entry_date BETWEEN ? AND ?
+        ORDER BY j.entry_date DESC, j.id DESC`
+    )
+    .all(mp.id, mp.id, mp.id, from, to)
+    .map((r) => ({ ...r, nominal: r2(r.nominal), potongan: r2(r.potongan) }));
+
+  return {
+    from, to,
+    mp: { code: mp.code, name: mp.name, saldo: saldoKas(mp.id) },
+    perToko,
+    rows,
+    total: r2(rows.reduce((s, r) => s + r.nominal, 0)),
+    totalPotongan: r2(rows.reduce((s, r) => s + r.potongan, 0)),
+    rekening: cashAccounts().filter((a) => a.code !== mp.code),
+  };
+}
+
+router.get('/tarik-mp', ah((req, res) => res.json(ambilTarikMp(req))));
+
+router.post('/tarik-mp', butuhIzin('keuangan.kas'), ah((req, res) => {
+  const body = parse(tarikSchema, req.body);
+  const mp = akunMp();
+  const ke = accountByCode(body.ke);
+  if (!ke.is_cash) throw httpError(422, `${ke.code} · ${ke.name} bukan rekening kas/bank`);
+  if (ke.code === mp.code) throw httpError(422, `Rekening tujuan tidak boleh ${mp.name} sendiri`);
+  const toko = body.shop_id ? db.prepare('SELECT * FROM shops WHERE id = ?').get(body.shop_id) : null;
+  if (body.shop_id && !toko) throw httpError(404, 'Toko tidak ditemukan');
+
+  const nilai = r2(body.amount);
+  const potong = r2(body.potongan);
+  const siapa = toko ? toko.name : 'semua toko';
+  const catatan = body.note ? ` — ${body.note}` : '';
+
+  const hasil = db.transaction(() => {
+    const tarik = postJournal({
+      date: body.entry_date,
+      description: `Tarik Saldo MP — ${siapa} → ${ke.name}${catatan}`,
+      lines: [
+        { code: ke.code, debit: nilai, credit: 0, memo: `Pencairan ${siapa}` },
+        { code: mp.code, debit: 0, credit: nilai, memo: `Tarik saldo ke ${ke.name}` },
+      ],
+      source: 'TRANSFER',
+      sourceId: toko ? toko.id : null,
+      userId: req.user.id,
+    });
+    if (potong > 0) {
+      postJournal({
+        date: body.entry_date,
+        description: `Kas Keluar — Potongan pencairan ${siapa} (${tarik.entry_no})`,
+        lines: [
+          { code: ACC.FEE_ADMIN, debit: potong, credit: 0, memo: `Potongan/penyesuaian pencairan ${siapa}` },
+          { code: mp.code, debit: 0, credit: potong, memo: `Potongan pencairan ${siapa}` },
+        ],
+        source: 'CASH',
+        sourceId: tarik.id,
+        userId: req.user.id,
+      });
+    }
+    return tarik;
+  })();
+
+  const sisa = saldoKas(mp.id);
+  res.status(201).json({
+    ok: true,
+    journal: hasil,
+    saldoMp: sisa,
+    message:
+      `Rp ${nilai.toLocaleString('id-ID')} ditarik dari ${mp.name} ke ${ke.name} (${hasil.entry_no})` +
+      (potong > 0 ? `, potongan Rp ${potong.toLocaleString('id-ID')} dicatat sebagai biaya` : '') +
+      `. Sisa ${mp.name}: Rp ${sisa.toLocaleString('id-ID')}`,
+  });
+}));
+
+router.delete('/tarik-mp/:id(\\d+)', butuhIzin('keuangan.kas'), ah((req, res) => {
+  const mp = akunMp();
+  const j = db
+    .prepare(
+      `SELECT j.* FROM journals j JOIN journal_lines l ON l.journal_id = j.id
+        WHERE j.id = ? AND j.source = 'TRANSFER' AND l.account_id = ? AND l.credit > 0`
+    )
+    .get(req.params.id, mp.id);
+  if (!j) throw httpError(404, 'Tarik saldo tidak ditemukan');
+  tolakBilaTerekonsiliasi(j);
+  db.transaction(() => {
+    for (const p of db.prepare("SELECT id FROM journals WHERE source = 'CASH' AND source_id = ?").all(j.id)) {
+      deleteJournalById(p.id);
+    }
+    deleteJournalById(j.id);
+  })();
+  res.json({ ok: true, message: `Tarik saldo ${j.entry_no} dibatalkan` });
 }));
 
 /** Dari mana sebuah pergerakan kas berasal, dalam bahasa yang dikenali pemakai. */

@@ -8,6 +8,7 @@ import {
 } from '../components/ui';
 import { rupiah, dateID, today } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import TarikSaldoMp from '../components/TarikSaldoMp';
 
 const NADA_EMBER = {
   '0-7': 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-400/10',
@@ -130,6 +131,8 @@ export default function Pencairan() {
         )}
         <TombolEkspor path="/api/pencairan" params={{ asOf, from: range.from, to: range.to }} nama="dana-belum-cair" />
       </PageHeader>
+
+      <TarikSaldoMp range={range} />
 
       <div className="card mb-4">
         <Field label="Posisi per Tanggal" className="max-w-xs" hint="Menentukan umur dana dan saldo pembandingnya">

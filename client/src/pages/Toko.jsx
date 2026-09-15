@@ -108,7 +108,7 @@ export default function Toko() {
       <PageHeader title="Toko / Akun Marketplace" subtitle="Bandingkan profitabilitas antar akun toko Anda">
         {canManage && (
           <button className="btn-secondary" onClick={() => setOrderLama(true)}>
-            <History size={16} /> Kaitkan Order Lama
+            <History size={16} /> Pindahkan Order ke MP
           </button>
         )}
         {canManage && (
@@ -323,8 +323,8 @@ export default function Toko() {
               </select>
             </Field>
             <Field
-              label="Rekening Penerima"
-              hint="Rekening tujuan pencairan toko ini — terisi sendiri saat mencatat order"
+              label="Rekening Tujuan Tarik Saldo"
+              hint="Bank tempat dana toko ini ditarik dari BANK MP INDOOR — terisi otomatis di form Tarik Saldo. Order marketplace sendiri selalu masuk ke BANK MP INDOOR."
               className="sm:col-span-2"
             >
               <select
@@ -335,22 +335,6 @@ export default function Toko() {
                 {rekening.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
               </select>
             </Field>
-            {editing.cash_code && (
-              <label className="flex items-start gap-2 text-sm sm:col-span-2">
-                <input
-                  type="checkbox" className="mt-0.5 h-4 w-4 rounded"
-                  checked={!!editing.rekening_utama}
-                  onChange={(e) => setEditing({ ...editing, rekening_utama: e.target.checked })}
-                />
-                <span>
-                  Toko utama untuk rekening ini
-                  <span className="block text-xs text-slate-500">
-                    Dipakai bila satu rekening dipakai beberapa toko pada kanal yang sama —
-                    toko inilah yang terpilih otomatis saat rekeningnya dipilih di formulir order.
-                  </span>
-                </span>
-              </label>
-            )}
             <Field label="Catatan" className="sm:col-span-2">
               <input className="input" value={editing.note || ''} onChange={(e) => setEditing({ ...editing, note: e.target.value })} />
             </Field>

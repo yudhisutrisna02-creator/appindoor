@@ -15,8 +15,10 @@
 const { z } = require('zod');
 const { db } = require('../db');
 const { httpError } = require('../utils/http');
-const { r2, postJournal, deleteJournalsBySource, buildSalesJournalLines } = require('../utils/accounting');
-const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
+const {
+  r2, postJournal, deleteJournalsBySource, buildSalesJournalLines, rekeningMarketplace,
+} = require('../utils/accounting');
+const { CHANNELS, CHANNEL_LABEL, CHANNEL_MARKETPLACE } = require('../utils/kanal');
 const BATCH = require('../utils/batch');
 
 const STATUS_PESANAN = require('../utils/status-pesanan').SEMUA;
@@ -172,6 +174,8 @@ function buatPengubah({ resolveItems, computeOrder, cancelOrder }) {
     for (const k of [...KOLOM_KETERANGAN, ...KOLOM_UANG, 'order_date', 'channel', 'payment_status']) {
       if (badan[k] !== undefined) gabung[k] = badan[k];
     }
+    // Marketplace selalu lewat rekening penampung BANK MP INDOOR.
+    if (CHANNEL_MARKETPLACE.includes(gabung.channel)) gabung.cash_code = rekeningMarketplace();
 
     // Biaya admin dan pajak punya dua bentuk: nilai tetap dan persentase.
     // Nilai yang dikirim langsung selalu menang. Bila hanya itemnya yang

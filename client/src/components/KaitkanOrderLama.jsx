@@ -6,12 +6,12 @@ import { rupiah, num, dateID } from '../lib/format';
 import { rentangBulan } from '../lib/rekening';
 
 /**
- * Mengaitkan order lama ke rekening tokonya.
+ * Memindahkan order marketplace lama ke rekening penampung BANK MP INDOOR.
  *
- * Order yang dicatat sebelum ada kolom rekening uangnya tercatat di akun
- * bawaan lama. Setelah tokonya punya rekening, order-order itu bisa ikut
- * dikaitkan sekaligus: rekening tokonya dipasang dan jurnalnya ditulis ulang,
- * sehingga uangnya berpindah ke rekening yang sebenarnya.
+ * Alur lama mencatat uang order marketplace langsung ke rekening bank toko
+ * (atau Bank Operasional). Alur sekarang: semua masuk ke BANK MP INDOOR, lalu
+ * ditarik ke bank lewat Pencairan Dana → Tarik Saldo. Order lama dipindahkan
+ * sekaligus di sini — rekeningnya diganti dan jurnalnya ditulis ulang.
  *
  * Pemeriksaannya berjalan sendiri saat jendela dibuka, karena laporan
  * pemeriksaan itulah jawaban untuk "tolong cek datanya": berapa yang bisa
@@ -61,13 +61,13 @@ export default function KaitkanOrderLama({ open, onClose, onSelesai }) {
   const r = hasil?.ringkas;
 
   return (
-    <Modal open={open} onClose={onClose} title="Kaitkan Order Lama ke Rekening Toko" wide>
+    <Modal open={open} onClose={onClose} title="Pindahkan Order Marketplace ke BANK MP INDOOR" wide>
       <div className="grid gap-3">
         <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
-          Order yang dicatat <strong>sebelum ada kolom rekening</strong> uangnya masih tercatat di
-          akun bawaan lama. Order yang tokonya sudah punya rekening bisa dikaitkan sekaligus di
-          sini — rekening tokonya dipasang dan jurnalnya ditulis ulang. Order yang sudah punya
-          rekening tidak disentuh.
+          Semua uang order <strong>marketplace</strong> sekarang masuk ke rekening penampung
+          <strong> BANK MP INDOOR</strong>, lalu ditarik ke bank lewat Pencairan Dana → Tarik Saldo.
+          Order marketplace lama yang masih tercatat di rekening toko atau Bank Operasional
+          dipindahkan di sini — jurnalnya ditulis ulang. Order luring (WA, offline, website) tidak disentuh.
         </p>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -91,9 +91,7 @@ export default function KaitkanOrderLama({ open, onClose, onSelesai }) {
         {r && (
           <>
             <div className="grid gap-2 rounded-xl bg-slate-50 p-3 text-sm sm:grid-cols-2">
-              <Baris label="Bisa dikaitkan" nilai={`${num(r.bisa)} order`} warna="text-emerald-700" />
-              <Baris label="Tanpa toko" nilai={`${num(r.tanpaToko)} order`} warna={r.tanpaToko ? 'text-amber-700' : ''} />
-              <Baris label="Tokonya belum punya rekening" nilai={`${num(r.tokoTanpaRekening)} order`} warna={r.tokoTanpaRekening ? 'text-amber-700' : ''} />
+              <Baris label="Akan dipindahkan" nilai={`${num(r.bisa)} order`} warna="text-emerald-700" />
               <Baris label="Di bulan yang sudah ditutup" nilai={`${num(r.terkunci)} order`} />
             </div>
 
@@ -101,7 +99,7 @@ export default function KaitkanOrderLama({ open, onClose, onSelesai }) {
               <div className="table-wrap">
                 <table className="table text-sm">
                   <thead>
-                    <tr><th>Akan masuk ke rekening</th><th className="text-right">Order</th><th className="text-right">Uang lunas pindah</th></tr>
+                    <tr><th>Dari rekening</th><th className="text-right">Order</th><th className="text-right">Uang lunas pindah ke MP</th></tr>
                   </thead>
                   <tbody>
                     {r.perRekening.map((x) => (
@@ -149,7 +147,7 @@ export default function KaitkanOrderLama({ open, onClose, onSelesai }) {
             disabled={!r || !r.bisa || menerapkan}
             onClick={terapkan}
           >
-            {menerapkan ? 'Mengaitkan...' : r?.bisa ? `Kaitkan ${num(r.bisa)} Order` : 'Tidak ada yang bisa dikaitkan'}
+            {menerapkan ? 'Memindahkan...' : r?.bisa ? `Pindahkan ${num(r.bisa)} Order` : 'Tidak ada yang perlu dipindah'}
           </button>
         </div>
       </div>

@@ -4,7 +4,9 @@ const { z } = require('zod');
 const { db, nextNumber } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines } = require('../utils/accounting');
+const {
+  r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines, rekeningMarketplace,
+} = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 const STATUS = require('../utils/status-pesanan');
@@ -13,7 +15,7 @@ const BATCH = require('../utils/batch');
 const router = express.Router();
 router.use(requireAuth);
 
-const { CHANNELS, CHANNEL_LABEL } = require('../utils/kanal');
+const { CHANNELS, CHANNEL_LABEL, CHANNEL_MARKETPLACE } = require('../utils/kanal');
 
 /** Ringkas akibat tiap kondisi — dipakai pesan setelah simpan dan setelah ubah. */
 const KABAR_KONDISI = {
@@ -105,15 +107,14 @@ const orderSchema = z.object({
  *      yang dicatat sebelum ada kolom ini tidak berubah artinya.
  */
 function rekeningOrder(body) {
+  // Marketplace SELALU lewat rekening penampung BANK MP INDOOR, apa pun yang
+  // dipilih di form: pencairannya ke bank dicatat terpisah lewat Tarik Saldo.
+  if (CHANNEL_MARKETPLACE.includes(body.channel)) return rekeningMarketplace();
   if (body.cash_code) {
     const akun = db.prepare('SELECT * FROM accounts WHERE code = ?').get(body.cash_code);
     if (!akun) throw httpError(404, `Rekening ${body.cash_code} tidak ditemukan`);
     if (!akun.is_cash) throw httpError(422, `${akun.code} · ${akun.name} bukan rekening kas/bank`);
     return akun.code;
-  }
-  if (body.shop_id) {
-    const toko = db.prepare('SELECT cash_code FROM shops WHERE id = ?').get(body.shop_id);
-    if (toko && toko.cash_code) return toko.cash_code;
   }
   return null;
 }
@@ -843,47 +844,49 @@ function bulanTerkunci() {
 }
 
 /**
- * Order lama yang belum punya rekening penerima.
+ * Order marketplace yang belum lewat rekening penampung BANK MP INDOOR.
  *
- * Order yang dicatat sebelum ada kolom rekening jurnalnya jatuh ke akun bawaan
- * lama — Bank Operasional untuk marketplace, Kas Tunai untuk luring. Kalau
- * tokonya sekarang sudah punya rekening, order itu bisa ikut dikaitkan.
- * Yang tidak bisa dikaitkan dilaporkan beserta alasannya, bukan dilewati diam-
- * diam: justru daftar itulah yang perlu dibetulkan satu per satu.
+ * Alur lama mengirim uang order marketplace langsung ke rekening bank toko
+ * (atau ke Bank Operasional bila kosong). Alur sekarang: semua uang order
+ * marketplace masuk ke BANK MP INDOOR, lalu dipindah ke bank lewat Tarik Saldo.
+ * Order lama dipindahkan ke penampung itu; order luring tidak disentuh.
+ * Nama kolom `toko_cash_code` dipertahankan: artinya kini "rekening tujuan".
  */
 function calonKaitkan(from, to) {
   const kunci = bulanTerkunci();
+  const mp = rekeningMarketplace();
+  const namaMp = (db.prepare('SELECT name FROM accounts WHERE code = ?').get(mp) || {}).name || mp;
   const rows = db
     .prepare(
       `SELECT o.id, o.order_no, o.order_ref, o.order_date, o.channel, o.payment_status,
-              o.net_revenue, o.total_fees, o.shipping_non_mp, o.shop_id,
-              s.name AS shop_name, s.cash_code AS toko_cash_code, a.name AS rekening_nama
+              o.net_revenue, o.total_fees, o.shipping_non_mp, o.shop_id, o.cash_code,
+              s.name AS shop_name, a.name AS rekening_lama
          FROM sales_orders o
          LEFT JOIN shops s    ON s.id = o.shop_id
-         LEFT JOIN accounts a ON a.code = s.cash_code AND a.is_cash = 1
+         LEFT JOIN accounts a ON a.code = o.cash_code
         WHERE o.status = 'POSTED'
           AND o.order_date BETWEEN ? AND ?
-          AND (o.cash_code IS NULL OR o.cash_code = '')
+          AND o.channel IN (${CHANNEL_MARKETPLACE.map(() => '?').join(',')})
+          AND (o.cash_code IS NULL OR o.cash_code <> ?)
         ORDER BY o.order_date, o.id`
     )
-    .all(from, to)
+    .all(from, to, ...CHANNEL_MARKETPLACE, mp)
     .map((o) => ({
       ...o,
       channel_label: CHANNEL_LABEL[o.channel] || o.channel,
       nilai: r2(o.net_revenue - o.total_fees + (o.shipping_non_mp || 0)),
+      toko_cash_code: mp,
+      rekening_nama: namaMp,
+      dari: o.cash_code ? `${o.cash_code} · ${o.rekening_lama || '?'}` : 'Bawaan lama (Bank Operasional)',
     }));
 
   const bisa = [];
-  const tanpaToko = [];
-  const tokoTanpaRekening = [];
   const terkunci = [];
   for (const o of rows) {
     if (kunci.has(o.order_date.slice(0, 7))) terkunci.push(o);
-    else if (!o.shop_id) tanpaToko.push(o);
-    else if (!o.toko_cash_code || !o.rekening_nama) tokoTanpaRekening.push(o);
     else bisa.push(o);
   }
-  return { bisa, tanpaToko, tokoTanpaRekening, terkunci };
+  return { bisa, tanpaToko: [], tokoTanpaRekening: [], terkunci, mp: { code: mp, name: namaMp } };
 }
 
 const kaitkanSchema = z.object({
@@ -948,7 +951,8 @@ router.post('/kaitkan-rekening', butuhIzin('penjualan.ubah'), ah((req, res) => {
 
   const perRekening = {};
   for (const o of c.bisa) {
-    const k = `${o.toko_cash_code} · ${o.rekening_nama}`;
+    // Dikelompokkan menurut rekening ASAL — tujuannya selalu BANK MP INDOOR.
+    const k = o.dari;
     perRekening[k] = perRekening[k] || { rekening: k, orders: 0, nilaiLunas: 0 };
     perRekening[k].orders += 1;
     if (o.payment_status === 'PAID') perRekening[k].nilaiLunas = r2(perRekening[k].nilaiLunas + o.nilai);
@@ -961,6 +965,7 @@ router.post('/kaitkan-rekening', butuhIzin('penjualan.ubah'), ah((req, res) => {
     terkunci: c.terkunci.length,
     perRekening: Object.values(perRekening).sort((a, b) => b.orders - a.orders),
     tokoBelumBerekening: [...new Set(c.tokoTanpaRekening.map((o) => o.shop_name))],
+    tujuan: c.mp,
   };
 
   if (!body.terapkan) {
@@ -976,7 +981,7 @@ router.post('/kaitkan-rekening', butuhIzin('penjualan.ubah'), ah((req, res) => {
   const { diubah, dilewati } = terapkanKaitan(c.bisa, req.user.id);
   res.json({
     ok: true, diubah, dilewati, ringkas,
-    message: `${diubah} order dikaitkan ke rekening tokonya` +
+    message: `${diubah} order marketplace dipindahkan ke ${c.mp.name}` +
       (dilewati.length ? `, ${dilewati.length} dilewati karena jurnalnya perlu diperiksa` : ''),
   });
 }));
@@ -1479,11 +1484,12 @@ function periksaOrderAsal(orderId, productId, qty, abaikanId = null) {
 /**
  * Rekening yang dipotong saat dana dikembalikan ke pembeli.
  *
- * Urutannya mengikuti dari mana uangnya dulu datang:
+ * Retur order marketplace SELALU dipotong dari rekening penampung BANK MP
+ * INDOOR — dana pengembaliannya dipotong platform dari saldo penjual, bukan
+ * dari rekening bank toko. Untuk penjualan lain urutannya:
  *   1. rekening yang dipilih pada formulir retur — orangnya selalu menang;
  *   2. rekening ordernya;
- *   3. rekening bawaan toko tempat order itu dibuat;
- *   4. kas tunai, sebagai jalan terakhir untuk penjualan luring.
+ *   3. kas tunai, sebagai jalan terakhir.
  */
 function rekeningPengembalian(body) {
   const pakai = (code) => {
@@ -1492,6 +1498,11 @@ function rekeningPengembalian(body) {
     return akun ? akun.code : null;
   };
 
+  const o = body.order_id
+    ? db.prepare('SELECT cash_code, channel FROM sales_orders WHERE id = ?').get(body.order_id)
+    : null;
+  if (o && CHANNEL_MARKETPLACE.includes(o.channel)) return rekeningMarketplace();
+
   if (body.cash_code) {
     const akun = db.prepare('SELECT * FROM accounts WHERE code = ?').get(body.cash_code);
     if (!akun) throw httpError(404, `Rekening ${body.cash_code} tidak ditemukan`);
@@ -1499,18 +1510,7 @@ function rekeningPengembalian(body) {
     return akun.code;
   }
 
-  if (body.order_id) {
-    const o = db
-      .prepare(
-        `SELECT o.cash_code, s.cash_code AS toko_cash_code
-           FROM sales_orders o
-           LEFT JOIN shops s ON s.id = o.shop_id
-          WHERE o.id = ?`
-      )
-      .get(body.order_id);
-    if (o) return pakai(o.cash_code) || pakai(o.toko_cash_code) || ACC.CASH;
-  }
-
+  if (o) return pakai(o.cash_code) || ACC.CASH;
   return ACC.CASH;
 }
 

@@ -363,6 +363,64 @@ function selaraskanWaktuRiwayat(db, applied) {
 }
 
 /**
+ * Rekening penampung marketplace: BANK MP INDOOR.
+ *
+ * Dana pencairan marketplace hampir tidak pernah sama persis dengan nilai
+ * transaksinya — ada potongan dan penyesuaian dari platform. Karena itu SEMUA
+ * uang order marketplace masuk ke satu rekening penampung, lalu saat dana cair
+ * dipindahkan ("tarik saldo") ke rekening bank masing-masing dengan nominal yang
+ * benar-benar diterima. Kodenya disimpan di pengaturan `rekening_mp`.
+ *
+ * Sekali saja, rekening yang dulu dipasangkan ke tiap toko dilepas: pemasangan
+ * itu dibuat untuk alur lama (uang order langsung ke rekening toko) dan akan
+ * menyesatkan bila dibiarkan.
+ */
+function siapkanRekeningMarketplace(db, applied) {
+  if (!tableExists(db, 'accounts') || !tableExists(db, 'settings')) return;
+  const setelan = (k) => {
+    const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(k);
+    return r ? r.value : null;
+  };
+  const simpan = (k, v) => db
+    .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(k, String(v));
+
+  db.transaction(() => {
+    const kode = setelan('rekening_mp');
+    const ada = kode && db.prepare('SELECT code FROM accounts WHERE code = ? AND is_cash = 1').get(kode);
+    if (!ada) {
+      const bernama = db.prepare("SELECT code FROM accounts WHERE UPPER(name) = 'BANK MP INDOOR'").get();
+      let pakai = bernama && bernama.code;
+      if (!pakai) {
+        for (let n = 1030; n < 1100; n += 1) {
+          if (!db.prepare('SELECT 1 FROM accounts WHERE code = ?').get(String(n))) { pakai = String(n); break; }
+        }
+        db.prepare(
+          `INSERT INTO accounts (code, name, type, subtype, normal, cashflow, is_cash, is_system, active)
+           VALUES (?, 'BANK MP INDOOR', 'ASSET', 'CASH', 'D', 'OCF', 1, 1, 1)`
+        ).run(pakai);
+        applied.push(`rekening ${pakai} BANK MP INDOOR dibuat sebagai penampung dana marketplace`);
+      }
+      simpan('rekening_mp', pakai);
+    }
+
+    if (!setelan('lepas_rekening_toko_v1') && tableExists(db, 'shops')) {
+      const kolom = columnsOf(db, 'shops');
+      if (kolom.includes('cash_code')) {
+        const n = db
+          .prepare(
+            `UPDATE shops SET cash_code = NULL${kolom.includes('rekening_utama') ? ', rekening_utama = 0' : ''}
+              WHERE cash_code IS NOT NULL${kolom.includes('rekening_utama') ? ' OR rekening_utama = 1' : ''}`
+          )
+          .run().changes;
+        if (n) applied.push(`${n} toko dilepas dari rekeningnya (alur baru: lewat BANK MP INDOOR)`);
+      }
+      simpan('lepas_rekening_toko_v1', '1');
+    }
+  })();
+}
+
+/**
  * Menjalankan seluruh migrasi. Dipanggil sekali saat boot, setelah schema.sql.
  * @returns {string[]} daftar perubahan yang benar-benar diterapkan
  */
@@ -576,6 +634,8 @@ function runMigrations(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_shop ON sales_orders(shop_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_fulfillment ON sales_orders(fulfillment_status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_payout ON sales_orders(payout_date)');
+
+  siapkanRekeningMarketplace(db, applied);
 
   return applied;
 }

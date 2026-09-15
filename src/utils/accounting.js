@@ -1,6 +1,6 @@
 'use strict';
 const { CHANNEL_MARKETPLACE } = require('./kanal');
-const { db, nextNumber } = require('../db');
+const { db, nextNumber, getSetting } = require('../db');
 const { ACC } = require('../db/coa');
 
 /** Pembulatan ke 2 desimal untuk meredam galat floating point. */
@@ -156,17 +156,6 @@ function deleteJournalsBySource(source, sourceId) {
 }
 
 /**
- * Menghapus satu jurnal berdasarkan id-nya sendiri.
- *
- * Dipakai catatan yang berdiri sendiri tanpa dokumen induk — pemindahan saldo
- * antar rekening, misalnya. Menghapusnya lewat deleteJournalsBySource tidak
- * bisa: source_id-nya kosong, sehingga satu penghapusan akan menyapu seluruh
- * catatan sejenis sekaligus.
- *
- * Pemeriksaan kunci periodenya tetap sama, supaya jalur ini tidak menjadi
- * celah untuk mengubah bulan yang sudah ditutup.
- */
-/**
  * Baris jurnal yang sudah dipasangkan dengan rekening koran adalah bukti bahwa
  * uang itu memang lewat rekening tersebut. Mengubah atau menghapusnya diam-diam
  * akan memutus pasangan itu, jadi pasangannya harus dilepas dulu dengan sadar.
@@ -186,6 +175,17 @@ function tolakBilaTerekonsiliasi(j) {
   }
 }
 
+/**
+ * Menghapus satu jurnal berdasarkan id-nya sendiri.
+ *
+ * Dipakai catatan yang berdiri sendiri tanpa dokumen induk — pemindahan saldo
+ * antar rekening, misalnya. Menghapusnya lewat deleteJournalsBySource tidak
+ * bisa: source_id-nya kosong, sehingga satu penghapusan akan menyapu seluruh
+ * catatan sejenis sekaligus.
+ *
+ * Pemeriksaan kunci periodenya tetap sama, supaya jalur ini tidak menjadi
+ * celah untuk mengubah bulan yang sudah ditutup.
+ */
 function deleteJournalById(id) {
   const j = db.prepare('SELECT id, entry_no, entry_date FROM journals WHERE id = ?').get(id);
   if (!j) return 0;
@@ -215,13 +215,27 @@ function deleteJournalById(id) {
  *   D  HPP                                 (cogs)
  *      K  Persediaan                       (cogs)
  */
+/**
+ * Rekening penampung dana marketplace (BANK MP INDOOR).
+ *
+ * Seluruh uang order marketplace masuk ke sini, bukan ke rekening bank toko:
+ * nominal pencairan dari platform hampir selalu berbeda dari nilai transaksi,
+ * jadi pemindahan ke bank dicatat terpisah (tarik saldo) dengan nominal yang
+ * benar-benar diterima. Bila pengaturannya hilang, jatuh ke Bank Operasional.
+ */
+function rekeningMarketplace() {
+  const kode = getSetting('rekening_mp');
+  if (kode && db.prepare('SELECT 1 FROM accounts WHERE code = ? AND is_cash = 1').get(kode)) return kode;
+  return ACC.BANK;
+}
+
 function buildSalesJournalLines(o) {
   const lines = [];
   // Rekening penerima dipilih pada ordernya. Bila kosong — order lama, atau
   // dicatat sebelum kolomnya ada — dipakai perkiraan lama supaya angka yang
   // sudah terlanjur terbukukan tidak berpindah akun sendiri.
   const settleAccount = o.payment_status === 'PAID'
-    ? (o.cash_code || (CHANNEL_MARKETPLACE.includes(o.channel) ? ACC.BANK : ACC.CASH))
+    ? (o.cash_code || (CHANNEL_MARKETPLACE.includes(o.channel) ? rekeningMarketplace() : ACC.CASH))
     : ACC.AR_MARKETPLACE;
 
   // Ongkir non-marketplace ikut masuk ke rekening bersama nilai ordernya,
@@ -284,6 +298,7 @@ module.exports = {
   deleteJournalsBySource,
   deleteJournalById,
   tolakBilaTerekonsiliasi,
+  rekeningMarketplace,
   buildSalesJournalLines,
   pastikanTerbuka,
 };
