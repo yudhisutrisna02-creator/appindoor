@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { db, getSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { saveDataUrlImage } = require('../utils/upload');
+const { saveDataUrlImage, hapusBerkas } = require('../utils/upload');
 const { nearestOffice } = require('../utils/geo');
 const { dayjs, todayLocal, evaluateLateness, workMinutes } = require('../utils/time');
 const { attendanceExcel, attendancePdf } = require('../utils/exporters');
@@ -455,6 +455,34 @@ router.patch('/:id', butuhIzin('presensi.kelola'), ah((req, res) => {
     record.id
   );
   res.json({ ok: true, record: db.prepare('SELECT * FROM attendance WHERE id = ?').get(record.id) });
+}));
+
+/**
+ * DELETE /api/attendance/:id — menghapus satu baris presensi.
+ *
+ * Dipakai untuk catatan yang salah orang atau salah hari, yang tidak bisa
+ * diperbaiki dengan koreksi status. Sengaja hanya untuk admin (izin
+ * sistem.peran): menghapus presensi berarti menghapus bukti kehadiran
+ * seseorang, dan foto-fotonya ikut dibuang sehingga tidak bisa dipulihkan.
+ */
+router.delete('/:id(\\d+)', butuhIzin('sistem.peran'), ah((req, res) => {
+  const record = db
+    .prepare(
+      `SELECT a.*, u.name AS user_name FROM attendance a
+         JOIN users u ON u.id = a.user_id WHERE a.id = ?`
+    )
+    .get(req.params.id);
+  if (!record) throw httpError(404, 'Data presensi tidak ditemukan');
+
+  db.prepare('DELETE FROM attendance WHERE id = ?').run(record.id);
+  for (const berkas of [record.in_photo, record.out_photo, record.izin_foto]) {
+    if (berkas) hapusBerkas(berkas);
+  }
+
+  res.json({
+    ok: true,
+    message: `Presensi ${record.user_name} tanggal ${record.work_date} dihapus beserta fotonya`,
+  });
 }));
 
 module.exports = router;

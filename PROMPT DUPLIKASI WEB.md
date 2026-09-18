@@ -585,6 +585,11 @@ menempel sesudahnya. Mencatatkan untuk orang lain menuntut `presensi.kelola` —
 tanpa itu, siapa pun bisa menandai rekannya sakit. Rekap Absensi menampilkan
 jenis izin, jam mulai–selesai, dan foto buktinya di panel bukti.
 
+`DELETE /api/attendance/:id` menghapus satu baris presensi beserta seluruh
+fotonya. Sengaja dibatasi izin `sistem.peran` (admin), bukan `presensi.kelola`:
+koreksi status sudah cukup untuk kesalahan biasa, sedangkan penghapusan
+membuang bukti kehadiran seseorang dan tidak bisa dipulihkan.
+
 ### BANK MP INDOOR — rekening penampung marketplace
 
 Dana pencairan marketplace hampir tidak pernah sama dengan nilai transaksinya
@@ -894,7 +899,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 879 pemeriksaan, 61 bagian
+npm run smoke            # 884 pemeriksaan, 61 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

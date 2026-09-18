@@ -6185,6 +6185,31 @@ async function main() {
     barisSakit && barisSakit.izin_jenis === 'SAKIT' && !!barisSakit.izin_foto,
     JSON.stringify(barisSakit && barisSakit.izin_jenis));
 
+  // ---- D. Hapus baris presensi: admin saja ----
+  token = await masukSebagai(emailIzin, 'RahasiaKuat1');
+  let tolakHapus61 = 0;
+  try { await call('DELETE', `/api/attendance/${barisSakit.id}`); }
+  catch (err) { tolakHapus61 = err.status; }
+  check('karyawan biasa tidak bisa menghapus presensi', tolakHapus61 === 403, `status ${tolakHapus61}`);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakHapusGudang = 0;
+  try { await call('DELETE', `/api/attendance/${barisSakit.id}`); }
+  catch (err) { tolakHapusGudang = err.status; }
+  check('tim tanpa hak admin tidak bisa menghapus presensi', tolakHapusGudang === 403,
+    `status ${tolakHapusGudang}`);
+  token = adminAkun;
+
+  const hapus61 = await call('DELETE', `/api/attendance/${barisSakit.id}`);
+  check('admin bisa menghapus presensi', hapus61.ok === true, hapus61.message);
+  const sesudahHapus61 = await call('GET', `/api/attendance?from=${today}&to=${today}`);
+  check('barisnya hilang dari rekap',
+    !sesudahHapus61.rows.some((r) => r.id === barisSakit.id));
+  let tolakUlang61 = 0;
+  try { await call('DELETE', `/api/attendance/${barisSakit.id}`); }
+  catch (err) { tolakUlang61 = err.status; }
+  check('menghapus baris yang sudah hilang ditolak dengan jelas', tolakUlang61 === 404);
+
 
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);

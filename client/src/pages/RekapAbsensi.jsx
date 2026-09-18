@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import GambarTerlindungi from '../components/GambarTerlindungi';
-import { FileSpreadsheet, FileText, Users, Clock, MapPin, Image as ImageIcon, CalendarPlus, Pencil } from 'lucide-react';
+import { FileSpreadsheet, FileText, Users, Clock, MapPin, Image as ImageIcon, CalendarPlus, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, Modal, Field } from '../components/ui';
 import { timeID, today, WORK_TYPE_LABEL, STATUS_LABEL } from '../lib/format';
@@ -11,7 +11,7 @@ const BADGE = { ONTIME: 'badge-green', LATE: 'badge-red', LEAVE: 'badge-amber', 
 
 export default function RekapAbsensi() {
   const toast = useToast();
-  const { canManage } = useAuth();
+  const { canManage, isAdmin } = useAuth();
   const [range, setRange] = useState(defaultRange);
   const [filters, setFilters] = useState({ workType: '', status: '', userId: '' });
   const [data, setData] = useState(null);
@@ -39,6 +39,20 @@ export default function RekapAbsensi() {
     if (!canManage) return;
     api.get('/api/admin/users').then((d) => setUsers(d.users)).catch(() => {});
   }, [canManage]);
+
+  async function hapusPresensi(r) {
+    if (!window.confirm(
+      `Hapus presensi ${r.user_name} tanggal ${r.work_date}?\n\n` +
+      'Foto selfie dan foto buktinya ikut terhapus dan tidak bisa dikembalikan.'
+    )) return;
+    try {
+      const res = await api.del(`/api/attendance/${r.id}`);
+      toast.success(res.message);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
 
   async function download(kind) {
     try {
@@ -178,13 +192,26 @@ export default function RekapAbsensi() {
                         </td>
                         {canManage && (
                           <td>
-                            <button
-                              className="btn-ghost !px-2 !py-1"
-                              onClick={() => setKoreksi({ id: r.id, nama: r.user_name, tanggal: r.work_date, status: r.status, late_minutes: r.late_minutes, notes: r.notes || '' })}
-                              aria-label="Koreksi"
-                            >
-                              <Pencil size={14} />
-                            </button>
+                            <div className="flex justify-end gap-1">
+                              <button
+                                className="btn-ghost !px-2 !py-1"
+                                onClick={() => setKoreksi({ id: r.id, nama: r.user_name, tanggal: r.work_date, status: r.status, late_minutes: r.late_minutes, notes: r.notes || '' })}
+                                aria-label="Koreksi"
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              {/* Menghapus presensi membuang bukti kehadiran beserta
+                                  fotonya, jadi hanya admin yang boleh. */}
+                              {isAdmin && (
+                                <button
+                                  className="btn-ghost !px-2 !py-1 text-rose-600"
+                                  onClick={() => hapusPresensi(r)}
+                                  aria-label="Hapus presensi"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>
