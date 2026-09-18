@@ -18,6 +18,7 @@ const {
   rekeningMarketplace,
 } = require('../utils/accounting');
 const { todayLocal } = require('../utils/time');
+const { buatCadangan } = require('../utils/cadangan');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -1132,6 +1133,238 @@ router.delete('/settlements/:id(\\d+)', butuhIzin('keuangan.kas'), ah((req, res)
   tolakBilaTerekonsiliasi(j);
   deleteJournalById(j.id);
   res.json({ ok: true, message: `${j.entry_no} dihapus — ${j.description}` });
+}));
+
+// ==================================================================
+// SETEL SALDO REKENING PER TANGGAL (saldo awal)
+// ==================================================================
+/**
+ * Menyetel saldo sebuah rekening pada satu tanggal menjadi angka yang
+ * sebenarnya, lewat satu jurnal penyesuaian terhadap 3050 Saldo Awal Kas & Bank.
+ *
+ * Dipakai saat mulai memakai aplikasi di tengah jalan, atau saat memulai bulan
+ * baru dari posisi nyata: yang diketik adalah SALDO AKHIR menurut rekening
+ * koran, bukan selisihnya — selisihnya yang dihitung di sini. Menyetel ulang
+ * angka yang sama dua kali tidak menambah apa-apa, karena selisihnya nol.
+ */
+const saldoAwalSchema = z.object({
+  tanggal: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  baris: z
+    .array(z.object({ code: z.string().trim().min(3), saldo: z.number() }))
+    .min(1, 'isi minimal satu rekening')
+    .max(100),
+  catatan: z.string().trim().max(200).optional().nullable(),
+});
+
+function saldoAkunPer(accountId, tanggal) {
+  return r2(db
+    .prepare(
+      `SELECT COALESCE(SUM(l.debit - l.credit), 0) s FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+        WHERE l.account_id = ? AND j.posted = 1 AND j.entry_date <= ?`
+    )
+    .get(accountId, tanggal).s);
+}
+
+/** GET /api/cashflow/saldo-awal?tanggal= — saldo tiap rekening pada tanggal itu. */
+router.get('/saldo-awal', ah((req, res) => {
+  const tanggal = req.query.tanggal || todayLocal();
+  const rows = cashAccounts().map((a) => ({ ...a, saldo: saldoAkunPer(a.id, tanggal) }));
+  res.json({ tanggal, rows, kategori: accountByCode(ACC.OPENING_CASH) });
+}));
+
+router.post('/saldo-awal', butuhIzin('keuangan.kas'), ah((req, res) => {
+  const body = parse(saldoAwalSchema, req.body);
+  const lawan = accountByCode(ACC.OPENING_CASH);
+
+  const rencana = body.baris.map((b) => {
+    const akun = accountByCode(b.code);
+    if (!akun.is_cash) throw httpError(422, `${akun.code} · ${akun.name} bukan rekening kas/bank`);
+    const sekarang = saldoAkunPer(akun.id, body.tanggal);
+    return { akun, sekarang, target: r2(b.saldo), selisih: r2(b.saldo - sekarang) };
+  });
+
+  const berubah = rencana.filter((x) => Math.abs(x.selisih) >= 0.01);
+  if (!berubah.length) {
+    return res.json({ ok: true, disetel: 0, message: 'Semua saldo sudah sesuai — tidak ada yang diubah' });
+  }
+
+  const hasil = db.transaction(() => berubah.map((x) => postJournal({
+    date: body.tanggal,
+    description:
+      `Saldo Awal — ${x.akun.name} disetel menjadi Rp ${x.target.toLocaleString('id-ID')}` +
+      (body.catatan ? ` (${body.catatan})` : ''),
+    lines: x.selisih > 0
+      ? [
+        { code: x.akun.code, debit: x.selisih, credit: 0, memo: 'Penyesuaian saldo awal' },
+        { code: lawan.code, debit: 0, credit: x.selisih, memo: `Saldo awal ${x.akun.name}` },
+      ]
+      : [
+        { code: lawan.code, debit: Math.abs(x.selisih), credit: 0, memo: `Saldo awal ${x.akun.name}` },
+        { code: x.akun.code, debit: 0, credit: Math.abs(x.selisih), memo: 'Penyesuaian saldo awal' },
+      ],
+    source: 'AWAL',
+    sourceId: x.akun.id,
+    userId: req.user.id,
+  })))();
+
+  res.status(201).json({
+    ok: true,
+    disetel: hasil.length,
+    rincian: berubah.map((x) => ({
+      code: x.akun.code, name: x.akun.name, sebelum: x.sekarang, sesudah: x.target, selisih: x.selisih,
+    })),
+    message: `${hasil.length} rekening disetel saldonya per ${body.tanggal}`,
+  });
+}));
+
+// ==================================================================
+// HAPUS PENGELUARAN SATU BULAN
+// ==================================================================
+/**
+ * Menghapus seluruh catatan UANG KELUAR pada satu bulan.
+ *
+ * Dipakai saat sebuah bulan hanya dipakai sebagai titik tolak: pengeluarannya
+ * tidak ingin ikut terbawa, dan yang dipakai hanyalah saldo akhir bulan itu —
+ * yang diisi sendiri lewat Setel Saldo. Pemasukan dan penjualan TIDAK disentuh.
+ *
+ * Hanya catatan yang dokumennya memang jurnal itu sendiri yang bisa dihapus di
+ * sini. Pembelian barang dan gaji punya dokumen dengan statusnya sendiri, jadi
+ * dilaporkan sebagai lewatan — bukan dihapus diam-diam sampai dokumennya
+ * mengaku terbayar padahal jurnalnya sudah tidak ada.
+ */
+const SUMBER_PENGELUARAN = {
+  CASH: 'Kas keluar',
+  ADS: 'Biaya iklan',
+  SETTLEMENT: 'Pelunasan utang',
+  TRANSFER: 'Pindah saldo',
+  MANUAL: 'Jurnal manual',
+};
+
+const hapusKeluarSchema = z.object({
+  bulan: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'format bulan YYYY-MM'),
+  terapkan: z.boolean().default(false),
+  konfirmasi: z.string().trim().optional(),
+});
+
+function calonPengeluaran(bulan) {
+  const rows = db
+    .prepare(
+      `SELECT j.id, j.entry_no, j.entry_date, j.description, j.source, j.source_id,
+              SUM(l.credit) AS nilai,
+              (SELECT COUNT(*) FROM bank_statement_lines b
+                WHERE b.journal_line_id IN (SELECT id FROM journal_lines WHERE journal_id = j.id)) AS terpasang
+         FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+         JOIN accounts a ON a.id = l.account_id
+        WHERE a.is_cash = 1 AND l.credit > 0 AND j.posted = 1
+          AND substr(j.entry_date, 1, 7) = ?
+        GROUP BY j.id
+        ORDER BY nilai DESC`
+    )
+    .all(bulan)
+    .map((r) => ({ ...r, nilai: r2(r.nilai), label: SUMBER_PENGELUARAN[r.source] || r.source }));
+
+  const bisa = rows.filter((r) => SUMBER_PENGELUARAN[r.source] && !r.terpasang);
+  const dilewati = rows.filter((r) => !SUMBER_PENGELUARAN[r.source] || r.terpasang);
+  return { bisa, dilewati };
+}
+
+router.post('/hapus-pengeluaran', butuhIzin('keuangan.jurnal'), ah(async (req, res) => {
+  const body = parse(hapusKeluarSchema, req.body);
+  const { bisa, dilewati } = calonPengeluaran(body.bulan);
+
+  const penghalang = [];
+  if (db.prepare('SELECT 1 FROM period_locks WHERE period = ?').get(body.bulan)) {
+    penghalang.push(`Bulan ${body.bulan} sudah ditutup buku — buka dulu tutup bukunya di Riwayat`);
+  }
+
+  const perSumber = {};
+  for (const r of bisa) {
+    perSumber[r.source] = perSumber[r.source] || { source: r.source, label: r.label, jumlah: 0, nilai: 0 };
+    perSumber[r.source].jumlah += 1;
+    perSumber[r.source].nilai = r2(perSumber[r.source].nilai + r.nilai);
+  }
+
+  // Utang yang terbuka kembali karena pelunasannya dihapus.
+  const utangKembali = db
+    .prepare(
+      `SELECT p.name, COALESCE(SUM(l.debit - l.credit), 0) AS nilai
+         FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+         JOIN accounts a ON a.id = l.account_id
+         JOIN partners p ON p.id = l.partner_id
+        WHERE j.source = 'SETTLEMENT' AND substr(j.entry_date, 1, 7) = ?
+          AND a.subtype IN ('PAYABLE', 'RECEIVABLE')
+        GROUP BY p.id`
+    )
+    .all(body.bulan)
+    .map((x) => ({ ...x, nilai: r2(x.nilai) }))
+    .filter((x) => Math.abs(x.nilai) >= 0.01);
+
+  const total = r2(bisa.reduce((n, r) => n + r.nilai, 0));
+  const ringkas = {
+    bulan: body.bulan,
+    jurnal: bisa.length,
+    total,
+    dilewati: dilewati.length,
+    perSumber: Object.values(perSumber).sort((a, b) => b.nilai - a.nilai),
+    kataKunci: `HAPUS PENGELUARAN ${body.bulan}`,
+  };
+
+  const peringatan = [];
+  if (utangKembali.length) {
+    peringatan.push(
+      'Utang mitra terbuka kembali karena pelunasannya ikut terhapus: ' +
+        utangKembali.map((x) => `${x.name} Rp ${Math.abs(x.nilai).toLocaleString('id-ID')}`).join(', ')
+    );
+  }
+  if (perSumber.ADS) {
+    peringatan.push(
+      `${perSumber.ADS.jumlah} catatan biaya iklan ikut terhapus, sehingga hilang juga dari laporan iklan dan hitungan ROAS bulan itu.`
+    );
+  }
+  if (dilewati.length) {
+    peringatan.push(
+      `${dilewati.length} pengeluaran tidak bisa dihapus dari sini (pembelian barang, gaji, atau yang sudah dicocokkan di Rekonsiliasi Bank) — betulkan lewat dokumennya.`
+    );
+  }
+  peringatan.push('Setelah ini, isi saldo tiap rekening lewat Setel Saldo agar angkanya sesuai keadaan sebenarnya.');
+
+  if (!body.terapkan) {
+    return res.json({
+      ok: true, dicoba: true, ringkas, penghalang, peringatan,
+      contoh: bisa.slice(0, 30),
+      contohDilewati: dilewati.slice(0, 20),
+    });
+  }
+
+  if (penghalang.length) throw httpError(409, penghalang.join('. '));
+  if (!bisa.length) throw httpError(422, `Tidak ada pengeluaran yang bisa dihapus pada ${body.bulan}`);
+  if (body.konfirmasi !== ringkas.kataKunci) {
+    throw httpError(422, `Ketik "${ringkas.kataKunci}" persis untuk melanjutkan`);
+  }
+
+  const cadangan = await buatCadangan('manual');
+  db.transaction(() => {
+    for (const r of bisa) {
+      // Belanja iklan punya barisnya sendiri; menghapus jurnalnya saja akan
+      // meninggalkan catatan iklan tanpa pembukuan.
+      if (r.source === 'ADS' && r.source_id) {
+        db.prepare('DELETE FROM ad_spends WHERE id = ?').run(r.source_id);
+      }
+      deleteJournalById(r.id);
+    }
+  })();
+
+  res.json({
+    ok: true,
+    ringkas,
+    cadangan: cadangan.nama,
+    message:
+      `${bisa.length} pengeluaran ${body.bulan} senilai Rp ${total.toLocaleString('id-ID')} dihapus. ` +
+      `Cadangan sebelum penghapusan: ${cadangan.nama}`,
+  });
 }));
 
 module.exports = router;

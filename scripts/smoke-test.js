@@ -6211,6 +6211,104 @@ async function main() {
   check('menghapus baris yang sudah hilang ditolak dengan jelas', tolakUlang61 === 404);
 
 
+  console.log('\n62. Setel saldo rekening & hapus pengeluaran satu bulan');
+
+  const cap62 = Date.now();
+  const bulan62 = `${Number(today.slice(0, 4)) - 1}-07`;
+  const saldo62 = async (kode) => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const rek62 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI SETEL 620-${cap62}`], mulai_kode: '1930',
+  })).dibuat[0].code;
+
+  // ---- A. Setel saldo: yang diketik adalah saldo akhir, bukan selisih ----
+  const lihat62 = await call('GET', `/api/cashflow/saldo-awal?tanggal=${bulan62}-31`);
+  check('daftar saldo per tanggal tersedia untuk semua rekening',
+    Array.isArray(lihat62.rows) && lihat62.rows.some((a) => a.code === rek62));
+
+  const setel62 = await call('POST', '/api/cashflow/saldo-awal', {
+    tanggal: `${bulan62}-31`,
+    baris: [{ code: rek62, saldo: 7500000 }],
+    catatan: 'Posisi menurut rekening koran',
+  });
+  check('saldo rekening disetel tepat ke angka yang diketik',
+    setel62.disetel === 1 && near(await saldo62(rek62), 7500000, 1), String(await saldo62(rek62)));
+
+  const ulang62 = await call('POST', '/api/cashflow/saldo-awal', {
+    tanggal: `${bulan62}-31`, baris: [{ code: rek62, saldo: 7500000 }],
+  });
+  check('menyetel angka yang sama dua kali tidak menambah apa pun',
+    ulang62.disetel === 0 && near(await saldo62(rek62), 7500000, 1));
+
+  const turun62 = await call('POST', '/api/cashflow/saldo-awal', {
+    tanggal: `${bulan62}-31`, baris: [{ code: rek62, saldo: 5000000 }],
+  });
+  check('saldo bisa diturunkan juga', turun62.disetel === 1 && near(await saldo62(rek62), 5000000, 1));
+
+  let tolakNonKas62 = 0;
+  try {
+    await call('POST', '/api/cashflow/saldo-awal', { tanggal: `${bulan62}-31`, baris: [{ code: '4000', saldo: 1000 }] });
+  } catch (err) { tolakNonKas62 = err.status; }
+  check('akun non-kas ditolak saat menyetel saldo', tolakNonKas62 === 422, `status ${tolakNonKas62}`);
+
+  // ---- B. Hapus pengeluaran: uang keluar hilang, pemasukan tetap ----
+  await call('POST', '/api/cashflow/entries', {
+    entry_date: `${bulan62}-05`, direction: 'IN', amount: 900000,
+    category_code: '4000', cash_code: rek62, description: `Pemasukan uji ${cap62}`,
+  });
+  await call('POST', '/api/cashflow/entries', {
+    entry_date: `${bulan62}-06`, direction: 'OUT', amount: 400000,
+    category_code: '6190', cash_code: rek62, description: `Pengeluaran uji ${cap62}`,
+  });
+  const iklan62 = await call('POST', '/api/iklan', {
+    spend_date: `${bulan62}-07`, channel: 'WEBSITE', platform: 'Meta Ads',
+    amount: 250000, payment: 'BANK', cash_code: rek62, note: `Iklan uji ${cap62}`,
+  });
+  void iklan62;
+  const sblmHapus62 = await saldo62(rek62);
+  check('saldo memuat pemasukan dan pengeluaran bulan itu',
+    near(sblmHapus62, 5000000 + 900000 - 400000 - 250000, 1), String(sblmHapus62));
+
+  const cek62 = await call('POST', '/api/cashflow/hapus-pengeluaran', { bulan: bulan62 });
+  check('pratinjau menghitung pengeluarannya saja, bukan pemasukannya',
+    cek62.ringkas.jurnal >= 2 && near(cek62.ringkas.total, 650000, 1), JSON.stringify(cek62.ringkas));
+  check('kata kuncinya menyebut bulannya', cek62.ringkas.kataKunci === `HAPUS PENGELUARAN ${bulan62}`);
+  check('pratinjau memperingatkan iklan yang ikut terhapus',
+    cek62.peringatan.some((p) => /iklan/i.test(p)), JSON.stringify(cek62.peringatan));
+  check('pratinjau tidak mengubah apa pun', near(await saldo62(rek62), sblmHapus62, 1));
+
+  let tolakKata62 = 0;
+  try {
+    await call('POST', '/api/cashflow/hapus-pengeluaran', { bulan: bulan62, terapkan: true, konfirmasi: 'HAPUS' });
+  } catch (err) { tolakKata62 = err.status; }
+  check('kata kunci yang salah ditolak', tolakKata62 === 422);
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakIzin62 = 0;
+  try { await call('POST', '/api/cashflow/hapus-pengeluaran', { bulan: bulan62 }); }
+  catch (err) { tolakIzin62 = err.status; }
+  check('tim tanpa izin jurnal tidak bisa menghapus pengeluaran', tolakIzin62 === 403, `status ${tolakIzin62}`);
+  token = adminAkun;
+
+  const jalan62 = await call('POST', '/api/cashflow/hapus-pengeluaran', {
+    bulan: bulan62, terapkan: true, konfirmasi: cek62.ringkas.kataKunci,
+  });
+  check('cadangan dibuat sebelum menghapus pengeluaran',
+    /^erp-.*\.db$/.test(jalan62.cadangan || ''), jalan62.cadangan);
+  check('uang keluar hilang, pemasukan tetap utuh',
+    near(await saldo62(rek62), 5000000 + 900000, 1), String(await saldo62(rek62)));
+  const iklanSisa62 = await call('GET', `/api/iklan?from=${bulan62}-01&to=${bulan62}-31`);
+  check('catatan iklannya ikut terhapus, bukan tinggal jurnalnya',
+    !(iklanSisa62.rows || []).some((x) => (x.note || '').includes(String(cap62))));
+  const lagi62 = await call('POST', '/api/cashflow/hapus-pengeluaran', { bulan: bulan62 });
+  check('tidak ada pengeluaran tersisa di bulan itu', lagi62.ringkas.jurnal === 0);
+  const tb62 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb62.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

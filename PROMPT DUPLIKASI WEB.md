@@ -626,6 +626,22 @@ rekening, catatan; nomor tetap bila bulannya sama) dan
 `keuangan.kas`, ditolak bila sudah direkonsiliasi. `ar-ap` juga membawa
 `lebihBayar` (saldo minus) yang ditampilkan sebagai peringatan.
 
+### Setel Saldo & Hapus Pengeluaran Satu Bulan
+
+Dua alat untuk memulai bulan baru dari posisi nyata tanpa mengarang transaksi:
+- **Rekening → Setel Saldo**: `GET/POST /api/cashflow/saldo-awal`, izin
+  `keuangan.kas`. Yang diketik adalah SALDO AKHIR menurut rekening koran;
+  selisihnya terhadap catatan aplikasi dibukukan sebagai jurnal `AWAL` lawan
+  3050 Saldo Awal Kas & Bank. Menyetel angka yang sama dua kali tidak menambah
+  apa pun (selisihnya nol).
+- **Sistem → Cadangan → Hapus Pengeluaran Satu Bulan**:
+  `POST /api/cashflow/hapus-pengeluaran {bulan, terapkan, konfirmasi}`, izin
+  `keuangan.jurnal`. Menghapus jurnal yang mengkreditkan akun kas pada bulan
+  itu untuk sumber CASH, ADS (beserta baris ad_spends-nya), SETTLEMENT,
+  TRANSFER, MANUAL. Pemasukan, penjualan, dan stok tidak disentuh; pembelian
+  barang, gaji, dan baris yang sudah direkonsiliasi dilaporkan sebagai lewatan.
+  Pratinjau memperingatkan utang yang terbuka kembali. Cadangan otomatis.
+
 ### Kosongkan Satu Bulan (Sistem → Cadangan)
 
 Untuk memulai bersih dari bulan berikutnya ketika data sebuah bulan sudah
@@ -899,7 +915,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 884 pemeriksaan, 61 bagian
+npm run smoke            # 901 pemeriksaan, 62 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

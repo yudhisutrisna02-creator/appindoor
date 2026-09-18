@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Landmark, AlertTriangle, Plus, Pencil, ListPlus } from 'lucide-react';
+import { Landmark, AlertTriangle, Plus, Pencil, ListPlus, Scale } from 'lucide-react';
 import { api } from '../lib/api';
+import SetelSaldo from '../components/SetelSaldo';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
   useToast, Field, TombolEkspor,
@@ -23,6 +24,7 @@ export default function Rekening() {
   const { punya } = useAuth();
   const bolehUbah = punya('keuangan.coa');
 
+  const [setel, setSetel] = useState(false);
   const [asOf, setAsOf] = useState(today());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,6 +100,11 @@ export default function Rekening() {
   return (
     <div>
       <PageHeader title="Rekening Kas & Bank" subtitle="Saldo tiap rekening berikut asal pergerakannya">
+        {bolehUbah && (
+          <button className="btn-secondary" onClick={() => setSetel(true)}>
+            <Scale size={16} /> Setel Saldo
+          </button>
+        )}
         {bolehUbah && (
           <button className="btn-secondary" onClick={() => setMassal({ teks: '', mulai: '1021' })}>
             <ListPlus size={16} /> Tambah Banyak
@@ -312,6 +319,13 @@ export default function Rekening() {
           </form>
         )}
       </Modal>
+
+      <SetelSaldo
+        open={setel}
+        onClose={() => setSetel(false)}
+        onSelesai={load}
+        tanggalAwal={asOf}
+      />
     </div>
   );
 }
