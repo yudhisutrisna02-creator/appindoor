@@ -26,12 +26,14 @@ export default function HapusPengeluaran() {
   const [memeriksa, setMemeriksa] = useState(false);
   const [konfirmasi, setKonfirmasi] = useState('');
   const [menghapus, setMenghapus] = useState(false);
+  // Bawaan: utang yang pelunasannya ikut terhapus dianggap memang sudah lunas.
+  const [lunasiUtang, setLunasiUtang] = useState(true);
 
   async function periksa() {
     setMemeriksa(true);
     setKonfirmasi('');
     try {
-      setHasil(await api.post('/api/cashflow/hapus-pengeluaran', { bulan }));
+      setHasil(await api.post('/api/cashflow/hapus-pengeluaran', { bulan, lunasi_utang: lunasiUtang }));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -42,7 +44,9 @@ export default function HapusPengeluaran() {
   async function hapus() {
     setMenghapus(true);
     try {
-      const res = await api.post('/api/cashflow/hapus-pengeluaran', { bulan, terapkan: true, konfirmasi });
+      const res = await api.post('/api/cashflow/hapus-pengeluaran', {
+        bulan, terapkan: true, konfirmasi, lunasi_utang: lunasiUtang,
+      });
       toast.success(res.message);
       setHasil(null);
       setKonfirmasi('');
@@ -109,6 +113,30 @@ export default function HapusPengeluaran() {
             <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
               <p className="mb-1 flex items-center gap-1.5 font-semibold"><AlertTriangle size={14} /> Perlu diketahui</p>
               <ul className="list-disc pl-5">{hasil.peringatan.map((p) => <li key={p}>{p}</li>)}</ul>
+            </div>
+          )}
+
+          {(hasil.utangKembali || []).length > 0 && (
+            <div className="rounded-xl bg-slate-50 p-3 text-xs">
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox" className="mt-0.5" checked={lunasiUtang}
+                  onChange={(e) => { setLunasiUtang(e.target.checked); setHasil(null); setKonfirmasi(''); }}
+                />
+                <span>
+                  <strong>Utangnya memang sudah dibayar</strong> (disarankan). Sisanya ditutup sebagai saldo
+                  awal tanpa uang keluar, sehingga tidak menagih lagi di bulan berikutnya. Hapus centangnya
+                  bila utang itu sebenarnya memang belum dibayar.
+                </span>
+              </label>
+              <ul className="mt-2 space-y-0.5 pl-6">
+                {hasil.utangKembali.map((u) => (
+                  <li key={`${u.partner_id}-${u.account_id}`} className="flex justify-between gap-3">
+                    <span>{u.subtype === 'PAYABLE' ? 'Utang' : 'Piutang'} {u.name}</span>
+                    <span className="tabular font-medium">{rupiah(Math.abs(u.nilai))}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

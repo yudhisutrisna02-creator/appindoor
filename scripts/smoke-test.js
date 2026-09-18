@@ -6305,6 +6305,46 @@ async function main() {
     !(iklanSisa62.rows || []).some((x) => (x.note || '').includes(String(cap62))));
   const lagi62 = await call('POST', '/api/cashflow/hapus-pengeluaran', { bulan: bulan62 });
   check('tidak ada pengeluaran tersisa di bulan itu', lagi62.ringkas.jurnal === 0);
+
+  // ---- C. Utang yang pelunasannya ikut terhapus: dianggap sudah lunas ----
+  const bulan62c = `${Number(today.slice(0, 4)) - 1}-08`;
+  const sup62 = await call('POST', '/api/partners', {
+    name: `Supplier Lunas ${cap62}`, kind: 'SUPPLIER', phone: '0812000622', address: 'Jl. Uji 62',
+  });
+  const idSup62 = (sup62.partner || sup62).id;
+  const prod62 = (await call('POST', '/api/inventory/products', {
+    sku: `P62-${cap62}`, name: 'Produk Uji Hapus Pengeluaran', cost: 0, price: 20000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod62.id, move_date: `${bulan62c}-03`, move_type: 'IN',
+    qty: 10, unit_cost: 30000, payment: 'CREDIT', partner_id: idSup62,
+  });
+  await call('POST', '/api/cashflow/settlements', {
+    entry_date: `${bulan62c}-20`, partner_id: idSup62, direction: 'PAY', amount: 300000, cash_code: rek62,
+  });
+  const utang62 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((x) => x.id === idSup62) || {}).utang || 0);
+  };
+  check('persiapan: utang supplier lunas di bulan itu', near(await utang62(), 0, 1));
+
+  const cekLunas = await call('POST', '/api/cashflow/hapus-pengeluaran', {
+    bulan: bulan62c, lunasi_utang: true,
+  });
+  check('pratinjau menyebut utang yang akan ditutup sebagai saldo awal',
+    (cekLunas.utangKembali || []).some((u) => u.partner_id === idSup62 && near(u.nilai, 300000, 1))
+      && cekLunas.peringatan.some((x) => /dianggap sudah lunas/i.test(x)),
+    JSON.stringify(cekLunas.utangKembali));
+
+  const jalanLunas = await call('POST', '/api/cashflow/hapus-pengeluaran', {
+    bulan: bulan62c, terapkan: true, konfirmasi: cekLunas.ringkas.kataKunci, lunasi_utang: true,
+  });
+  check('utangnya ditutup sebagai saldo awal, bukan terbuka lagi',
+    jalanLunas.dilunasi === 1 && near(await utang62(), 0, 1), String(await utang62()));
+  check('pembayarannya hilang dari rekening',
+    near(await saldo62(rek62), 5000000 + 900000, 1), String(await saldo62(rek62)));
+  const tbLunas = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca tetap seimbang sesudah utang dianggap lunas', tbLunas.balanced === true);
   const tb62 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
   check('neraca saldo tetap seimbang', tb62.balanced === true);
 

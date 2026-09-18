@@ -50,6 +50,15 @@ export default function SetelSaldo({ open, onClose, onSelesai, tanggalAwal }) {
     }
   }
 
+  // Total dihitung dari rekening yang DIISI saja, ditambah saldo aplikasi untuk
+  // rekening yang dibiarkan kosong — supaya angkanya sebanding.
+  const totalAplikasi = (data?.rows || []).reduce((n, a) => n + a.saldo, 0);
+  const totalSebenarnya = (data?.rows || []).reduce((n, a) => {
+    const v = isi[a.code];
+    return n + (v !== undefined && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : a.saldo);
+  }, 0);
+  const totalSelisih = totalSebenarnya - totalAplikasi;
+
   return (
     <Modal open={open} onClose={onClose} title="Setel Saldo Rekening" wide>
       <form onSubmit={simpan} className="grid gap-3">
@@ -105,6 +114,18 @@ export default function SetelSaldo({ open, onClose, onSelesai, tanggalAwal }) {
                   );
                 })}
               </tbody>
+              {/* Saldo akhir sebuah usaha jarang berada di satu rekening;
+                  totalnya yang dicocokkan dengan hitungan di luar aplikasi. */}
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
+                  <td className="px-3 py-2.5">TOTAL SEMUA REKENING</td>
+                  <td className="tabular px-3 py-2.5 text-right">{rupiah(totalAplikasi)}</td>
+                  <td className="tabular px-3 py-2.5 text-right">{rupiah(totalSebenarnya)}</td>
+                  <td className={`tabular px-3 py-2.5 text-right ${totalSelisih < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                    {totalSelisih > 0 ? '+' : ''}{rupiah(totalSelisih)}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}

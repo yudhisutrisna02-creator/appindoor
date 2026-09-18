@@ -640,7 +640,10 @@ Dua alat untuk memulai bulan baru dari posisi nyata tanpa mengarang transaksi:
   itu untuk sumber CASH, ADS (beserta baris ad_spends-nya), SETTLEMENT,
   TRANSFER, MANUAL. Pemasukan, penjualan, dan stok tidak disentuh; pembelian
   barang, gaji, dan baris yang sudah direkonsiliasi dilaporkan sebagai lewatan.
-  Pratinjau memperingatkan utang yang terbuka kembali. Cadangan otomatis.
+  Pratinjau memperingatkan utang yang terbuka kembali. Dengan `lunasi_utang`
+  (bawaan menyala), utang itu ditutup lagi lewat jurnal AWAL lawan 3050 —
+  uangnya memang sudah keluar di dunia nyata, yang dibuang hanya catatannya.
+  Cadangan otomatis.
 
 ### Kosongkan Satu Bulan (Sistem → Cadangan)
 
@@ -915,7 +918,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 901 pemeriksaan, 62 bagian
+npm run smoke            # 906 pemeriksaan, 62 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

@@ -1245,6 +1245,11 @@ const hapusKeluarSchema = z.object({
   bulan: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'format bulan YYYY-MM'),
   terapkan: z.boolean().default(false),
   konfirmasi: z.string().trim().optional(),
+  // Utang yang pelunasannya ikut terhapus: dianggap sudah lunas (bawaan) atau
+  // dibiarkan terbuka kembali. Dianggap lunas berarti sisanya ditutup lewat
+  // jurnal saldo awal — tanpa uang keluar, karena uangnya memang sudah keluar
+  // di dunia nyata sebelum catatannya dibuang.
+  lunasi_utang: z.boolean().default(true),
 });
 
 function calonPengeluaran(bulan) {
@@ -1289,14 +1294,15 @@ router.post('/hapus-pengeluaran', butuhIzin('keuangan.jurnal'), ah(async (req, r
   // Utang yang terbuka kembali karena pelunasannya dihapus.
   const utangKembali = db
     .prepare(
-      `SELECT p.name, COALESCE(SUM(l.debit - l.credit), 0) AS nilai
+      `SELECT p.id AS partner_id, p.name, a.id AS account_id, a.code, a.subtype,
+              COALESCE(SUM(l.debit - l.credit), 0) AS nilai
          FROM journal_lines l
          JOIN journals j ON j.id = l.journal_id
          JOIN accounts a ON a.id = l.account_id
          JOIN partners p ON p.id = l.partner_id
         WHERE j.source = 'SETTLEMENT' AND substr(j.entry_date, 1, 7) = ?
           AND a.subtype IN ('PAYABLE', 'RECEIVABLE')
-        GROUP BY p.id`
+        GROUP BY p.id, a.id`
     )
     .all(body.bulan)
     .map((x) => ({ ...x, nilai: r2(x.nilai) }))
@@ -1315,8 +1321,12 @@ router.post('/hapus-pengeluaran', butuhIzin('keuangan.jurnal'), ah(async (req, r
   const peringatan = [];
   if (utangKembali.length) {
     peringatan.push(
-      'Utang mitra terbuka kembali karena pelunasannya ikut terhapus: ' +
-        utangKembali.map((x) => `${x.name} Rp ${Math.abs(x.nilai).toLocaleString('id-ID')}`).join(', ')
+      body.lunasi_utang
+        ? 'Utang yang pelunasannya ikut terhapus akan ditutup kembali sebagai saldo awal (dianggap sudah lunas), ' +
+          'tanpa uang keluar: ' +
+          utangKembali.map((x) => `${x.name} Rp ${Math.abs(x.nilai).toLocaleString('id-ID')}`).join(', ')
+        : 'Utang mitra terbuka kembali karena pelunasannya ikut terhapus: ' +
+          utangKembali.map((x) => `${x.name} Rp ${Math.abs(x.nilai).toLocaleString('id-ID')}`).join(', ')
     );
   }
   if (perSumber.ADS) {
@@ -1334,6 +1344,7 @@ router.post('/hapus-pengeluaran', butuhIzin('keuangan.jurnal'), ah(async (req, r
   if (!body.terapkan) {
     return res.json({
       ok: true, dicoba: true, ringkas, penghalang, peringatan,
+      utangKembali,
       contoh: bisa.slice(0, 30),
       contohDilewati: dilewati.slice(0, 20),
     });
@@ -1346,6 +1357,10 @@ router.post('/hapus-pengeluaran', butuhIzin('keuangan.jurnal'), ah(async (req, r
   }
 
   const cadangan = await buatCadangan('manual');
+  const lawanLunas = accountByCode(ACC.OPENING_CASH);
+  const akhirBulan = `${body.bulan}-${new Date(Date.UTC(Number(body.bulan.slice(0, 4)), Number(body.bulan.slice(5, 7)), 0)).getUTCDate()}`;
+  let dilunasi = 0;
+
   db.transaction(() => {
     for (const r of bisa) {
       // Belanja iklan punya barisnya sendiri; menghapus jurnalnya saja akan
@@ -1355,15 +1370,44 @@ router.post('/hapus-pengeluaran', butuhIzin('keuangan.jurnal'), ah(async (req, r
       }
       deleteJournalById(r.id);
     }
+
+    // Utangnya memang sudah dibayar di dunia nyata — yang dibuang hanyalah
+    // catatan uang keluarnya. Jadi sisanya ditutup lewat saldo awal, bukan
+    // dibiarkan menagih lagi di bulan berikutnya.
+    if (body.lunasi_utang) {
+      for (const u of utangKembali) {
+        const nilai = Math.abs(u.nilai);
+        const mitraDiDebit = u.nilai > 0;
+        postJournal({
+          date: akhirBulan,
+          description: `Saldo Awal — ${u.subtype === 'PAYABLE' ? 'utang' : 'piutang'} ${u.name} dianggap lunas per ${akhirBulan}`,
+          lines: mitraDiDebit
+            ? [
+              { account_id: u.account_id, debit: nilai, credit: 0, partner_id: u.partner_id, memo: 'Dianggap lunas saat pengeluaran bulan ini dihapus' },
+              { code: lawanLunas.code, debit: 0, credit: nilai, memo: `Utang ${u.name} dianggap lunas` },
+            ]
+            : [
+              { code: lawanLunas.code, debit: nilai, credit: 0, memo: `Piutang ${u.name} dianggap lunas` },
+              { account_id: u.account_id, debit: 0, credit: nilai, partner_id: u.partner_id, memo: 'Dianggap lunas saat pengeluaran bulan ini dihapus' },
+            ],
+          source: 'AWAL',
+          sourceId: u.partner_id,
+          userId: req.user.id,
+        });
+        dilunasi += 1;
+      }
+    }
   })();
 
   res.json({
     ok: true,
     ringkas,
     cadangan: cadangan.nama,
+    dilunasi,
     message:
-      `${bisa.length} pengeluaran ${body.bulan} senilai Rp ${total.toLocaleString('id-ID')} dihapus. ` +
-      `Cadangan sebelum penghapusan: ${cadangan.nama}`,
+      `${bisa.length} pengeluaran ${body.bulan} senilai Rp ${total.toLocaleString('id-ID')} dihapus` +
+      (dilunasi ? `, ${dilunasi} utang/piutang mitra ditutup sebagai saldo awal` : '') +
+      `. Cadangan sebelum penghapusan: ${cadangan.nama}`,
   });
 }));
 
