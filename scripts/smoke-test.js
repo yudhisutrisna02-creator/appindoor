@@ -6081,6 +6081,111 @@ async function main() {
   check('neraca saldo tetap seimbang', tb60.balanced === true);
 
 
+  console.log('\n61. Presensi: sakit & izin jam kerja dengan bukti foto');
+
+  const cap61 = Date.now();
+  const foto61 = `data:image/jpeg;base64,${Buffer.from('x'.repeat(64)).toString('base64')}`;
+  const pegawai61 = await call('POST', '/api/admin/users', {
+    name: `Pegawai Izin ${cap61}`, email: `izin${cap61}@contoh.test`,
+    password: 'RahasiaKuat1', role: 'staff', position: 'Packing',
+  });
+  const emailIzin = pegawai61.user.email;
+  const pegawai61b = await call('POST', '/api/admin/users', {
+    name: `Pegawai Siang ${cap61}`, email: `siang${cap61}@contoh.test`,
+    password: 'RahasiaKuat1', role: 'staff', position: 'Packing',
+  });
+
+  // ---- A. Sakit: bukti wajib, dan harinya tidak menunggu check-in ----
+  const tokenAdmin61 = token;
+  token = await masukSebagai(emailIzin, 'RahasiaKuat1');
+
+  let tolakTanpaBukti = 0;
+  try { await call('POST', '/api/attendance/sakit', { notes: 'demam' }); }
+  catch (err) { tolakTanpaBukti = err.status; }
+  check('pengajuan sakit tanpa foto bukti ditolak',
+    tolakTanpaBukti === 422 || tolakTanpaBukti === 400, `status ${tolakTanpaBukti}`);
+
+  const sakit61 = await call('POST', '/api/attendance/sakit', {
+    photo: foto61, notes: 'Demam, surat dari bidan desa',
+  });
+  check('sakit tercatat beserta buktinya',
+    sakit61.record.izin_jenis === 'SAKIT' && !!sakit61.record.izin_foto
+      && sakit61.record.status === 'LEAVE', JSON.stringify(sakit61.record.izin_jenis));
+  const hariIni61 = await call('GET', '/api/attendance/today');
+  check('layar presensi menampilkan izin yang sedang berlaku',
+    hariIni61.record && hariIni61.record.izin_jenis === 'SAKIT');
+
+  let tolakCheckIn61 = 0;
+  try {
+    await call('POST', '/api/attendance/check-in', {
+      workType: 'WFH', lat: -7.67, lng: 109.66, accuracy: 10, photo: foto61,
+    });
+  } catch (err) { tolakCheckIn61 = err.status; }
+  check('yang sudah menandai sakit tidak bisa check-in lagi', tolakCheckIn61 === 409,
+    `status ${tolakCheckIn61}`);
+
+  // ---- B. Izin jam kerja: check-in dinilai dari jam yang disepakati ----
+  token = await masukSebagai(pegawai61b.user.email, 'RahasiaKuat1');
+
+  let tolakJam = 0;
+  try {
+    await call('POST', '/api/attendance/izin-jam', {
+      jenis: 'BERANGKAT_SIANG', mulai: '25:00', photo: foto61,
+    });
+  } catch (err) { tolakJam = err.status; }
+  check('jam yang tidak masuk akal ditolak',
+    tolakJam === 422 || tolakJam === 400, `status ${tolakJam}`);
+
+  let tolakUrutan = 0;
+  try {
+    await call('POST', '/api/attendance/izin-jam', {
+      jenis: 'SETENGAH_HARI', mulai: '13:00', selesai: '09:00', photo: foto61,
+    });
+  } catch (err) { tolakUrutan = err.status; }
+  check('jam selesai sebelum jam mulai ditolak', tolakUrutan === 422, `status ${tolakUrutan}`);
+
+  // Jam mulai sengaja dibuat jauh setelah sekarang, sehingga check-in berikutnya
+  // pasti lebih awal daripada jam izinnya — dan tidak boleh dihitung terlambat.
+  const izin61 = await call('POST', '/api/attendance/izin-jam', {
+    jenis: 'BERANGKAT_SIANG', mulai: '23:50', photo: foto61, notes: 'Mengantar anak ke klinik',
+  });
+  check('izin jam kerja tersimpan dengan jam mulainya',
+    izin61.record.izin_jenis === 'BERANGKAT_SIANG' && izin61.record.izin_mulai === '23:50'
+      && !!izin61.record.izin_foto, JSON.stringify(izin61.record.izin_mulai));
+
+  const masuk61 = await call('POST', '/api/attendance/check-in', {
+    workType: 'WFH', lat: -7.67, lng: 109.66, accuracy: 10, photo: foto61,
+  });
+  check('check-in sesudah izin mengisi baris yang sama, bukan membuat baru',
+    masuk61.record.id === izin61.record.id && !!masuk61.record.check_in_at);
+  check('keterlambatan dihitung dari jam izin, bukan jam masuk umum',
+    masuk61.record.status === 'ONTIME' && masuk61.record.late_minutes === 0,
+    `${masuk61.record.status} ${masuk61.record.late_minutes}`);
+  check('jenis izin dan buktinya tetap menempel setelah check-in',
+    masuk61.record.izin_jenis === 'BERANGKAT_SIANG' && !!masuk61.record.izin_foto);
+
+  let tolakIzinSesudah = 0;
+  try { await call('POST', '/api/attendance/sakit', { photo: foto61 }); }
+  catch (err) { tolakIzinSesudah = err.status; }
+  check('yang sudah check-in tidak bisa mengajukan izin hari itu', tolakIzinSesudah === 409,
+    `status ${tolakIzinSesudah}`);
+
+  // ---- C. Mencatatkan untuk orang lain perlu izin presensi.kelola ----
+  let tolakOrangLain = 0;
+  try {
+    await call('POST', '/api/attendance/sakit', { user_id: pegawai61.user.id, photo: foto61 });
+  } catch (err) { tolakOrangLain = err.status; }
+  check('karyawan biasa tidak bisa menandai rekannya sakit', tolakOrangLain === 403,
+    `status ${tolakOrangLain}`);
+
+  token = tokenAdmin61;
+  const rekap61 = await call('GET', `/api/attendance?from=${today}&to=${today}`);
+  const barisSakit = rekap61.rows.find((r) => r.user_id === pegawai61.user.id);
+  check('rekap absensi membawa jenis izin, jam, dan berkas buktinya',
+    barisSakit && barisSakit.izin_jenis === 'SAKIT' && !!barisSakit.izin_foto,
+    JSON.stringify(barisSakit && barisSakit.izin_jenis));
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

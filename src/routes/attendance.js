@@ -65,9 +65,15 @@ router.post('/check-in', ah((req, res) => {
 
   const date = todayLocal();
   const existing = db
-    .prepare('SELECT id FROM attendance WHERE user_id = ? AND work_date = ?')
+    .prepare('SELECT * FROM attendance WHERE user_id = ? AND work_date = ?')
     .get(req.user.id, date);
-  if (existing) throw httpError(409, 'Anda sudah melakukan check-in hari ini');
+  if (existing && existing.check_in_at) throw httpError(409, 'Anda sudah melakukan check-in hari ini');
+  if (existing && existing.izin_jenis === 'SAKIT') {
+    throw httpError(409, 'Hari ini sudah ditandai sakit. Minta pengelola membetulkannya bila Anda tetap masuk.');
+  }
+  if (existing && !IZIN_JAM.includes(existing.izin_jenis)) {
+    throw httpError(409, 'Sudah ada catatan presensi hari ini. Hubungi pengelola untuk membetulkannya.');
+  }
 
   const near = nearestOffice(body.lat, body.lng);
   const inside = near ? near.inside : false;
@@ -84,8 +90,35 @@ router.post('/check-in', ah((req, res) => {
   }
 
   const at = dayjs().toISOString();
-  const { status, lateMinutes } = evaluateLateness(at);
+  // Yang sudah mengajukan izin jam kerja dinilai terhadap jam yang disepakati.
+  const { status, lateMinutes } = evaluateLateness(at, existing ? existing.izin_mulai : null);
   const photo = saveDataUrlImage(body.photo, `in-${req.user.id}`);
+
+  if (existing) {
+    db.prepare(
+      `UPDATE attendance
+          SET work_type = ?, check_in_at = ?, in_lat = ?, in_lng = ?, in_accuracy_m = ?,
+              in_photo = ?, in_address = ?, in_office_id = ?, in_distance_m = ?,
+              in_inside_geofence = ?, status = ?, late_minutes = ?, notes = COALESCE(?, notes)
+        WHERE id = ?`
+    ).run(
+      body.workType, at, body.lat, body.lng, body.accuracy,
+      photo, body.address || null,
+      near ? near.office.id : null,
+      near ? near.distance : null,
+      inside ? 1 : 0,
+      status, lateMinutes, body.notes || null, existing.id
+    );
+
+    return res.status(201).json({
+      ok: true,
+      message: status === 'LATE'
+        ? `Check-in tercatat — TERLAMBAT ${lateMinutes} menit dari jam izin ${existing.izin_mulai}`
+        : `Check-in tercatat — sesuai jam izin ${existing.izin_mulai}`,
+      record: db.prepare('SELECT * FROM attendance WHERE id = ?').get(existing.id),
+      geofence: near ? { office: near.office.name, distance: near.distance, inside } : null,
+    });
+  }
 
   const info = db
     .prepare(
@@ -223,6 +256,136 @@ router.get('/export/pdf', ah(async (req, res) => {
     .set('Content-Type', 'application/pdf')
     .set('Content-Disposition', `attachment; filename="rekap-absensi-${from}_${to}.pdf"`)
     .send(buffer);
+}));
+
+// Izin yang orangnya TETAP masuk, hanya jamnya bergeser. Bedanya dengan sakit:
+// baris presensinya menunggu check-in, dan keterlambatan dinilai dari izin_mulai.
+const IZIN_JAM = ['SETENGAH_HARI', 'GESER_JAM', 'BERANGKAT_SIANG'];
+const LABEL_IZIN = {
+  SAKIT: 'Sakit',
+  SETENGAH_HARI: 'Setengah hari kerja',
+  GESER_JAM: 'Ganti jam kerja',
+  BERANGKAT_SIANG: 'Berangkat siang',
+};
+const JAM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'jam harus bentuk HH:MM');
+
+/**
+ * Baris presensi milik seseorang pada satu tanggal, disiapkan bila belum ada.
+ *
+ * Pengajuan izin datang sebelum check-in, jadi barisnya sering belum lahir.
+ * work_type diisi WFH sekadar memenuhi skema — yang bermakna adalah status dan
+ * kolom izin_*.
+ */
+function barisPresensi(userId, tanggal) {
+  const ada = db.prepare('SELECT * FROM attendance WHERE user_id = ? AND work_date = ?').get(userId, tanggal);
+  if (ada) return ada;
+  const info = db
+    .prepare("INSERT INTO attendance (user_id, work_date, work_type, status) VALUES (?, ?, 'WFH', 'LEAVE')")
+    .run(userId, tanggal);
+  return db.prepare('SELECT * FROM attendance WHERE id = ?').get(info.lastInsertRowid);
+}
+
+/**
+ * Siapa yang dicatatkan. Karyawan mencatat untuk dirinya sendiri; hanya yang
+ * berizin presensi.kelola boleh mencatatkan untuk orang lain — kalau tidak,
+ * siapa pun bisa menandai rekannya sakit.
+ */
+function sasaranIzin(req, userId) {
+  if (!userId || userId === req.user.id) return req.user;
+  if (!req.izin || !req.izin.has('presensi.kelola')) {
+    throw httpError(403, 'Anda hanya bisa mencatat izin untuk diri sendiri');
+  }
+  const u = db.prepare('SELECT id, name FROM users WHERE id = ? AND active = 1').get(userId);
+  if (!u) throw httpError(404, 'Karyawan tidak ditemukan atau tidak aktif');
+  return u;
+}
+
+const izinSchema = z.object({
+  user_id: z.number().int().positive().optional().nullable(),
+  work_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // Bukti wajib: surat dokter/bidan atau foto resep untuk sakit, foto kegiatan
+  // untuk izin jam kerja. Tanpa bukti, catatannya tidak bisa dipertanggungjawabkan.
+  photo: z.string().min(20, 'foto bukti wajib dilampirkan'),
+  notes: z.string().max(500).optional().nullable(),
+});
+
+const izinJamSchema = izinSchema.extend({
+  jenis: z.enum(IZIN_JAM),
+  mulai: JAM,
+  selesai: JAM.optional().nullable(),
+});
+
+/** Menyimpan pengajuan izin pada baris presensi hari itu. */
+function simpanIzin({ req, sasaran, tanggal, jenis, mulai, selesai, photo, notes }) {
+  const baris = barisPresensi(sasaran.id, tanggal);
+  if (baris.check_in_at) {
+    throw httpError(
+      409,
+      `${sasaran.name} sudah check-in pada ${tanggal}. Betulkan lewat Rekap Absensi → koreksi status.`
+    );
+  }
+
+  const berkas = saveDataUrlImage(photo, `izin-${sasaran.id}`);
+  db.prepare(
+    `UPDATE attendance
+        SET status = 'LEAVE', izin_jenis = ?, izin_mulai = ?, izin_selesai = ?,
+            izin_foto = ?, izin_catatan = ?, izin_oleh = ?, izin_at = ?, notes = COALESCE(?, notes)
+      WHERE id = ?`
+  ).run(
+    jenis, mulai || null, selesai || null, berkas, notes || null,
+    req.user.id, dayjs().toISOString(), notes || null, baris.id
+  );
+
+  return db.prepare('SELECT * FROM attendance WHERE id = ?').get(baris.id);
+}
+
+/**
+ * POST /api/attendance/sakit — menandai sakit beserta bukti surat dokter,
+ * surat bidan, atau foto resep obat. Hari itu tidak menunggu check-in.
+ */
+router.post('/sakit', ah((req, res) => {
+  const body = parse(izinSchema, req.body);
+  const tanggal = body.work_date || todayLocal();
+  const sasaran = sasaranIzin(req, body.user_id);
+
+  const record = simpanIzin({
+    req, sasaran, tanggal, jenis: 'SAKIT', mulai: null, selesai: null,
+    photo: body.photo, notes: body.notes,
+  });
+
+  res.status(201).json({
+    ok: true,
+    record,
+    message: `${sasaran.name} tercatat SAKIT pada ${tanggal} — bukti tersimpan`,
+  });
+}));
+
+/**
+ * POST /api/attendance/izin-jam — setengah hari kerja, ganti jam kerja, atau
+ * berangkat siang. Orangnya tetap check-in nanti, dan keterlambatannya dihitung
+ * dari jam yang disepakati di sini.
+ */
+router.post('/izin-jam', ah((req, res) => {
+  const body = parse(izinJamSchema, req.body);
+  const tanggal = body.work_date || todayLocal();
+  const sasaran = sasaranIzin(req, body.user_id);
+  if (body.selesai && body.selesai <= body.mulai) {
+    throw httpError(422, 'Jam selesai harus setelah jam mulai');
+  }
+
+  const record = simpanIzin({
+    req, sasaran, tanggal, jenis: body.jenis, mulai: body.mulai, selesai: body.selesai,
+    photo: body.photo, notes: body.notes,
+  });
+
+  res.status(201).json({
+    ok: true,
+    record,
+    message:
+      `${sasaran.name}: ${LABEL_IZIN[body.jenis]} pada ${tanggal}, mulai ${body.mulai}` +
+      (body.selesai ? ` sampai ${body.selesai}` : '') +
+      '. Check-in nanti dinilai dari jam itu.',
+  });
 }));
 
 /**

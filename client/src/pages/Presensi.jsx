@@ -6,6 +6,7 @@ import {
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, useToast } from '../components/ui';
 import { timeID, WORK_TYPE_LABEL } from '../lib/format';
+import IzinSakit, { LABEL_IZIN } from '../components/IzinSakit';
 
 const WORK_TYPES = [
   { value: 'WFO', label: 'WFO', desc: 'Kantor / Gudang', icon: Building2 },
@@ -203,8 +204,14 @@ export default function Presensi() {
         />
         <StatCard
           label="Status"
-          value={record ? (record.status === 'LATE' ? 'Terlambat' : 'Tepat Waktu') : '-'}
-          sub={record?.late_minutes ? `${record.late_minutes} menit` : 'Sesuai jadwal'}
+          value={record?.izin_jenis && !record.check_in_at
+            ? (LABEL_IZIN[record.izin_jenis] || 'Izin')
+            : record?.check_in_at
+              ? (record.status === 'LATE' ? 'Terlambat' : 'Tepat Waktu')
+              : '-'}
+          sub={record?.izin_mulai && !record.check_in_at
+            ? `Mulai kerja ${record.izin_mulai}`
+            : record?.late_minutes ? `${record.late_minutes} menit` : 'Sesuai jadwal'}
           icon={CheckCircle2} tone={record?.status === 'LATE' ? 'red' : 'green'}
         />
         <StatCard
@@ -215,7 +222,18 @@ export default function Presensi() {
         />
       </div>
 
-      {doneToday ? (
+      {/* Sakit & izin jam kerja hanya selama belum check-in hari itu. */}
+      {!record?.check_in_at && <IzinSakit record={record} onSelesai={loadStatus} />}
+
+      {record?.izin_jenis === 'SAKIT' && !record.check_in_at ? (
+        <div className="card text-center">
+          <CheckCircle2 size={40} className="mx-auto mb-3 text-amber-500" />
+          <h2 className="text-lg font-bold text-slate-900">Hari ini tercatat sakit</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Buktinya sudah tersimpan dan terlihat di Rekap Absensi. Tidak perlu check-in hari ini.
+          </p>
+        </div>
+      ) : doneToday ? (
         <div className="card text-center">
           <CheckCircle2 size={40} className="mx-auto mb-3 text-emerald-500" />
           <h2 className="text-lg font-bold text-slate-900">Presensi hari ini sudah lengkap</h2>

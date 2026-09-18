@@ -4,6 +4,7 @@ import { FileSpreadsheet, FileText, Users, Clock, MapPin, Image as ImageIcon, Ca
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, Modal, Field } from '../components/ui';
 import { timeID, today, WORK_TYPE_LABEL, STATUS_LABEL } from '../lib/format';
+import { LABEL_IZIN } from '../components/IzinSakit';
 import { useAuth } from '../lib/auth';
 
 const BADGE = { ONTIME: 'badge-green', LATE: 'badge-red', LEAVE: 'badge-amber', ABSENT: 'badge-slate' };
@@ -137,7 +138,16 @@ export default function RekapAbsensi() {
                         <td className="tabular">{timeID(r.check_in_at)}</td>
                         <td className="tabular">{timeID(r.check_out_at)}</td>
                         <td className="tabular">{r.work_minutes ? `${Math.floor(r.work_minutes / 60)}j ${r.work_minutes % 60}m` : '-'}</td>
-                        <td><span className={BADGE[r.status]}>{STATUS_LABEL[r.status]}</span></td>
+                        <td>
+                          <span className={BADGE[r.status]}>
+                            {r.izin_jenis ? (LABEL_IZIN[r.izin_jenis] || STATUS_LABEL[r.status]) : STATUS_LABEL[r.status]}
+                          </span>
+                          {r.izin_mulai && (
+                            <p className="mt-0.5 text-[11px] text-slate-500">
+                              mulai {r.izin_mulai}{r.izin_selesai ? ` – ${r.izin_selesai}` : ''}
+                            </p>
+                          )}
+                        </td>
                         <td className="tabular">{r.late_minutes ? `${r.late_minutes} m` : '-'}</td>
                         <td className="text-xs">
                           {/* Jarak ke kantor hanya bermakna untuk WFO; WFH & Dinas
@@ -158,7 +168,7 @@ export default function RekapAbsensi() {
                           )}
                         </td>
                         <td>
-                          {r.in_photo ? (
+                          {r.in_photo || r.izin_foto ? (
                             <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setPreview(r)}>
                               <ImageIcon size={14} /> Lihat
                             </button>
@@ -193,6 +203,15 @@ export default function RekapAbsensi() {
             {[
               { label: `Check In • ${timeID(preview.check_in_at)}`, photo: preview.in_photo, lat: preview.in_lat, lng: preview.in_lng, acc: preview.in_accuracy_m },
               { label: `Check Out • ${timeID(preview.check_out_at)}`, photo: preview.out_photo, lat: preview.out_lat, lng: preview.out_lng, acc: preview.out_accuracy_m },
+              ...(preview.izin_foto
+                ? [{
+                  label: `${LABEL_IZIN[preview.izin_jenis] || 'Izin'}${preview.izin_mulai ? ` • mulai ${preview.izin_mulai}` : ''}`,
+                  photo: preview.izin_foto,
+                  keterangan: preview.izin_catatan,
+                  // Surat dokter & resep berbentuk dokumen: dimuat utuh, tidak dipotong.
+                  dokumen: true,
+                }]
+                : []),
             ].map((side) => (
               <div key={side.label}>
                 <p className="label">{side.label}</p>
@@ -200,13 +219,14 @@ export default function RekapAbsensi() {
                   <GambarTerlindungi
                     berkas={side.photo}
                     alt={side.label}
-                    className="aspect-[4/3] w-full rounded-xl object-cover"
+                    className={`aspect-[4/3] w-full rounded-xl ${side.dokumen ? 'bg-slate-100 object-contain' : 'object-cover'}`}
                   />
                 ) : (
                   <div className="grid aspect-[4/3] place-items-center rounded-xl bg-slate-100 text-xs text-slate-400">
                     Tidak ada foto
                   </div>
                 )}
+                {side.keterangan && <p className="mt-2 text-xs text-slate-600">{side.keterangan}</p>}
                 {side.lat != null && (
                   <p className="tabular mt-2 text-xs text-slate-500">
                     {side.lat.toFixed(6)}, {side.lng.toFixed(6)} • ±{Math.round(side.acc || 0)} m

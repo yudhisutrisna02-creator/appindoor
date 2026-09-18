@@ -73,8 +73,11 @@ const todayLocal = () => nowLocal().format('YYYY-MM-DD');
  * @param {string|Date} at waktu check-in (ISO/Date)
  * @returns {{status:'ONTIME'|'LATE', lateMinutes:number, workStart:string}}
  */
-function evaluateLateness(at) {
-  const workStart = getSetting('work_start', process.env.WORK_START || '08:00');
+function evaluateLateness(at, mulaiKustom = null) {
+  // Jam masuk yang disepakati untuk hari itu — izin berangkat siang atau ganti
+  // jam kerja — menang atas jam masuk umum. Tanpa ini, orang yang sudah izin
+  // tetap tercatat terlambat berjam-jam.
+  const workStart = mulaiKustom || getSetting('work_start', process.env.WORK_START || '08:00');
   const tolerance = Number(getSetting('late_tolerance_minutes', process.env.LATE_TOLERANCE_MINUTES || 10));
 
   const local = keLokal(at);

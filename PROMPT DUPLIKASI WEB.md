@@ -564,6 +564,27 @@ memakai `koreksiHargaMasuk` (fungsi yang sama dengan tombol Harga). Semua dalam
 satu transaksi; ditolak bila utang supplier jadi minus, mutasi tanpa supplier,
 atau sudah ber-PO.
 
+### Sakit & izin jam kerja (menu Presensi)
+
+Dua pengajuan yang dicatat karyawan sendiri, keduanya WAJIB berfoto bukti
+(`izin_foto`, disimpan lewat saveDataUrlImage; peramban mengecilkan fotonya ke
+sisi terpanjang 1600 px supaya surat dokter dari kamera HP tidak ditolak batas
+3 MB):
+- `POST /api/attendance/sakit {photo, notes, work_date?, user_id?}` — surat
+  dokter/bidan atau foto resep. Barisnya berstatus LEAVE dengan
+  `izin_jenis='SAKIT'`; hari itu tidak menunggu check-in dan check-in ditolak.
+- `POST /api/attendance/izin-jam {jenis, mulai, selesai?, photo, ...}` dengan
+  jenis SETENGAH_HARI | GESER_JAM | BERANGKAT_SIANG. Orangnya tetap masuk:
+  barisnya menunggu check-in, dan `evaluateLateness(at, izin_mulai)` menilai
+  keterlambatan dari jam yang disepakati — bukan dari jam masuk umum, supaya
+  yang sudah izin berangkat siang tidak tercatat telat berjam-jam.
+
+Check-in mengisi baris izin yang sudah ada (bukan membuat baris kedua; UNIQUE
+(user_id, work_date) akan menolaknya), dan jenis izin serta buktinya tetap
+menempel sesudahnya. Mencatatkan untuk orang lain menuntut `presensi.kelola` —
+tanpa itu, siapa pun bisa menandai rekannya sakit. Rekap Absensi menampilkan
+jenis izin, jam mulai–selesai, dan foto buktinya di panel bukti.
+
 ### BANK MP INDOOR — rekening penampung marketplace
 
 Dana pencairan marketplace hampir tidak pernah sama dengan nilai transaksinya
@@ -873,7 +894,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 866 pemeriksaan, 60 bagian
+npm run smoke            # 879 pemeriksaan, 61 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```
@@ -1339,6 +1360,7 @@ Daftar ini ada supaya tidak terulang di duplikasinya.
 | Pembayaran utang dicatat sebesar nilai barang masuk yang salah harga | Utang tampak lunas, kas tampak berkurang Rp 8,7 juta padahal yang ditransfer Rp 6,36 juta; kesalahan harga tidak kelihatan karena utangnya sudah nol. Pembayaran harus dicocokkan dengan rekening koran, bukan dengan angka utang di layar |
 | Menghapus satu bulan tanpa membawa sisa utang mitra | Pembayaran supplier tanggal 1 bulan berikutnya (untuk barang bulan yang dihapus) membuat Utang Usaha minus Rp 25 juta. Sisa utang/piutang bulan itu harus dibawa sebagai saldo awal |
 | Uang order marketplace dicatat langsung ke rekening bank toko | Nominal pencairan dari platform selalu berbeda dari nilai transaksi, jadi saldo rekening di aplikasi tidak pernah cocok dengan mutasi bank. Tampung dulu di satu rekening marketplace, lalu catat tarik saldo dengan nominal yang benar-benar diterima |
+| Izin berangkat siang dinilai dengan jam masuk umum | Karyawan yang sudah izin tetap tercatat terlambat berjam-jam, dan rekapnya memaksa koreksi manual tiap kali. Jam yang disepakati harus ikut tersimpan di baris presensinya |
 | Hapus jurnal manual memakai DELETE langsung | Bulan yang sudah ditutup buku tetap bisa berubah dari satu tombol; semua penghapusan jurnal harus lewat pintu yang memeriksa kunci periode |
 | Logika batch disebar ke tiap titik yang mengubah stok | Titik ke-sepuluh pasti terlewat; sisa batch berbeda dari stok tanpa pesan galat |
 

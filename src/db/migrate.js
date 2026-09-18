@@ -635,6 +635,17 @@ function runMigrations(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_fulfillment ON sales_orders(fulfillment_status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_so_payout ON sales_orders(payout_date)');
 
+  // --- Presensi: sakit & izin jam kerja beserta buktinya ---
+  // Keterlambatan dihitung dari jam yang disepakati (izin_mulai), bukan dari
+  // jam masuk umum, supaya yang sudah izin berangkat siang tidak tercatat telat.
+  addColumn(db, 'attendance', 'izin_jenis', 'TEXT', applied);
+  addColumn(db, 'attendance', 'izin_mulai', 'TEXT', applied);
+  addColumn(db, 'attendance', 'izin_selesai', 'TEXT', applied);
+  addColumn(db, 'attendance', 'izin_foto', 'TEXT', applied);
+  addColumn(db, 'attendance', 'izin_catatan', 'TEXT', applied);
+  addColumn(db, 'attendance', 'izin_oleh', 'INTEGER', applied);
+  addColumn(db, 'attendance', 'izin_at', 'TEXT', applied);
+
   siapkanRekeningMarketplace(db, applied);
 
   return applied;
