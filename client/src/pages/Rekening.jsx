@@ -23,6 +23,10 @@ export default function Rekening() {
   const toast = useToast();
   const { punya } = useAuth();
   const bolehUbah = punya('keuangan.coa');
+  // Menyetel saldo adalah pekerjaan operasional harian — leader keuangan pun
+  // mengisinya. Izinnya disamakan dengan pintu peladennya (keuangan.kas),
+  // bukan izin bagan akun yang hanya dipegang admin.
+  const bolehSetel = punya('keuangan.kas');
 
   const [setel, setSetel] = useState(false);
   const [asOf, setAsOf] = useState(today());
@@ -100,7 +104,7 @@ export default function Rekening() {
   return (
     <div>
       <PageHeader title="Rekening Kas & Bank" subtitle="Saldo tiap rekening berikut asal pergerakannya">
-        {bolehUbah && (
+        {bolehSetel && (
           <button className="btn-secondary" onClick={() => setSetel(true)}>
             <Scale size={16} /> Setel Saldo
           </button>

@@ -633,7 +633,10 @@ Dua alat untuk memulai bulan baru dari posisi nyata tanpa mengarang transaksi:
   `keuangan.kas`. Yang diketik adalah SALDO AKHIR menurut rekening koran;
   selisihnya terhadap catatan aplikasi dibukukan sebagai jurnal `AWAL` lawan
   3050 Saldo Awal Kas & Bank. Menyetel angka yang sama dua kali tidak menambah
-  apa pun (selisihnya nol).
+  apa pun (selisihnya nol). Tombolnya di layar memakai izin yang SAMA dengan
+  pintu peladennya (`keuangan.kas`), bukan izin bagan akun — leader keuangan
+  ikut mengisi saldo harian, dan tombol yang disembunyikan dari mereka hanya
+  memindahkan pekerjaan ke admin.
 - **Sistem → Cadangan → Hapus Pengeluaran Satu Bulan**:
   `POST /api/cashflow/hapus-pengeluaran {bulan, terapkan, konfirmasi}`, izin
   `keuangan.jurnal`. Menghapus jurnal yang mengkreditkan akun kas pada bulan
@@ -918,7 +921,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 906 pemeriksaan, 62 bagian
+npm run smoke            # 910 pemeriksaan, 62 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

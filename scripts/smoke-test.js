@@ -6345,6 +6345,35 @@ async function main() {
     near(await saldo62(rek62), 5000000 + 900000, 1), String(await saldo62(rek62)));
   const tbLunas = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
   check('neraca tetap seimbang sesudah utang dianggap lunas', tbLunas.balanced === true);
+
+  // ---- D. Setel saldo dipakai leader, bukan hanya admin ----
+  // Leader keuangan mengisi saldo harian; izinnya harus sama dengan pintu
+  // peladennya (keuangan.kas), bukan izin bagan akun milik admin.
+  const peranManajer62 = (await call('GET', '/api/peran')).roles.find((x) => x.slug === 'manager');
+  check('peran manajer memegang izin kas tetapi bukan izin bagan akun',
+    peranManajer62.permissions.includes('keuangan.kas')
+      && !peranManajer62.permissions.includes('keuangan.coa'),
+    JSON.stringify(peranManajer62.permissions.filter((x) => x.startsWith('keuangan.'))));
+
+  const akunManajer62 = await call('POST', '/api/admin/users', {
+    name: `Leader Uji ${cap62}`, email: `leader${cap62}@contoh.test`,
+    password: 'RahasiaKuat1', role: 'manager', role_id: peranManajer62.id,
+  });
+  token = await masukSebagai(akunManajer62.user.email, 'RahasiaKuat1');
+  const setelLeader = await call('POST', '/api/cashflow/saldo-awal', {
+    tanggal: `${bulan62}-31`, baris: [{ code: rek62, saldo: 6100000 }], catatan: 'Disetel leader',
+  });
+  check('leader bisa menyetel saldo rekening', setelLeader.disetel === 1, JSON.stringify(setelLeader.message));
+
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakGudang62 = 0;
+  try {
+    await call('POST', '/api/cashflow/saldo-awal', { tanggal: `${bulan62}-31`, baris: [{ code: rek62, saldo: 1 }] });
+  } catch (err) { tolakGudang62 = err.status; }
+  check('tim tanpa izin kas tetap tidak bisa menyetel saldo', tolakGudang62 === 403, `status ${tolakGudang62}`);
+  token = adminAkun;
+  check('saldo hasil setelan leader tetap berlaku', near(await saldo62(rek62), 6100000, 1),
+    String(await saldo62(rek62)));
   const tb62 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
   check('neraca saldo tetap seimbang', tb62.balanced === true);
 
