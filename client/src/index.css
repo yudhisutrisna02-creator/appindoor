@@ -143,6 +143,11 @@
   .table tbody tr:hover {
     @apply bg-slate-50/70;
   }
+  /* Sel yang isinya kalimat, bukan angka. Tanpa ini teks panjang tidak pernah
+     turun baris dan menimpa kolom sebelahnya — kolom angka jadi tak terbaca. */
+  .table tbody td.sel-teks {
+    @apply whitespace-normal;
+  }
 
   .badge {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;

@@ -39,7 +39,9 @@ export default function Pengaturan() {
           <button
             key={t.key} onClick={() => setTab(t.key)}
             className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition ${
-              tab === t.key ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+              tab === t.key
+                ? 'bg-brand-600 text-white shadow-sm shadow-brand-600/30'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <t.icon size={16} /> {t.label}

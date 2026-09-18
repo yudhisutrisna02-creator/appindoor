@@ -1,10 +1,30 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, ShieldCheck, Lock } from 'lucide-react';
+import { Plus, Pencil, Trash2, ShieldCheck, Lock, Users, KeyRound } from 'lucide-react';
 import { api } from '../lib/api';
 import { Spinner, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { useAuth } from '../lib/auth';
 
 const KOSONG = { name: '', description: '', active: true, permissions: [] };
+
+/**
+ * Warna per peran.
+ *
+ * Bukan hiasan: yang mengatur hak akses menelusuri daftar ini berkali-kali, dan
+ * warna membuat baris yang dicari ketemu sebelum namanya dibaca. Kelasnya
+ * ditulis utuh — Tailwind memangkas kelas yang namanya dirangkai saat berjalan.
+ */
+const WARNA_PERAN = {
+  admin: { garis: 'bg-brand-500', tulisan: 'text-brand-700 dark:text-brand-300', latar: 'bg-brand-50 dark:bg-brand-400/10', cincin: 'ring-brand-200 dark:ring-brand-400/30' },
+  manager: { garis: 'bg-violet-500', tulisan: 'text-violet-700 dark:text-violet-300', latar: 'bg-violet-50 dark:bg-violet-400/10', cincin: 'ring-violet-200 dark:ring-violet-400/30' },
+  cs_marketplace: { garis: 'bg-sky-500', tulisan: 'text-sky-700 dark:text-sky-300', latar: 'bg-sky-50 dark:bg-sky-400/10', cincin: 'ring-sky-200 dark:ring-sky-400/30' },
+  gudang: { garis: 'bg-amber-500', tulisan: 'text-amber-700 dark:text-amber-300', latar: 'bg-amber-50 dark:bg-amber-400/10', cincin: 'ring-amber-200 dark:ring-amber-400/30' },
+  konten: { garis: 'bg-pink-500', tulisan: 'text-pink-700 dark:text-pink-300', latar: 'bg-pink-50 dark:bg-pink-400/10', cincin: 'ring-pink-200 dark:ring-pink-400/30' },
+  _lain: { garis: 'bg-emerald-500', tulisan: 'text-emerald-700 dark:text-emerald-300', latar: 'bg-emerald-50 dark:bg-emerald-400/10', cincin: 'ring-emerald-200 dark:ring-emerald-400/30' },
+};
+const warnaPeran = (slug) => WARNA_PERAN[slug] || WARNA_PERAN._lain;
+
+/** Huruf awal nama peran, dipakai sebagai penanda di kartunya. */
+const inisial = (nama) => String(nama || '?').trim().split(/\s+/).slice(0, 2).map((k) => k[0]).join('').toUpperCase();
 
 /**
  * Peran & hak akses.
@@ -114,54 +134,74 @@ export default function PeranTab() {
         </div>
       </div>
 
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Peran</th><th>Keterangan</th><th>Hak Akses</th>
-              <th>Pengguna</th><th>Status</th>{bolehUbah && <th></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {roles.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <div className="flex items-center gap-1.5 font-medium text-slate-900">
-                    {r.slug === 'admin' && <ShieldCheck size={14} className="text-brand-600" />}
-                    {r.name}
+      {/* Kartu, bukan tabel: keterangan tiap peran berupa kalimat penuh, dan di
+          dalam tabel ia menimpa kolom angka di sebelahnya. Kartu juga memberi
+          tempat bagi warna penanda peran yang membuat daftar ini mudah disapu
+          mata. */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {roles.map((r) => {
+          const w = warnaPeran(r.slug);
+          return (
+            <div
+              key={r.id}
+              className="relative flex flex-col overflow-hidden rounded-2xl bg-surface p-4 pl-5 shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <span className={`absolute inset-y-0 left-0 w-1.5 ${w.garis}`} />
+
+              <div className="flex items-start gap-3">
+                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-bold ring-1 ${w.latar} ${w.tulisan} ${w.cincin}`}>
+                  {r.slug === 'admin' ? <ShieldCheck size={18} /> : inisial(r.name)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="truncate font-bold text-slate-900">{r.name}</h3>
+                    {r.active
+                      ? <span className="badge-green shrink-0">aktif</span>
+                      : <span className="badge-slate shrink-0">nonaktif</span>}
                   </div>
-                  <p className="font-mono text-[11px] text-slate-400">{r.slug}</p>
-                </td>
-                {/* Keterangan bisa panjang; tanpa lebar tetap ia mendorong kolom
-                    angka di sebelahnya sampai saling tumpang tindih. */}
-                <td className="text-xs text-slate-600">
-                  <p className="w-[22rem] max-w-[40vw] leading-relaxed">{r.description || '-'}</p>
-                </td>
-                <td className="tabular text-sm">{r.permissions.length}</td>
-                <td className="tabular text-sm">{r.jumlahPengguna}</td>
-                <td>{r.active ? <span className="badge-green">aktif</span> : <span className="badge-slate">nonaktif</span>}</td>
+                  <p className={`truncate font-mono text-[11px] ${w.tulisan}`}>{r.slug}</p>
+                </div>
+              </div>
+
+              <p className="mt-3 line-clamp-3 text-xs leading-relaxed text-slate-600" title={r.description || ''}>
+                {r.description || 'Belum ada keterangan.'}
+              </p>
+
+              <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                <div className="flex flex-wrap gap-1.5 text-xs">
+                  <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 font-semibold ring-1 ${w.latar} ${w.tulisan} ${w.cincin}`}>
+                    <KeyRound size={13} /> {r.permissions.length} hak akses
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-semibold text-slate-600">
+                    <Users size={13} /> {r.jumlahPengguna} pengguna
+                  </span>
+                </div>
+
                 {bolehUbah && (
-                  <td>
-                    <div className="flex gap-1">
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      className="btn-ghost !px-2 !py-1"
+                      onClick={() => setEditing({ ...r, description: r.description || '', active: !!r.active })}
+                      aria-label={r.slug === 'admin' ? `Lihat hak akses ${r.name}` : `Ubah peran ${r.name}`}
+                      title={r.slug === 'admin' ? 'Hak akses admin terkunci' : 'Ubah peran'}
+                    >
+                      {r.slug === 'admin' ? <Lock size={14} /> : <Pencil size={14} />}
+                    </button>
+                    {!r.is_system && (
                       <button
-                        className="btn-ghost !px-2 !py-1"
-                        onClick={() => setEditing({ ...r, description: r.description || '', active: !!r.active })}
-                        aria-label={r.slug === 'admin' ? 'Lihat' : 'Ubah'}
+                        className="btn-ghost !px-2 !py-1 text-rose-600"
+                        onClick={() => hapus(r)}
+                        aria-label={`Hapus peran ${r.name}`} title="Hapus peran"
                       >
-                        {r.slug === 'admin' ? <Lock size={14} /> : <Pencil size={14} />}
+                        <Trash2 size={14} />
                       </button>
-                      {!r.is_system && (
-                        <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => hapus(r)} aria-label="Hapus">
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
+                    )}
+                  </div>
                 )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <Modal
