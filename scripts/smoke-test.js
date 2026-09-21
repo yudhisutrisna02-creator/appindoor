@@ -6501,6 +6501,101 @@ async function main() {
   check('neraca saldo tetap seimbang setelah pembatalan massal', tb63.balanced === true);
 
 
+  console.log('\n64. Mutasi stok bisa diubah & dihapus');
+
+  const cap64 = Date.now();
+  const saldo64 = async (kode) => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const rek64 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI MUTASI 640-${cap64}`], mulai_kode: '1950',
+  })).dibuat[0].code;
+  const prod64 = (await call('POST', '/api/inventory/products', {
+    sku: `P64-${cap64}`, name: 'Produk Uji Ubah Mutasi', cost: 0, price: 40000,
+  })).product;
+  const produk64 = async () => (await call('GET', `/api/inventory/products?q=P64-${cap64}`)).products[0];
+
+  const masuk64 = (await call('POST', '/api/inventory/moves', {
+    product_id: prod64.id, move_date: today, move_type: 'IN',
+    qty: 10, unit_cost: 20000, payment: 'BANK', cash_code: rek64, ref: 'AWAL',
+  })).move;
+  check('persiapan: stok 10 dan rekening terpotong 200.000',
+    (await produk64()).stock === 10 && near(await saldo64(rek64), -200000, 1));
+
+  // ---- A. Ubah jumlah & harga: stok, HPP, dan jurnalnya ikut ----
+  const ubah64 = await call('PUT', `/api/inventory/moves/${masuk64.id}`, {
+    move_date: today, qty: 6, unit_cost: 25000, payment: 'BANK', cash_code: rek64,
+    ref: 'DIBETULKAN', note: 'Salah hitung dus',
+  });
+  const stlhUbah64 = await produk64();
+  check('jumlah, harga, dan keterangan mutasi ikut berubah',
+    stlhUbah64.stock === 6 && near(stlhUbah64.cost, 25000, 1),
+    `${stlhUbah64.stock} · ${stlhUbah64.cost}`);
+  check('rekening hanya terpotong sebesar nilai yang baru',
+    near(await saldo64(rek64), -150000, 1), String(await saldo64(rek64)));
+  const kartu64 = (await call('GET', `/api/inventory/moves?from=${today}&to=${today}&product_id=${prod64.id}`)).rows;
+  check('kartu stok memuat satu baris dengan keterangan barunya',
+    kartu64.length === 1 && kartu64[0].ref === 'DIBETULKAN' && near(kartu64[0].balance_after, 6, 0.01),
+    JSON.stringify(kartu64.map((m) => ({ ref: m.ref, b: m.balance_after }))));
+  check('mutasi lama tidak tertinggal', ubah64.move.id !== masuk64.id);
+
+  // ---- B. Mutasi bawaan dokumen lain tidak bisa disentuh dari sini ----
+  const order64 = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Pembeli Uji Mutasi',
+    items: [{ product_id: prod64.id, qty: 1, price: 40000 }],
+  });
+  void order64;
+  const mutasiJual64 = (await call('GET', `/api/inventory/moves?from=${today}&to=${today}&product_id=${prod64.id}`))
+    .rows.find((m) => m.source === 'SALES');
+  let tolakSales64 = 0;
+  try { await call('DELETE', `/api/inventory/moves/${mutasiJual64.id}`); }
+  catch (err) { tolakSales64 = err.status; }
+  check('mutasi dari penjualan ditolak untuk dihapus dari kartu stok', tolakSales64 === 422,
+    `status ${tolakSales64}`);
+
+  // ---- C. Izin ----
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  const gudangBisa64 = await call('GET', `/api/inventory/moves?from=${today}&to=${today}`);
+  check('tim gudang tetap bisa membaca kartu stok', Array.isArray(gudangBisa64.rows));
+  token = adminAkun;
+
+  // ---- D. Barang yang sudah terjual tidak boleh hilang dari stok ----
+  // Menghapus barang masuk yang sebagian sudah terjual akan membuat stok minus
+  // untuk barang yang jelas-jelas pernah ada; jadi ditolak dengan alasannya.
+  const mutasiSisa64 = (await call('GET', `/api/inventory/moves?from=${today}&to=${today}&product_id=${prod64.id}`))
+    .rows.find((m) => m.source === 'MANUAL');
+  let tolakStok64 = 0;
+  let pesanStok64 = '';
+  try { await call('DELETE', `/api/inventory/moves/${mutasiSisa64.id}`); }
+  catch (err) { tolakStok64 = err.status; pesanStok64 = err.message; }
+  check('barang masuk yang sebagian sudah terjual tidak bisa dihapus',
+    tolakStok64 === 422 && /tidak cukup/.test(pesanStok64), pesanStok64);
+
+  // ---- E. Hapus mutasi yang belum tersentuh: stok & jurnalnya dibalik ----
+  const tambahan64 = (await call('POST', '/api/inventory/moves', {
+    product_id: prod64.id, move_date: today, move_type: 'IN',
+    qty: 4, unit_cost: 30000, payment: 'BANK', cash_code: rek64, ref: 'TAMBAHAN',
+  })).move;
+  const stokSblmHapus64 = (await produk64()).stock;
+  const saldoSblmHapus64 = await saldo64(rek64);
+  const hapus64 = await call('DELETE', `/api/inventory/moves/${tambahan64.id}`);
+  check('mutasi manual bisa dihapus', hapus64.ok === true, String(hapus64.message));
+  check('stok dan rekening kembali seperti sebelum mutasi itu',
+    (await produk64()).stock === stokSblmHapus64 - 4
+      && near((await saldo64(rek64)) - saldoSblmHapus64, 120000, 1),
+    `stok ${stokSblmHapus64} → ${(await produk64()).stock}`);
+
+  let tolakHilang64 = 0;
+  try { await call('DELETE', `/api/inventory/moves/${tambahan64.id}`); }
+  catch (err) { tolakHilang64 = err.status; }
+  check('menghapus mutasi yang sudah hilang ditolak', tolakHilang64 === 404);
+
+  const tb64 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb64.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -626,6 +626,22 @@ rekening, catatan; nomor tetap bila bulannya sama) dan
 `keuangan.kas`, ditolak bila sudah direkonsiliasi. `ar-ap` juga membawa
 `lebihBayar` (saldo minus) yang ditampilkan sebagai peringatan.
 
+### Ubah & hapus mutasi stok (Mutasi Stok)
+
+`PUT /api/inventory/moves/:id` dan `DELETE /api/inventory/moves/:id`, izin
+`gudang.produk`. Mengubah = membalik mutasi lama lalu mencatat yang baru lewat
+`applyMove`, supaya stok, HPP rata-rata, dan jurnalnya mengikuti satu aturan.
+Penjagaannya:
+- hanya mutasi `source=MANUAL`; yang lahir dari penjualan, retur, opname, atau
+  koreksi dibetulkan lewat dokumen asalnya;
+- produk yang dilacak per batch ditolak — batch_moves mutasi manual tidak
+  menyimpan id mutasinya, jadi tidak ada cara membalik satu baris saja;
+- membalik barang masuk yang barangnya sudah terjual ditolak (stok tidak cukup);
+- jurnalnya dihapus lewat `deleteJournalsBySource('STOCK', id)` sehingga kunci
+  periode tetap berlaku;
+- kolom balance_after seluruh kartu stok produk itu dihitung ulang, dengan
+  baris ADJ sebagai jangkar (angkanya hasil hitungan fisik, bukan penjumlahan).
+
 ### Ubah status pesanan massal (Order Penjualan)
 
 Centang di tiap baris + pilih-semua yang hanya mencakup baris yang SEDANG
@@ -936,7 +952,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 924 pemeriksaan, 63 bagian
+npm run smoke            # 936 pemeriksaan, 64 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

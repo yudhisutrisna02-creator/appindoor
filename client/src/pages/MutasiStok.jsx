@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, Plus, Package, Pencil, ShoppingCart } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Plus, Package, Pencil, ShoppingCart, SquarePen, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, num, today } from '../lib/format';
@@ -117,6 +117,49 @@ export default function MutasiStok() {
     });
   }
 
+  /**
+   * Membuka formulir yang sama dengan pencatatan, tetapi terisi nilai mutasi
+   * yang sedang dibetulkan. Peladen membalik mutasi lama lalu mencatat yang
+   * baru, sehingga stok, HPP, dan jurnalnya mengikuti satu aturan yang sama.
+   */
+  function openUbah(m) {
+    const lewatRekening = m.unit_cost > 0;
+    setForm({
+      id: m.id,
+      move_type: m.move_type,
+      product_id: String(m.product_id),
+      move_date: m.move_date,
+      qty: String(m.qty),
+      unit_cost: m.move_type === 'IN' ? String(m.unit_cost) : '',
+      batch_kode: '',
+      batch_kadaluarsa: '',
+      // Cara bayarnya tidak tersimpan pada mutasinya; yang tersimpan adalah
+      // jurnalnya. Jadi ia ditanyakan ulang, bukan ditebak diam-diam.
+      cara: '',
+      cash_code: '',
+      partner_id: m.partner_id ? String(m.partner_id) : '',
+      ref: m.ref || '',
+      note: m.note || '',
+      lewatRekening,
+    });
+  }
+
+  async function hapusMutasi(m) {
+    if (!window.confirm(
+      `Hapus mutasi ${m.move_type === 'IN' ? 'masuk' : 'keluar'} ${num(m.qty)} ${m.unit} ` +
+      `${m.product_name} tanggal ${m.move_date}?\n\n` +
+      'Stok dikembalikan seperti sebelum mutasi ini, dan jurnal persediaannya ikut dihapus.'
+    )) return;
+    try {
+      const res = await api.del(`/api/inventory/moves/${m.id}`);
+      toast.success(res.message);
+      load();
+      api.get('/api/inventory/products').then((d) => setProducts(d.products)).catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
   const selected = products.find((p) => p.id === Number(form?.product_id));
 
   /**
@@ -153,8 +196,13 @@ export default function MutasiStok() {
         payload.batch_kadaluarsa = form.batch_kadaluarsa || null;
       }
 
-      await api.post('/api/inventory/moves', payload);
-      toast.success(`Mutasi stok ${TYPE_LABEL[form.move_type].toLowerCase()} tersimpan & jurnal terbentuk`);
+      if (form.id) {
+        const res = await api.put(`/api/inventory/moves/${form.id}`, payload);
+        toast.success(res.message);
+      } else {
+        await api.post('/api/inventory/moves', payload);
+        toast.success(`Mutasi stok ${TYPE_LABEL[form.move_type].toLowerCase()} tersimpan & jurnal terbentuk`);
+      }
       setForm(null);
       load();
       api.get('/api/inventory/products').then((d) => setProducts(d.products));
@@ -251,6 +299,27 @@ export default function MutasiStok() {
                                 <Pencil size={13} /> Harga
                               </button>
                             )}
+                            {/* Mutasi dari penjualan, retur, atau opname tidak
+                                bisa diubah dari sini: dokumen asalnyalah yang
+                                menentukan angkanya. */}
+                            {bolehUbahHarga && m.source === 'MANUAL' && (
+                              <>
+                                <button
+                                  type="button" className="btn-ghost !px-2 !py-1"
+                                  title="Ubah mutasi ini" aria-label={`Ubah mutasi ${m.product_name}`}
+                                  onClick={() => openUbah(m)}
+                                >
+                                  <SquarePen size={14} />
+                                </button>
+                                <button
+                                  type="button" className="btn-ghost !px-2 !py-1 text-rose-600"
+                                  title="Hapus mutasi ini" aria-label={`Hapus mutasi ${m.product_name}`}
+                                  onClick={() => hapusMutasi(m)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -263,7 +332,9 @@ export default function MutasiStok() {
         </>
       )}
 
-      <Modal open={!!form} onClose={() => setForm(null)} title={form?.move_type === 'IN' ? 'Catat Stok Masuk' : 'Catat Stok Keluar'}>
+      <Modal open={!!form} onClose={() => setForm(null)} title={form?.id
+          ? `Ubah Stok ${form.move_type === 'IN' ? 'Masuk' : 'Keluar'}`
+          : form?.move_type === 'IN' ? 'Catat Stok Masuk' : 'Catat Stok Keluar'}>
         {form && (
           <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
             <Field label="Tanggal *">
@@ -273,8 +344,11 @@ export default function MutasiStok() {
               <input className="input" value={form.ref} onChange={(e) => setForm({ ...form, ref: e.target.value })} />
             </Field>
 
-            <Field label="Produk *" className="sm:col-span-2">
-              <select className="input" required value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })}>
+            <Field label="Produk *" className="sm:col-span-2" hint={form.id ? 'Tidak bisa dipindah ke produk lain — hapus lalu catat ulang bila memang salah produk' : undefined}>
+              <select
+                className="input" required value={form.product_id} disabled={!!form.id}
+                onChange={(e) => setForm({ ...form, product_id: e.target.value })}
+              >
                 <option value="">— pilih produk —</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>

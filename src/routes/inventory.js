@@ -4,7 +4,9 @@ const { z } = require('zod');
 const { db, nextNumber } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2, ACC, postJournal, deleteJournalById, accountByCode } = require('../utils/accounting');
+const {
+  r2, ACC, postJournal, deleteJournalById, deleteJournalsBySource, accountByCode,
+} = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
 const BATCH = require('../utils/batch');
@@ -631,6 +633,124 @@ const hargaSchema = z.object({
  * Hanya untuk barang masuk yang dicatat lewat Mutasi Stok. Penerimaan pesanan
  * pembelian dibetulkan lewat pesanan pembeliannya.
  */
+/**
+ * Membalik pengaruh satu mutasi manual: stok, HPP rata-rata, dan jurnalnya.
+ *
+ * Dipakai bersama oleh penghapusan dan pengubahan — mengubah sebuah mutasi
+ * berarti membalik yang lama lalu mencatat yang baru lewat jalur pencatatan
+ * biasa, supaya tidak ada dua versi aturan stok dan jurnal.
+ *
+ * Batch sengaja ditolak di pemanggilnya: pergerakan batch milik mutasi manual
+ * tidak menyimpan id mutasinya, sehingga tidak ada cara membalik satu baris
+ * saja tanpa menyenggol batch lain.
+ */
+function balikkanMutasi(m) {
+  const produk = db.prepare('SELECT * FROM products WHERE id = ?').get(m.product_id);
+  const qty = r2(m.qty);
+  const nilai = r2(qty * m.unit_cost);
+  const stokLama = r2(produk.stock);
+
+  if (m.move_type === 'IN') {
+    const stokBaru = r2(stokLama - qty);
+    if (stokBaru < -0.0001) {
+      throw httpError(
+        422,
+        `Stok ${produk.name} tinggal ${stokLama} ${produk.unit}, tidak cukup untuk membatalkan ` +
+          `barang masuk ${qty} ${produk.unit}. Barangnya kemungkinan sudah terjual.`
+      );
+    }
+    const hpp = stokBaru > 0 ? Math.max(0, (stokLama * produk.cost - nilai) / stokBaru) : produk.cost;
+    db.prepare('UPDATE products SET stock = ?, cost = ? WHERE id = ?').run(stokBaru, hpp, produk.id);
+  } else {
+    const stokBaru = r2(stokLama + qty);
+    const hpp = stokBaru > 0 ? (stokLama * produk.cost + nilai) / stokBaru : produk.cost;
+    db.prepare('UPDATE products SET stock = ?, cost = ? WHERE id = ?').run(stokBaru, hpp, produk.id);
+  }
+
+  // Lewat pintu yang memeriksa kunci periode: mutasi di bulan yang sudah
+  // ditutup buku tidak boleh hilang diam-diam.
+  deleteJournalsBySource('STOCK', m.id);
+  db.prepare('DELETE FROM stock_moves WHERE id = ?').run(m.id);
+}
+
+/**
+ * Menghitung ulang kolom "saldo akhir" pada kartu stok sesudah sebuah baris
+ * berubah — kalau tidak, baris-baris sesudahnya memamerkan saldo yang tidak
+ * pernah ada. Baris stok opname dipakai sebagai jangkar: angkanya hasil
+ * hitungan fisik, bukan hasil penjumlahan.
+ */
+function hitungUlangSaldo(productId) {
+  const rows = db
+    .prepare('SELECT * FROM stock_moves WHERE product_id = ? ORDER BY move_date, id')
+    .all(productId);
+  const simpan = db.prepare('UPDATE stock_moves SET balance_after = ? WHERE id = ?');
+  let saldo = 0;
+  for (const m of rows) {
+    if (m.move_type === 'ADJ') saldo = r2(m.balance_after);
+    else saldo = r2(saldo + (m.move_type === 'IN' ? m.qty : -m.qty));
+    if (r2(m.balance_after) !== saldo) simpan.run(saldo, m.id);
+  }
+}
+
+/** Mutasi yang boleh diubah/dihapus dari layar Mutasi Stok, beserta alasannya. */
+function mutasiBisaDiubah(id) {
+  const m = db.prepare('SELECT * FROM stock_moves WHERE id = ?').get(id);
+  if (!m) throw httpError(404, 'Mutasi tidak ditemukan');
+  if (m.source !== 'MANUAL') {
+    throw httpError(
+      422,
+      `Mutasi ini berasal dari ${m.source === 'SALES' ? 'penjualan' : m.source === 'RETURN' ? 'retur' : m.source.toLowerCase()} ` +
+        '— betulkan lewat dokumen asalnya, bukan dari kartu stok.'
+    );
+  }
+  const produk = db.prepare('SELECT lacak_batch, name FROM products WHERE id = ?').get(m.product_id);
+  if (produk && produk.lacak_batch) {
+    throw httpError(
+      422,
+      `${produk.name} dilacak per batch, dan pergerakan batchnya tidak menyimpan nomor mutasi ini. ` +
+        'Betulkan lewat Stok Opname atau Koreksi Stok supaya sisa batchnya ikut benar.'
+    );
+  }
+  return m;
+}
+
+/** PUT /api/inventory/moves/:id — membetulkan satu mutasi stok manual. */
+router.put('/moves/:id(\\d+)', butuhIzin('gudang.produk'), ah((req, res) => {
+  const m = mutasiBisaDiubah(req.params.id);
+  const body = parse(moveSchema, { ...req.body, product_id: m.product_id, move_type: m.move_type });
+
+  const hasil = db.transaction(() => {
+    balikkanMutasi(m);
+    const baru = applyMove(body, req.user.id);
+    hitungUlangSaldo(m.product_id);
+    return baru;
+  })();
+
+  res.json({
+    ok: true,
+    move: hasil,
+    message: `Mutasi ${m.move_date} dibetulkan menjadi ${hasil.move_date} · ${r2(hasil.qty)} unit`,
+  });
+}));
+
+/** DELETE /api/inventory/moves/:id — menghapus satu mutasi stok manual. */
+router.delete('/moves/:id(\\d+)', butuhIzin('gudang.produk'), ah((req, res) => {
+  const m = mutasiBisaDiubah(req.params.id);
+  const produk = db.prepare('SELECT name, unit FROM products WHERE id = ?').get(m.product_id);
+
+  db.transaction(() => {
+    balikkanMutasi(m);
+    hitungUlangSaldo(m.product_id);
+  })();
+
+  res.json({
+    ok: true,
+    message:
+      `Mutasi ${m.move_type === 'IN' ? 'masuk' : 'keluar'} ${r2(m.qty)} ${produk.unit} ` +
+      `${produk.name} tanggal ${m.move_date} dihapus — stok dan jurnalnya ikut dibalik`,
+  });
+}));
+
 router.put('/moves/:id(\\d+)/harga', butuhIzin('gudang.produk'), ah((req, res) => {
   const body = parse(hargaSchema, req.body);
   res.json({ ok: true, ...koreksiHargaMasuk(Number(req.params.id), body, req.user.id) });
