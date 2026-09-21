@@ -635,7 +635,10 @@ dicentang. `PATCH /api/sales/status-massal` menerima seluruh tahap di
 `STATUS.SEMUA` termasuk RETUR dan BATAL, ditambah payment_status dan
 payout_date opsional. Perubahannya lewat `ubahOrder` satu per satu — bukan
 UPDATE massal — supaya jurnal, piutang, dan pembatalan tidak punya dua versi.
-BATAL dijaga dua lapis: izin `penjualan.batal` dan kata kunci `BATAL <jumlah>`
+Memilih tahap berjalan (Diproses/Dikirim/Kilat/Selesai) otomatis menyiapkan
+"belum cair" dan mengosongkan payout_date — pesanan yang terlanjur ditandai
+cair harus mengembalikan dananya menjadi piutang, bukan meninggalkan uang di
+rekening untuk dana yang belum pernah masuk. BATAL dijaga dua lapis: izin `penjualan.batal` dan kata kunci `BATAL <jumlah>`
 yang diketik ulang, karena ia mengembalikan stok dan menghapus jurnal.
 
 ### Setel Saldo & Hapus Pengeluaran Satu Bulan
@@ -933,7 +936,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 922 pemeriksaan, 63 bagian
+npm run smoke            # 924 pemeriksaan, 63 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

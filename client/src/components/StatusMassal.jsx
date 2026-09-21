@@ -8,6 +8,19 @@ import { useAuth } from '../lib/auth';
 /** Tahap yang dananya sudah diterima — pilihan tanggal cair ikut muncul. */
 const TAHAP_CAIR = ['CAIR', 'KILAT_CAIR'];
 
+/** Tahap yang barangnya masih berjalan: dananya belum boleh dianggap diterima. */
+const TAHAP_BERJALAN = ['DIPROSES', 'DIKIRIM', 'KILAT', 'SELESAI'];
+
+/**
+ * Tebakan status pembayaran yang masuk akal untuk tahap yang dipilih.
+ *
+ * Kejadian yang sering: pesanan terlanjur ditandai Cair padahal masih diproses.
+ * Mengembalikannya ke Diproses tanpa membatalkan tanda lunas meninggalkan uang
+ * di rekening untuk dana yang belum pernah masuk — jadi tebakannya "belum cair"
+ * dan tanggal cairnya dikosongkan.
+ */
+const bayarUntuk = (status) => (TAHAP_CAIR.includes(status) ? 'PAID' : 'UNPAID');
+
 /**
  * Mengubah status banyak pesanan sekaligus.
  *
@@ -42,9 +55,12 @@ export default function StatusMassal({ terpilih, onSelesai, onBatalPilih }) {
         ids: terpilih,
         fulfillment_status: form.status,
         ...(form.ubahBayar ? { payment_status: form.payment_status } : {}),
+        // Tanggal cair mengikuti status bayarnya: diisi saat dananya diterima,
+        // dikosongkan saat pesanan dikembalikan ke tahap berjalan.
         ...(TAHAP_CAIR.includes(form.status) && form.payout_date
           ? { payout_date: form.payout_date }
           : {}),
+        ...(form.ubahBayar && form.payment_status === 'UNPAID' ? { payout_date: null } : {}),
         ...(membatalkan ? { konfirmasi: form.konfirmasi } : {}),
       });
       if (res.gagal && res.gagal.length) {
@@ -90,7 +106,19 @@ export default function StatusMassal({ terpilih, onSelesai, onBatalPilih }) {
             <Field label="Status pesanan baru *" hint="Berlaku untuk semua order yang dicentang">
               <select
                 className="input" required value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value, konfirmasi: '' })}
+                onChange={(e) => {
+                  const status = e.target.value;
+                  setForm({
+                    ...form,
+                    status,
+                    konfirmasi: '',
+                    // Mengembalikan pesanan ke tahap berjalan hampir selalu
+                    // berarti dananya belum jadi diterima, jadi pilihannya
+                    // disiapkan — tetap boleh dilepas bila memang tidak perlu.
+                    ubahBayar: TAHAP_BERJALAN.includes(status),
+                    payment_status: bayarUntuk(status),
+                  });
+                }}
               >
                 <option value="">— pilih status —</option>
                 {Object.entries(STATUS_PESANAN)
@@ -124,13 +152,22 @@ export default function StatusMassal({ terpilih, onSelesai, onBatalPilih }) {
                   <span>Sekalian ubah status pembayarannya</span>
                 </label>
                 {form.ubahBayar && (
-                  <select
-                    className="input mt-2" value={form.payment_status}
-                    onChange={(e) => setForm({ ...form, payment_status: e.target.value })}
-                  >
-                    <option value="PAID">Lunas / dana sudah cair</option>
-                    <option value="UNPAID">Belum cair</option>
-                  </select>
+                  <>
+                    <select
+                      className="input mt-2" value={form.payment_status}
+                      onChange={(e) => setForm({ ...form, payment_status: e.target.value })}
+                    >
+                      <option value="PAID">Lunas / dana sudah cair</option>
+                      <option value="UNPAID">Belum cair</option>
+                    </select>
+                    {form.payment_status === 'UNPAID' && (
+                      <p className="mt-2 leading-relaxed text-slate-600">
+                        Tanggal cairnya ikut dikosongkan, dan dana yang tadinya tercatat masuk rekening
+                        kembali menjadi piutang. Ini yang dipakai bila pesanan terlanjur ditandai cair
+                        padahal masih diproses.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             )}

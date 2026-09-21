@@ -6419,6 +6419,38 @@ async function main() {
     cair63.fulfillment_status === 'CAIR' && cair63.payment_status === 'PAID' && cair63.payout_date === today,
     JSON.stringify({ f: cair63.fulfillment_status, p: cair63.payment_status, d: cair63.payout_date }));
 
+  // ---- A2. Terlanjur Cair, dikembalikan ke Diproses ----
+  // Kejadian nyata: pesanan ditandai cair padahal masih diproses. Selain
+  // statusnya, tanda lunas dan tanggal cairnya harus ikut dibatalkan — kalau
+  // tidak, uang untuk dana yang belum pernah masuk tetap duduk di rekening.
+  const saldoAkun63 = async (kode) => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const kodeMp63 = (await call('GET', '/api/cashflow/options')).rekeningMp.code;
+  const mpSblm63 = await saldoAkun63(kodeMp63);
+  const piutangSblm63 = await saldoAkun63('1110');
+
+  const balik63 = await call('PATCH', '/api/sales/status-massal', {
+    ids: [ids63[0]], fulfillment_status: 'DIPROSES', payment_status: 'UNPAID', payout_date: null,
+  });
+  const ordBalik63 = (await call('GET', `/api/sales/${ids63[0]}`)).order;
+  check('pesanan yang terlanjur cair bisa dikembalikan ke Diproses',
+    balik63.berhasil === 1 && ordBalik63.fulfillment_status === 'DIPROSES'
+      && ordBalik63.payment_status === 'UNPAID' && !ordBalik63.payout_date,
+    JSON.stringify({ f: ordBalik63.fulfillment_status, p: ordBalik63.payment_status, d: ordBalik63.payout_date }));
+  check('dananya kembali tercatat sebagai piutang, bukan di rekening',
+    near((await saldoAkun63('1110')) - piutangSblm63, 50000, 1)
+      && near((await saldoAkun63(kodeMp63)) - mpSblm63, -50000, 1),
+    `piutang ${piutangSblm63} → ${await saldoAkun63('1110')}`);
+
+  // Dikembalikan lagi ke Cair supaya rangkaian uji berikutnya berjalan dari
+  // keadaan yang sama seperti sebelumnya.
+  await call('PATCH', '/api/sales/status-massal', {
+    ids: [ids63[0]], fulfillment_status: 'CAIR', payment_status: 'PAID', payout_date: today,
+  });
+
   // ---- B. Retur juga bisa massal ----
   await call('PATCH', '/api/sales/status-massal', { ids: [ids63[2]], fulfillment_status: 'RETUR' });
   check('status retur bisa disetel massal', (await statusOrder63(ids63[2])) === 'RETUR');
