@@ -31,3 +31,9 @@ backups/
 *.db
 *.db-wal
 *.db-shm
+
+# Catatan kerja & salinan layar milik pemilik usaha. Isinya saldo rekening,
+# daftar stok, dan nomor rekening — bukan bagian dari aplikasi, dan repositori
+# ini publik.
+*.txt
+!requirements*.txt
