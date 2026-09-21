@@ -1,0 +1,35 @@
+Kosongkan Satu Bulan
+Menghapus seluruh catatan satu bulan: order penjualan (beserta returnya), barang masuk/keluar, stok opname, iklan, pesanan pembelian, pelunasan utang/piutang, kas masuk/keluar, dan jurnal manual. Stok produk dikembalikan sebesar mutasi yang dihapus. Data master (produk, mitra, toko, rekening) dan bulan lain tidak disentuh. Cadangan dibuat otomatis sebelum penghapusan.
+
+Bulan
+
+August 2026
+Periksa Isinya
+Order penjualan
+1.366 order · Rp 146.394.439
+Retur ikut terhapus
+6 retur
+Barang masuk
+72 catatan
+Barang keluar (non-penjualan)
+14 catatan
+Koreksi stok opname
+107 baris · 3 dokumen
+Iklan
+49 catatan · Rp 23.873.057
+Pesanan pembelian
+2 pesanan
+Jurnal terhapus
+1.512 jurnal
+Penjualan: 1.366
+Barang masuk/keluar: 85
+Biaya iklan: 49
+Retur penjualan: 6
+Stok opname: 3
+Pelunasan utang/piutang: 2
+Jurnal manual: 1
+Perlu diketahui
+
+Rp 63.894.876 dana marketplace dari order bulan ini belum cair. Setelah ordernya dihapus, uang itu tidak tercatat otomatis saat masuk rekening — catat lewat Kas Masuk bila sudah cair.
+6 retur bertanggal bulan lain ikut terhapus karena ordernya dari bulan ini.
+1 produk stoknya menjadi minus — betulkan lewat stok opname.

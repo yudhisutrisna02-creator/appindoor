@@ -1,0 +1,10 @@
+Saldo yang berubah
+
+Akun	Saldo awal bulan berikutnya	Saldo hari ini
+1010 Bank Operasional	Rp 26.517.620 → Rp 0	Rp 26.402.220 → Rp -115.400
+1012 BCA FITRI APRIYATI (423-046-6641)	Rp -2.735.000 → Rp 0	Rp 9.051.137 → Rp 11.846.637
+1015 BNI ANNISA (125-882-9107)	Rp 0 → Rp 0	Rp 7.964.393 → Rp 8.051.513
+1022 BCA YUDHI 423-029-6621	Rp 0 → Rp 0	Rp -105.200 → Rp 0
+1110 Piutang Marketplace (Dana Ditahan)	Rp 61.652.676 → Rp 0	Rp 123.946.214 → Rp 62.293.538
+1200 Persediaan Barang Dagang	Rp 66.998.430 → Rp 65.968.078	Rp 50.964.397 → Rp 49.776.635
+2000 Utang Usaha (Supplier)	Rp 43.625.918 → Rp 0	Rp 18.436.068 → Rp -25.189.850

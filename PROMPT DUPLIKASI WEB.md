@@ -626,6 +626,18 @@ rekening, catatan; nomor tetap bila bulannya sama) dan
 `keuangan.kas`, ditolak bila sudah direkonsiliasi. `ar-ap` juga membawa
 `lebihBayar` (saldo minus) yang ditampilkan sebagai peringatan.
 
+### Ubah status pesanan massal (Order Penjualan)
+
+Centang di tiap baris + pilih-semua yang hanya mencakup baris yang SEDANG
+tampil (daftarnya dipotong; mencentang yang tak terlihat adalah cara termudah
+mengubah pesanan yang belum pernah dilihat). Panel muncul begitu ada yang
+dicentang. `PATCH /api/sales/status-massal` menerima seluruh tahap di
+`STATUS.SEMUA` termasuk RETUR dan BATAL, ditambah payment_status dan
+payout_date opsional. Perubahannya lewat `ubahOrder` satu per satu — bukan
+UPDATE massal — supaya jurnal, piutang, dan pembatalan tidak punya dua versi.
+BATAL dijaga dua lapis: izin `penjualan.batal` dan kata kunci `BATAL <jumlah>`
+yang diketik ulang, karena ia mengembalikan stok dan menghapus jurnal.
+
 ### Setel Saldo & Hapus Pengeluaran Satu Bulan
 
 Dua alat untuk memulai bulan baru dari posisi nyata tanpa mengarang transaksi:
@@ -921,7 +933,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 910 pemeriksaan, 62 bagian
+npm run smoke            # 922 pemeriksaan, 63 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

@@ -6378,6 +6378,97 @@ async function main() {
   check('neraca saldo tetap seimbang', tb62.balanced === true);
 
 
+  console.log('\n63. Ubah status pesanan secara massal');
+
+  const cap63 = Date.now();
+  const prod63 = (await call('POST', '/api/inventory/products', {
+    sku: `P63-${cap63}`, name: 'Produk Uji Status Massal', cost: 0, price: 50000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod63.id, move_date: today, move_type: 'IN',
+    qty: 50, unit_cost: 20000, payment: 'CASH',
+  });
+  const stok63 = async () => (await call('GET', `/api/inventory/products?q=P63-${cap63}`)).products[0].stock;
+
+  const ids63 = [];
+  for (let i = 0; i < 3; i += 1) {
+    const o = await call('POST', '/api/sales', {
+      order_date: today, channel: 'SHOPEE', customer: `Pembeli Massal ${i}`,
+      items: [{ product_id: prod63.id, qty: 1, price: 50000 }],
+    });
+    ids63.push((o.order || o).id);
+  }
+  const statusOrder63 = async (id) => (await call('GET', `/api/sales/${id}`)).order.fulfillment_status;
+  check('persiapan: tiga order baru berstatus Diproses',
+    (await statusOrder63(ids63[0])) === 'DIPROSES' && (await stok63()) === 47,
+    `${await statusOrder63(ids63[0])} · stok ${await stok63()}`);
+
+  // ---- A. Dikirim, lalu Cair bersama tanggal & status bayarnya ----
+  const kirim63 = await call('PATCH', '/api/sales/status-massal', {
+    ids: ids63, fulfillment_status: 'DIKIRIM',
+  });
+  check('tiga order berpindah ke Dikirim sekaligus',
+    kirim63.berhasil === 3 && kirim63.gagal.length === 0 && (await statusOrder63(ids63[1])) === 'DIKIRIM',
+    String(kirim63.message));
+
+  await call('PATCH', '/api/sales/status-massal', {
+    ids: ids63, fulfillment_status: 'CAIR', payment_status: 'PAID', payout_date: today,
+  });
+  const cair63 = (await call('GET', `/api/sales/${ids63[0]}`)).order;
+  check('status cair ikut menandai lunas dan tanggal cairnya',
+    cair63.fulfillment_status === 'CAIR' && cair63.payment_status === 'PAID' && cair63.payout_date === today,
+    JSON.stringify({ f: cair63.fulfillment_status, p: cair63.payment_status, d: cair63.payout_date }));
+
+  // ---- B. Retur juga bisa massal ----
+  await call('PATCH', '/api/sales/status-massal', { ids: [ids63[2]], fulfillment_status: 'RETUR' });
+  check('status retur bisa disetel massal', (await statusOrder63(ids63[2])) === 'RETUR');
+
+  // ---- C. Batal: butuh kata kunci DAN izin pembatalan ----
+  let tolakKata63 = 0;
+  try {
+    await call('PATCH', '/api/sales/status-massal', {
+      ids: [ids63[0], ids63[1]], fulfillment_status: 'BATAL', konfirmasi: 'BATAL',
+    });
+  } catch (err) { tolakKata63 = err.status; }
+  check('membatalkan massal tanpa kata kunci yang tepat ditolak', tolakKata63 === 422,
+    `status ${tolakKata63}`);
+  check('ordernya belum tersentuh', (await statusOrder63(ids63[0])) === 'CAIR');
+
+  const peranCs63 = (await call('GET', '/api/peran')).roles.find((x) => x.slug === 'cs_marketplace');
+  const akunCs63 = await call('POST', '/api/admin/users', {
+    name: `CS Uji ${cap63}`, email: `cs${cap63}@contoh.test`,
+    password: 'RahasiaKuat1', role: 'staff', role_id: peranCs63.id,
+  });
+  check('peran CS boleh mengubah pesanan tetapi tidak membatalkan',
+    peranCs63.permissions.includes('penjualan.ubah') && !peranCs63.permissions.includes('penjualan.batal'));
+
+  token = await masukSebagai(akunCs63.user.email, 'RahasiaKuat1');
+  const csKirim63 = await call('PATCH', '/api/sales/status-massal', {
+    ids: [ids63[2]], fulfillment_status: 'DIKIRIM',
+  });
+  check('CS tetap bisa memindahkan status biasa secara massal', csKirim63.berhasil === 1);
+  let tolakIzin63 = 0;
+  try {
+    await call('PATCH', '/api/sales/status-massal', {
+      ids: [ids63[0]], fulfillment_status: 'BATAL', konfirmasi: 'BATAL 1',
+    });
+  } catch (err) { tolakIzin63 = err.status; }
+  check('tim tanpa izin pembatalan tidak bisa membatalkan massal', tolakIzin63 === 403,
+    `status ${tolakIzin63}`);
+  token = adminAkun;
+
+  const stokSblm63 = await stok63();
+  const batal63 = await call('PATCH', '/api/sales/status-massal', {
+    ids: [ids63[0], ids63[1]], fulfillment_status: 'BATAL', konfirmasi: 'BATAL 2',
+  });
+  check('dua order dibatalkan massal', batal63.berhasil === 2 && /dibatalkan/.test(batal63.message),
+    String(batal63.message));
+  check('stoknya kembali ke gudang', near((await stok63()) - stokSblm63, 2, 0.01),
+    `${stokSblm63} -> ${await stok63()}`);
+  const tb63 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang setelah pembatalan massal', tb63.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

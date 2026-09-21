@@ -712,12 +712,14 @@ const ubahOrder = buatPengubah({ resolveItems, computeOrder, cancelOrder });
  */
 const statusMassalSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1, 'pilih minimal satu order').max(500),
-  // BATAL sengaja tidak diterima di sini. Membatalkan mengembalikan stok dan
-  // menghapus jurnal — terlalu berat untuk dijalankan lewat centang massal yang
-  // mudah tersenggol.
-  fulfillment_status: z.enum(STATUS.TAHAP_PAPAN),
+  // BATAL ikut diterima, tetapi dijaga tersendiri di routernya: membatalkan
+  // mengembalikan stok dan menghapus jurnal, jadi ia menuntut izin
+  // penjualan.batal DAN kata kunci yang diketik ulang — terlalu berat untuk
+  // dijalankan oleh centang yang tersenggol.
+  fulfillment_status: z.enum(STATUS.SEMUA),
   payment_status: z.enum(['PAID', 'UNPAID']).optional(),
   payout_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  konfirmasi: z.string().trim().optional(),
 });
 
 const ubahStatusMassal = db.transaction((badan, userId) => {
@@ -804,13 +806,27 @@ router.get('/papan', ah((req, res) => {
 
 router.patch('/status-massal', butuhIzin('penjualan.ubah'), ah((req, res) => {
   const badan = parse(statusMassalSchema, req.body);
+
+  // Membatalkan massal: dua penjagaan sekaligus, karena akibatnya menyebar ke
+  // stok dan buku besar dan tidak bisa dibatalkan dengan satu klik balik.
+  if (badan.fulfillment_status === 'BATAL') {
+    if (!req.izin || !req.izin.has('penjualan.batal')) {
+      throw httpError(403, 'Membatalkan order menuntut izin penjualan.batal');
+    }
+    const kataKunci = `BATAL ${badan.ids.length}`;
+    if (badan.konfirmasi !== kataKunci) {
+      throw httpError(422, `Ketik "${kataKunci}" persis untuk membatalkan ${badan.ids.length} order`);
+    }
+  }
+
   const hasil = ubahStatusMassal(badan, req.user.id);
 
+  const kata = badan.fulfillment_status === 'BATAL' ? 'dibatalkan' : 'diperbarui';
   res.json({
     ok: true,
     message: hasil.gagal.length
-      ? `${hasil.berhasil} order diperbarui, ${hasil.gagal.length} gagal`
-      : `${hasil.berhasil} order diperbarui`,
+      ? `${hasil.berhasil} order ${kata}, ${hasil.gagal.length} gagal`
+      : `${hasil.berhasil} order ${kata}`,
     ...hasil,
   });
 }));

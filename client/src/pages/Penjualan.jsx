@@ -4,6 +4,7 @@ import { Plus, Trash2, ShoppingCart, FileSpreadsheet, Eye, XCircle, Undo2, Penci
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor, KotakCari } from '../components/ui';
 import UbahOrder from './UbahOrder';
+import StatusMassal from '../components/StatusMassal';
 import BarisVarian from '../components/BarisVarian';
 import { rupiah, num, pct, today, dateID, CHANNEL_LABEL, STATUS_PESANAN, WARNA_STATUS, kelasChannel, EKSPEDISI, MARKETPLACE } from '../lib/format';
 import { useAuth } from '../lib/auth';
@@ -46,7 +47,10 @@ const emptyOrder = () => ({
 export default function Penjualan() {
   const toast = useToast();
   const { canManage, punya } = useAuth();
+  // Centang massal hanya berguna bagi yang boleh mengubah pesanan.
+  const bolehUbah = punya('penjualan.ubah');
   const [hapusPeriode, setHapusPeriode] = useState(false);
+  const [pilih, setPilih] = useState(() => new Set());
   const [range, setRange] = useState(defaultRange);
   const [channel, setChannel] = useState('');
   const [shopId, setShopId] = useState('');
@@ -234,6 +238,39 @@ export default function Penjualan() {
     }
   }
 
+  /**
+   * Order yang dicentang untuk diubah massal.
+   *
+   * Disimpan sebagai kumpulan id, bukan salinan barisnya: daftar ordernya
+   * dimuat ulang setiap kali filter berubah, dan salinan baris akan menjadi
+   * basi tanpa ada tanda apa pun di layar.
+   */
+  function togglePilih(id) {
+    setPilih((lama) => {
+      const baru = new Set(lama);
+      if (baru.has(id)) baru.delete(id);
+      else baru.add(id);
+      return baru;
+    });
+  }
+
+  /**
+   * Pilih-semua hanya menyangkut baris yang sedang tampil. Daftar ini dipotong
+   * pada jumlah tertentu, dan mencentang yang tidak terlihat adalah cara paling
+   * mudah mengubah pesanan yang belum pernah dilihat orangnya.
+   */
+  const barisTampil = data ? data.rows : [];
+  const semuaTerpilih = barisTampil.length > 0 && barisTampil.every((o) => pilih.has(o.id));
+
+  function toggleSemua() {
+    setPilih((lama) => {
+      const baru = new Set(lama);
+      if (semuaTerpilih) barisTampil.forEach((o) => baru.delete(o.id));
+      else barisTampil.forEach((o) => baru.add(o.id));
+      return baru;
+    });
+  }
+
   async function cancel(order) {
     if (!window.confirm(`Batalkan order ${order.order_no}? Stok akan dikembalikan dan jurnalnya dihapus.`)) return;
     try {
@@ -396,6 +433,14 @@ export default function Penjualan() {
                 Angka ringkasan di atas dan berkas unduhan tetap mencakup seluruhnya.
               </p>
             )}
+            {bolehUbah && (
+              <StatusMassal
+                terpilih={[...pilih]}
+                onBatalPilih={() => setPilih(new Set())}
+                onSelesai={() => { setPilih(new Set()); load(); refreshProducts(); }}
+              />
+            )}
+
             {data.rows.length === 0 ? (
               <EmptyState message="Belum ada order pada rentang ini" hint="Klik “Order Baru” untuk mencatat penjualan" />
             ) : (
@@ -408,6 +453,16 @@ export default function Penjualan() {
                         tiga belas kolom sekaligus membuat yang penting justru
                         tenggelam. */}
                     <tr>
+                      {bolehUbah && (
+                        <th className="w-10">
+                          <input
+                            type="checkbox"
+                            aria-label="Pilih semua order di halaman ini"
+                            checked={semuaTerpilih}
+                            onChange={toggleSemua}
+                          />
+                        </th>
+                      )}
                       <th>No. Order</th><th>Tanggal</th><th>Toko</th><th>Nama Pembeli</th>
                       <th>No. Pesanan</th><th>Resi / Kode Booking</th>
                       <th>Pesanan</th><th>Bayar</th>
@@ -425,7 +480,17 @@ export default function Penjualan() {
                   </thead>
                   <tbody>
                     {data.rows.map((o) => (
-                      <tr key={o.id}>
+                      <tr key={o.id} className={pilih.has(o.id) ? 'bg-brand-50/60' : undefined}>
+                        {bolehUbah && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              aria-label={`Pilih order ${o.order_no}`}
+                              checked={pilih.has(o.id)}
+                              onChange={() => togglePilih(o.id)}
+                            />
+                          </td>
+                        )}
                         <td className="font-mono text-xs">{o.order_no}</td>
                         <td className="tabular whitespace-nowrap">{dateID(o.order_date)}</td>
                         <td className="text-sm">
