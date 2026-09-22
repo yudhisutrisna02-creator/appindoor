@@ -56,6 +56,12 @@ import AkunSaya from './pages/AkunSaya';
 import Verifikasi from './pages/Verifikasi';
 import KinerjaProduk from './pages/KinerjaProduk';
 
+/*
+ * Susunan menu mengikuti alur kerja harian, bukan urutan modul dibangun:
+ * Penjualan dibuka setiap pagi, disusul Pembelian dan Gudang yang memasoknya,
+ * lalu Keuangan yang membukukannya. Presensi, Mitra, Laporan, dan Sistem
+ * dipakai lebih jarang sehingga diletakkan di bawah.
+ */
 const NAV = [
   {
     section: 'Ringkasan',
@@ -68,37 +74,6 @@ const NAV = [
       // Tanpa izin: setiap orang perlu bisa mengurus foto dan kata sandinya
       // sendiri, apa pun perannya.
       { to: '/akun', label: 'Akun Saya', icon: UserCircle },
-    ],
-  },
-  {
-    section: 'Presensi',
-    key: 'presensi',
-    items: [
-      { to: '/presensi', label: 'Absen Sekarang', icon: Fingerprint, izin: 'presensi.absen' },
-      { to: '/presensi/rekap', label: 'Rekap Absensi', icon: CalendarClock, izin: 'presensi.lihat' },
-      { to: '/presensi/penggajian', label: 'Penggajian', icon: Wallet, izin: 'penggajian.lihat' },
-    ],
-  },
-  {
-    section: 'Gudang',
-    key: 'gudang',
-    items: [
-      { to: '/gudang/valuasi', label: 'Valuasi Stok', icon: Warehouse, izin: 'gudang.lihat' },
-      { to: '/gudang/produk', label: 'Master Produk', icon: Package, izin: 'gudang.lihat' },
-      { to: '/gudang/mutasi', label: 'Mutasi Stok', icon: ArrowLeftRight, izin: 'gudang.lihat' },
-      { to: '/gudang/opname', label: 'Stok Opname', icon: ClipboardCheck, izin: 'gudang.opname' },
-      { to: '/gudang/kadaluarsa', label: 'Batch & Kadaluarsa', icon: CalendarX2, izin: 'gudang.lihat' },
-      { to: '/gudang/perbaikan', label: 'Barang Perlu Perbaikan', icon: Wrench, izin: 'gudang.lihat' },
-      { to: '/gudang/kinerja', label: 'Kinerja Produk', icon: PackageSearch, izin: 'gudang.kinerja' },
-    ],
-  },
-  {
-    section: 'Pembelian',
-    key: 'pembelian',
-    items: [
-      { to: '/pembelian/saran', label: 'Saran Pembelian', icon: ShoppingBasket, izin: 'pembelian.lihat' },
-      { to: '/pembelian', label: 'Pesanan Pembelian', icon: PackageCheck, izin: 'pembelian.lihat' },
-      { to: '/pembelian/retur', label: 'Retur Pembelian', icon: Undo2, izin: 'pembelian.lihat' },
     ],
   },
   {
@@ -117,6 +92,28 @@ const NAV = [
     ],
   },
   {
+    section: 'Pembelian',
+    key: 'pembelian',
+    items: [
+      { to: '/pembelian/saran', label: 'Saran Pembelian', icon: ShoppingBasket, izin: 'pembelian.lihat' },
+      { to: '/pembelian', label: 'Pesanan Pembelian', icon: PackageCheck, izin: 'pembelian.lihat' },
+      { to: '/pembelian/retur', label: 'Retur Pembelian', icon: Undo2, izin: 'pembelian.lihat' },
+    ],
+  },
+  {
+    section: 'Gudang',
+    key: 'gudang',
+    items: [
+      { to: '/gudang/valuasi', label: 'Valuasi Stok', icon: Warehouse, izin: 'gudang.lihat' },
+      { to: '/gudang/produk', label: 'Master Produk', icon: Package, izin: 'gudang.lihat' },
+      { to: '/gudang/mutasi', label: 'Mutasi Stok', icon: ArrowLeftRight, izin: 'gudang.lihat' },
+      { to: '/gudang/opname', label: 'Stok Opname', icon: ClipboardCheck, izin: 'gudang.opname' },
+      { to: '/gudang/kadaluarsa', label: 'Batch & Kadaluarsa', icon: CalendarX2, izin: 'gudang.lihat' },
+      { to: '/gudang/perbaikan', label: 'Barang Perlu Perbaikan', icon: Wrench, izin: 'gudang.lihat' },
+      { to: '/gudang/kinerja', label: 'Kinerja Produk', icon: PackageSearch, izin: 'gudang.kinerja' },
+    ],
+  },
+  {
     section: 'Keuangan',
     key: 'keuangan',
     items: [
@@ -132,6 +129,20 @@ const NAV = [
     ],
   },
   {
+    section: 'Presensi',
+    key: 'presensi',
+    items: [
+      { to: '/presensi', label: 'Absen Sekarang', icon: Fingerprint, izin: 'presensi.absen' },
+      { to: '/presensi/rekap', label: 'Rekap Absensi', icon: CalendarClock, izin: 'presensi.lihat' },
+      { to: '/presensi/penggajian', label: 'Penggajian', icon: Wallet, izin: 'penggajian.lihat' },
+    ],
+  },
+  {
+    section: 'Mitra',
+    key: 'mitra',
+    items: [{ to: '/mitra', label: 'Supplier & Pelanggan', icon: Contact, izin: 'mitra.lihat' }],
+  },
+  {
     section: 'Laporan',
     key: 'laporan',
     items: [
@@ -142,11 +153,6 @@ const NAV = [
       { to: '/laporan/keuangan', label: 'Laporan Keuangan', icon: FileText, izin: 'keuangan.lihat' },
       { to: '/laporan/mitra', label: 'Laporan Mitra', icon: FileText, izin: 'mitra.lihat' },
     ],
-  },
-  {
-    section: 'Mitra',
-    key: 'mitra',
-    items: [{ to: '/mitra', label: 'Supplier & Pelanggan', icon: Contact, izin: 'mitra.lihat' }],
   },
   {
     section: 'Sistem',
