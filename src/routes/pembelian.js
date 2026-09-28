@@ -18,7 +18,7 @@ const { db, nextNumber, getSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const {
-  r2, ACC, postJournal, deleteJournalsBySource,
+  r2, ACC, postJournal, deleteJournalsBySource, accountByCode, pastikanTerbuka, tolakBilaTerekonsiliasi,
 } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { dokumenPdf, tableCsv } = require('../utils/exporters');
@@ -67,9 +67,29 @@ function hitungStatus(items) {
   return 'SEBAGIAN';
 }
 
+/**
+ * Rekening pembayar pesanan, dirapikan menurut cara bayarnya.
+ *
+ * Tempo tidak memakai rekening (lawannya utang supplier). Tunai tanpa pilihan
+ * jatuh ke Kas Tunai. Transfer bank WAJIB menyebut rekeningnya — tanpa itu,
+ * semua transfer menumpuk di Bank Operasional dan tidak bisa dicocokkan dengan
+ * mutasi rekening mana pun.
+ */
+function rekeningBayar(body) {
+  if (body.payment === 'CREDIT') return null;
+  if (!body.cash_code) {
+    if (body.payment === 'CASH') return ACC.CASH;
+    throw httpError(422, 'Pilih rekening bank yang dipakai untuk transfer');
+  }
+  const akun = accountByCode(body.cash_code);
+  if (!akun.is_cash) throw httpError(422, `${akun.code} · ${akun.name} bukan rekening kas/bank`);
+  return akun.code;
+}
+
 const buatPO = db.transaction((body, userId) => {
   const supplier = db.prepare('SELECT id FROM partners WHERE id = ?').get(body.partner_id);
   if (!supplier) throw httpError(404, 'Supplier tidak ditemukan');
+  body.cash_code = rekeningBayar(body);
 
   const poNo = nextNumber('PO', body.order_date.slice(0, 7));
   const info = db
@@ -315,6 +335,76 @@ function sesuaikanSelisihHarga(po, item, userId, tambahan) {
   return selisih;
 }
 
+/**
+ * Memindahkan akun lawan pada pembukuan yang sudah terbentuk untuk pesanan ini
+ * — jurnal penerimaan barangnya dan jurnal selisih harga notanya.
+ *
+ * Dipakai saat cara bayar, rekening, atau supplier diganti SETELAH barangnya
+ * datang: misalnya pesanan tempo yang ternyata langsung ditransfer. Yang
+ * berganti hanya baris akun lawannya; persediaan dan HPP tidak disentuh.
+ *
+ * Dari tempo ke tunai/transfer ditolak bila utangnya sudah tidak ada: artinya
+ * pembayarannya sudah dicatat lewat Utang & Piutang, dan memindahkan
+ * penerimaannya juga akan membayar pesanan yang sama dua kali.
+ */
+function pindahkanAkunLawan(po, lama, baru) {
+  const moves = db
+    .prepare("SELECT id FROM stock_moves WHERE ref = ? AND move_type = 'IN'")
+    .all(po.po_no)
+    .map((m) => m.id);
+  const items = db.prepare('SELECT id FROM purchase_items WHERE po_id = ?').all(po.id).map((i) => i.id);
+
+  const jurnal = [
+    ...(moves.length
+      ? db.prepare(`SELECT * FROM journals WHERE source = 'STOCK' AND source_id IN (${moves.map(() => '?').join(',')})`).all(...moves)
+      : []),
+    ...(items.length
+      ? db.prepare(`SELECT * FROM journals WHERE source = 'PO_HARGA' AND source_id IN (${items.map(() => '?').join(',')})`).all(...items)
+      : []),
+  ];
+  if (!jurnal.length) return 0;
+
+  const akunDari = accountByCode(lama.akun);
+  const akunKe = accountByCode(baru.akun);
+  const cocok = (l) => l.account_id === akunDari.id
+    && (lama.partner === null || l.partner_id === lama.partner);
+
+  let pindah = 0; // jumlah bersih yang berpindah (kredit − debit)
+  const baris = [];
+  for (const j of jurnal) {
+    pastikanTerbuka(j.entry_date.slice(0, 7), j.entry_date);
+    tolakBilaTerekonsiliasi(j);
+    for (const l of db.prepare('SELECT * FROM journal_lines WHERE journal_id = ?').all(j.id)) {
+      if (!cocok(l)) continue;
+      baris.push(l);
+      pindah = r2(pindah + l.credit - l.debit);
+    }
+  }
+
+  // Dari utang supplier ke rekening: utangnya harus masih ada sebesar itu.
+  if (lama.partner !== null && Math.abs(pindah) >= 0.01) {
+    const sisa = r2(db
+      .prepare(
+        `SELECT COALESCE(SUM(l.credit - l.debit), 0) s FROM journal_lines l
+           JOIN journals j ON j.id = l.journal_id
+          WHERE l.account_id = ? AND l.partner_id = ? AND j.posted = 1`
+      )
+      .get(akunDari.id, lama.partner).s);
+    if (baru.partner === null && sisa + 0.004 < pindah) {
+      throw httpError(
+        422,
+        `Utang pesanan ${po.po_no} tinggal Rp ${Math.max(0, sisa).toLocaleString('id-ID')} dari ` +
+          `Rp ${pindah.toLocaleString('id-ID')} — pembayarannya sudah dicatat lewat Utang & Piutang. ` +
+          'Biarkan cara bayarnya Tempo, atau hapus pelunasannya dulu bila memang dibayar langsung saat pesan.'
+      );
+    }
+  }
+
+  const ganti = db.prepare('UPDATE journal_lines SET account_id = ?, partner_id = ? WHERE id = ?');
+  for (const l of baris) ganti.run(akunKe.id, baru.partner, l.id);
+  return pindah;
+}
+
 const ubahPO = db.transaction((poId, body, userId) => {
   const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(poId);
   if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');
@@ -327,15 +417,22 @@ const ubahPO = db.transaction((poId, body, userId) => {
   const petaLama = new Map(lama.map((i) => [i.id, i]));
   const adaPenerimaan = lama.some((i) => i.qty_received > 0);
 
-  // Cara bayar menentukan akun lawan jurnal saat barang diterima. Mengubahnya
-  // setelah ada penerimaan membuat penerimaan berikutnya memakai akun yang
-  // berbeda dari yang sebelumnya, di dalam satu pesanan yang sama.
-  if (adaPenerimaan && body.payment !== po.payment) {
-    throw httpError(
-      422,
-      'Sebagian barang sudah diterima dan dibukukan — cara bayar tidak bisa diubah lagi.'
-    );
-  }
+  // Cara bayar, rekening, dan supplier menentukan akun lawan jurnal saat
+  // barang diterima. Bila diganti setelah ada penerimaan, pembukuan yang sudah
+  // terbentuk ikut dipindah — kalau tidak, satu pesanan memakai dua akun lawan
+  // yang berbeda dan tidak ada satu pun yang benar.
+  body.cash_code = rekeningBayar(body);
+  const lawanLama = {
+    akun: akunLawanPO(po),
+    partner: po.payment === 'CREDIT' ? po.partner_id : null,
+  };
+  const lawanBaru = {
+    akun: akunLawanPO({ payment: body.payment, cash_code: body.cash_code }),
+    partner: body.payment === 'CREDIT' ? body.partner_id : null,
+  };
+  const pindahBayar = adaPenerimaan
+    && (lawanLama.akun !== lawanBaru.akun || lawanLama.partner !== lawanBaru.partner);
+  if (pindahBayar) pindahkanAkunLawan(po, lawanLama, lawanBaru);
 
   const dipakai = new Set();
   // Selisih harga nota per baris yang barangnya sudah datang, dari edit ini.
@@ -428,7 +525,7 @@ const ubahPO = db.transaction((poId, body, userId) => {
   const items = db.prepare('SELECT qty, qty_received FROM purchase_items WHERE po_id = ?').all(poId);
   db.prepare('UPDATE purchase_orders SET status = ? WHERE id = ?').run(hitungStatus(items), poId);
 
-  return { adaPenerimaan, selisihHarga };
+  return { adaPenerimaan, selisihHarga, pindahBayar };
 });
 
 router.put('/:id(\\d+)', butuhIzin('pembelian.kelola'), ah((req, res) => {
@@ -444,6 +541,9 @@ router.put('/:id(\\d+)', butuhIzin('pembelian.kelola'), ah((req, res) => {
     selisihHarga: hasil.selisihHarga,
     message:
       `Pesanan ${po.po_no} diperbarui` +
+      (hasil.pindahBayar
+        ? ` — pembukuan barang yang sudah datang dipindah ke ${po.payment === 'CREDIT' ? 'utang supplier' : 'rekening pembayarnya'}`
+        : '') +
       (hasil.adaPenerimaan
         ? Math.abs(hasil.selisihHarga) >= 0.01
           ? ` — harga nota barang yang sudah datang ${hasil.selisihHarga > 0 ? 'naik' : 'turun'} ` +

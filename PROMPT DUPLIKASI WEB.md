@@ -643,6 +643,18 @@ bertahap dengan harga berbeda sah punya rata-rata yang tidak sama dengan harga
 terakhirnya, dan membandingkan keduanya menciptakan selisih yang tidak pernah
 diminta.
 
+### Cara bayar & rekening pesanan pembelian
+
+Transfer bank WAJIB menyebut rekeningnya (`cash_code`, harus akun kas);
+Tunai tanpa pilihan jatuh ke Kas Tunai; Tempo tidak memakai rekening
+(`rekeningBayar()`). Cara bayar, rekening, dan supplier kini boleh diganti
+setelah barang datang: `pindahkanAkunLawan()` memindahkan baris akun lawan pada
+jurnal penerimaan (STOCK, lewat stock_moves.ref = po_no) dan jurnal PO_HARGA
+ke akun baru — persediaan & HPP tidak disentuh, kunci periode dan pasangan
+rekonsiliasi tetap dihormati. Dari Tempo ke Tunai/Transfer ditolak bila utang
+supplier sudah tidak cukup (artinya sudah dilunasi lewat Utang & Piutang —
+memindahkan juga akan membayar pesanan yang sama dua kali).
+
 ### Ubah & hapus mutasi stok (Mutasi Stok)
 
 `PUT /api/inventory/moves/:id` dan `DELETE /api/inventory/moves/:id`, izin
@@ -969,7 +981,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 945 pemeriksaan, 65 bagian
+npm run smoke            # 955 pemeriksaan, 66 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

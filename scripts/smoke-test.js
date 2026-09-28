@@ -1118,15 +1118,16 @@ async function main() {
   check('baris yang barangnya sudah datang tidak bisa dihapus',
     tolakHapusBaris === 422, `status ${tolakHapusBaris}`);
 
-  let tolakUbahBayar = 0;
-  try {
-    await call('PUT', `/api/pembelian/${poUbah.id}`, {
-      order_date: today, partner_id: idSupplier, payment: 'CASH', cash_code: '1010',
-      items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 30000 }],
-    });
-  } catch (err) { tolakUbahBayar = err.status; }
-  check('cara bayar tidak bisa diubah setelah ada penerimaan',
-    tolakUbahBayar === 422, `status ${tolakUbahBayar}`);
+  const ubahBayar = await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CASH', cash_code: '1010',
+    items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 30000 }],
+  });
+  check('cara bayar bisa diubah setelah ada penerimaan (pembukuannya ikut dipindah)',
+    ubahBayar.po.payment === 'CASH' && /dipindah/.test(ubahBayar.message), String(ubahBayar.message));
+  await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 30000 }],
+  });
 
   // Stok tidak boleh bergeser sedikit pun oleh seluruh percobaan di atas.
   const stokSetelahUbah = (await call('GET', `/api/inventory/products?q=${prodPO.sku}`)).products[0];
@@ -6677,6 +6678,97 @@ async function main() {
     near(await utang65(), 200000, 1) && near((await saldo65('5100')) - selisihAwal65, 0, 1));
   const tb65 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
   check('neraca saldo tetap seimbang', tb65.balanced === true);
+
+
+  console.log('\n66. Cara bayar & rekening pesanan pembelian');
+
+  const cap66 = Date.now();
+  const saldo66 = async (kode) => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const rek66 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI PO A 661-${cap66}`, `BRI UJI PO B 662-${cap66}`], mulai_kode: '1960',
+  })).dibuat.map((d) => d.code);
+  const sup66 = await call('POST', '/api/partners', {
+    name: `Supplier Bayar ${cap66}`, kind: 'SUPPLIER', phone: '0812000666', address: 'Jl. Uji 66',
+  });
+  const idSup66 = (sup66.partner || sup66).id;
+  const prod66 = (await call('POST', '/api/inventory/products', {
+    sku: `P66-${cap66}`, name: 'Produk Uji Cara Bayar', cost: 0, price: 50000,
+  })).product;
+  const utang66 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((x) => x.id === idSup66) || {}).utang || 0);
+  };
+  const isiPO66 = (po, bayar) => ({
+    order_date: today, partner_id: idSup66, ...bayar,
+    items: [{ id: po.items[0].id, product_id: prod66.id, qty: 10, unit_cost: 20000 }],
+  });
+
+  // ---- A. Transfer bank wajib menyebut rekeningnya ----
+  let tolakTanpaRek66 = 0;
+  try {
+    await call('POST', '/api/pembelian', {
+      order_date: today, partner_id: idSup66, payment: 'BANK',
+      items: [{ product_id: prod66.id, qty: 1, unit_cost: 1000 }],
+    });
+  } catch (err) { tolakTanpaRek66 = err.status; }
+  check('transfer bank tanpa rekening ditolak', tolakTanpaRek66 === 422, `status ${tolakTanpaRek66}`);
+
+  let tolakBukanKas66 = 0;
+  try {
+    await call('POST', '/api/pembelian', {
+      order_date: today, partner_id: idSup66, payment: 'BANK', cash_code: '4000',
+      items: [{ product_id: prod66.id, qty: 1, unit_cost: 1000 }],
+    });
+  } catch (err) { tolakBukanKas66 = err.status; }
+  check('akun non-kas ditolak sebagai rekening transfer', tolakBukanKas66 === 422);
+
+  // ---- B. Tempo → Transfer setelah barang datang ----
+  const po66 = (await call('POST', '/api/pembelian', {
+    order_date: today, partner_id: idSup66, payment: 'CREDIT',
+    items: [{ product_id: prod66.id, qty: 10, unit_cost: 20000 }],
+  })).po;
+  await call('POST', `/api/pembelian/${po66.id}/terima`, {
+    receive_date: today, lines: [{ item_id: po66.items[0].id, qty: 10 }],
+  });
+  const persediaan66 = await saldo66('1200');
+  check('persiapan: pesanan tempo, utang Rp 200.000', near(await utang66(), 200000, 1));
+
+  const keBank66 = await call('PUT', `/api/pembelian/${po66.id}`,
+    isiPO66(po66, { payment: 'BANK', cash_code: rek66[0] }));
+  check('tempo bisa diganti transfer walau barangnya sudah datang',
+    keBank66.po.payment === 'BANK' && keBank66.po.cash_code === rek66[0], String(keBank66.message));
+  check('utang supplier hilang, rekening yang dipilih terpotong',
+    near(await utang66(), 0, 1) && near(await saldo66(rek66[0]), -200000, 1),
+    `utang ${await utang66()} · rek ${await saldo66(rek66[0])}`);
+  check('nilai persediaan tidak berubah', near(await saldo66('1200'), persediaan66, 1));
+
+  // ---- C. Ganti rekening ----
+  await call('PUT', `/api/pembelian/${po66.id}`, isiPO66(po66, { payment: 'BANK', cash_code: rek66[1] }));
+  check('ganti rekening memindahkan pembayarannya',
+    near(await saldo66(rek66[0]), 0, 1) && near(await saldo66(rek66[1]), -200000, 1));
+
+  // ---- D. Kembali ke tempo ----
+  await call('PUT', `/api/pembelian/${po66.id}`, isiPO66(po66, { payment: 'CREDIT' }));
+  check('kembali ke tempo mengembalikan utangnya',
+    near(await utang66(), 200000, 1) && near(await saldo66(rek66[1]), 0, 1));
+
+  // ---- E. Sudah dilunasi lewat Utang & Piutang: tidak boleh dibayar dua kali ----
+  await call('POST', '/api/cashflow/settlements', {
+    entry_date: today, partner_id: idSup66, direction: 'PAY', amount: 200000, cash_code: rek66[0],
+  });
+  let tolakGanda66 = 0;
+  let pesanGanda66 = '';
+  try {
+    await call('PUT', `/api/pembelian/${po66.id}`, isiPO66(po66, { payment: 'BANK', cash_code: rek66[1] }));
+  } catch (err) { tolakGanda66 = err.status; pesanGanda66 = err.message; }
+  check('tempo yang sudah dilunasi tidak bisa diganti transfer (cegah bayar dua kali)',
+    tolakGanda66 === 422 && /Utang & Piutang/.test(pesanGanda66), pesanGanda66);
+  const tb66 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb66.balanced === true);
 
 
   // ---------- Hasil ----------

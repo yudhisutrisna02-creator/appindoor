@@ -13,6 +13,7 @@ const KOSONG = () => ({
   expected_date: '',
   partner_id: '',
   payment: 'CREDIT',
+  cash_code: '',
   invoice_no: '',
   due_date: '',
   note: '',
@@ -33,6 +34,9 @@ const WARNA_STATUS = {
  * terjawab olehnya: barang apa yang sudah dipesan tetapi belum tiba, sudah
  * berapa lama menunggu, dan berapa nilainya.
  */
+/** Kode Kas Tunai pada bagan akun bawaan. */
+const KODE_KAS_TUNAI = '1000';
+
 export default function Pembelian() {
   const toast = useToast();
   const { punya } = useAuth();
@@ -44,6 +48,8 @@ export default function Pembelian() {
   const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState([]);
   const [products, setProducts] = useState([]);
+  const [rekening, setRekening] = useState([]);
+  const [kodeMp, setKodeMp] = useState(null);
   const [form, setForm] = useState(null);
   const [terima, setTerima] = useState(null);
   const [nota, setNota] = useState(null);
@@ -64,6 +70,10 @@ export default function Pembelian() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     api.get('/api/partners', { kind: 'SUPPLIER' }).then((d) => setSuppliers(d.partners)).catch(() => {});
+    api.get('/api/cashflow/options').then((d) => {
+      setRekening(d.cashAccounts || []);
+      setKodeMp(d.rekeningMp ? d.rekeningMp.code : null);
+    }).catch(() => {});
     api.get('/api/inventory/products', { limit: 2000 }).then((d) => setProducts(d.products)).catch(() => {});
   }, []);
 
@@ -88,6 +98,7 @@ export default function Pembelian() {
         expected_date: form.expected_date || null,
         partner_id: Number(form.partner_id),
         payment: form.payment,
+        cash_code: form.payment === 'CREDIT' ? null : form.cash_code || null,
         invoice_no: form.invoice_no || null,
         due_date: form.due_date || null,
         note: form.note || null,
@@ -135,6 +146,9 @@ export default function Pembelian() {
         expected_date: d.po.expected_date || '',
         partner_id: String(d.po.partner_id || ''),
         payment: d.po.payment,
+        cash_code: d.po.cash_code || '',
+        payment_awal: d.po.payment,
+        cash_code_awal: d.po.cash_code || '',
         invoice_no: d.po.invoice_no || '',
         due_date: d.po.due_date || '',
         note: d.po.note || '',
@@ -423,12 +437,50 @@ export default function Pembelian() {
               <input type="date" className="input" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
             </Field>
             <Field label="Cara Bayar *" hint="Menentukan akun lawan saat barang diterima">
-              <select className="input" value={form.payment} onChange={(e) => setForm({ ...form, payment: e.target.value })}>
+              <select
+                className="input" value={form.payment}
+                onChange={(e) => {
+                  const payment = e.target.value;
+                  setForm({
+                    ...form,
+                    payment,
+                    // Tunai hampir selalu dari Kas Tunai; transfer harus dipilih
+                    // sendiri — menebak rekening bank sama dengan mengarang.
+                    cash_code: payment === 'CASH' ? KODE_KAS_TUNAI : payment === 'BANK' ? '' : '',
+                  });
+                }}
+              >
                 <option value="CREDIT">Tempo (utang supplier)</option>
                 <option value="BANK">Transfer bank</option>
                 <option value="CASH">Tunai</option>
               </select>
             </Field>
+            {form.payment !== 'CREDIT' && (
+              <Field
+                label={form.payment === 'BANK' ? 'Transfer dari rekening *' : 'Dibayar dari *'}
+                hint="Rekening yang benar-benar dipakai membayar supplier"
+              >
+                <select
+                  className="input" required value={form.cash_code}
+                  onChange={(e) => setForm({ ...form, cash_code: e.target.value })}
+                >
+                  <option value="">— pilih rekening —</option>
+                  {rekening
+                    .filter((k) => k.code !== kodeMp)
+                    .filter((k) => form.payment !== 'BANK' || k.code !== KODE_KAS_TUNAI)
+                    .map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
+                </select>
+              </Field>
+            )}
+            {form.id && form.items.some((i) => i.qty_received > 0)
+              && (form.payment !== form.payment_awal || (form.cash_code || '') !== (form.cash_code_awal || '')) && (
+              <p className="sm:col-span-2 rounded-xl bg-brand-50 px-3 py-2 text-xs leading-relaxed text-brand-800">
+                Cara bayar barang yang <strong>sudah datang</strong> ikut dipindah pembukuannya ke{' '}
+                {form.payment === 'CREDIT' ? 'utang supplier' : 'rekening yang dipilih'} — nilai persediaan dan
+                HPP tidak berubah. Bila utangnya sudah dilunasi lewat Utang &amp; Piutang, perubahan ini ditolak
+                supaya pesanan yang sama tidak terbayar dua kali.
+              </p>
+            )}
             <Field label="Catatan">
               <input className="input" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
             </Field>
