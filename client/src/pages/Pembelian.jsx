@@ -144,6 +144,8 @@ export default function Pembelian() {
           qty: i.qty,
           unit_cost: i.unit_cost,
           qty_received: i.qty_received,
+          // Harga sebelum diubah — dasar pratinjau selisih harga nota.
+          harga_awal: i.unit_cost,
         })),
       });
     } catch (err) {
@@ -247,6 +249,19 @@ export default function Pembelian() {
   const totalForm = form
     ? form.items.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.unit_cost) || 0), 0)
     : 0;
+
+  /**
+   * Selisih harga nota dari perubahan yang sedang dilakukan: jumlah yang sudah
+   * datang × (harga baru − harga sebelumnya). Rumusnya sama dengan peladen,
+   * supaya angka di layar tidak berbeda dari yang dibukukan.
+   */
+  function selisihBaris(it) {
+    const diterima = Number(it.qty_received) || 0;
+    if (!diterima || it.harga_awal === undefined) return 0;
+    const nilai = diterima * ((Number(it.unit_cost) || 0) - (Number(it.harga_awal) || 0));
+    return Math.abs(nilai) < 0.01 ? 0 : Math.round(nilai * 100) / 100;
+  }
+
 
   return (
     <div>
@@ -383,9 +398,10 @@ export default function Pembelian() {
               <p className="sm:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
                 Sebagian barang sudah diterima. Baris yang barangnya sudah datang{' '}
                 <strong>tidak bisa diganti atau dihapus</strong>, dan jumlahnya tidak bisa diturunkan
-                di bawah yang sudah masuk — stok, HPP, dan jurnalnya sudah terbentuk. Perubahan harga
-                hanya berlaku untuk sisa yang belum datang. Untuk barang yang telanjur masuk dengan
-                harga keliru, pakai <strong>Retur Pembelian</strong> atau koreksi stok.
+                di bawah yang sudah masuk. <strong>Harganya tetap boleh diubah</strong> mengikuti nota
+                supplier: <strong>HPP stok yang sudah masuk tidak berubah</strong> — selisihnya hanya
+                menyesuaikan {form.payment === 'CREDIT' ? 'utang ke supplier' : 'pembayarannya'} dan
+                dicatat di akun Selisih Harga Pembelian.
               </p>
             )}
             <Field label="Supplier *" className="sm:col-span-2">
@@ -449,8 +465,7 @@ export default function Pembelian() {
                           value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })}
                         />
                         <input
-                          type="number" min="0" className="input col-span-3" placeholder="Harga beli"
-                          disabled={lunasDatang}
+                          type="number" min="0" step="any" className="input col-span-3" placeholder="Harga beli"
                           value={it.unit_cost} onChange={(e) => setItem(i, { unit_cost: e.target.value })}
                         />
                         <button
@@ -464,10 +479,14 @@ export default function Pembelian() {
                       </div>
                       {sudahDatang && (
                         <p className="mt-1 text-[11px] text-amber-700">
-                          {num(it.qty_received)} sudah diterima dan masuk stok
-                          {lunasDatang
-                            ? ' — barang dan harganya terkunci'
-                            : ' — harga baru hanya berlaku untuk sisanya'}
+                          {num(it.qty_received)} sudah diterima — barang terkunci, harga boleh diubah;
+                          HPP stok yang sudah masuk tetap
+                          {!lunasDatang && '. Sisanya diterima dengan harga baru ini'}
+                          {selisihBaris(it) !== 0 && (
+                            <strong className="ml-1">
+                              · selisih nota {selisihBaris(it) > 0 ? '+' : '−'}{rupiah(Math.abs(selisihBaris(it)))}
+                            </strong>
+                          )}
                         </p>
                       )}
                     </div>

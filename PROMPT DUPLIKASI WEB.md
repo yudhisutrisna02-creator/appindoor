@@ -626,6 +626,23 @@ rekening, catatan; nomor tetap bila bulannya sama) dan
 `keuangan.kas`, ditolak bila sudah direkonsiliasi. `ar-ap` juga membawa
 `lebihBayar` (saldo minus) yang ditampilkan sebagai peringatan.
 
+### Harga nota pesanan pembelian dibetulkan tanpa menggeser HPP
+
+HPP produk disusun sendiri oleh pemiliknya (harga pabrik + ongkir + pajak +
+kemasan/label), jadi harga nota supplier yang dibetulkan belakangan tidak boleh
+menggesernya. Pada Ubah Pesanan, harga baris yang barangnya SUDAH datang tetap
+bisa diubah (barang & jumlah minimum tetap terkunci). Nilai persediaan dan HPP
+tidak disentuh; selisihnya = qty diterima × (harga baru − harga lama) dibukukan
+lawan akun lawan PO (Utang supplier ber-partner_id untuk tempo, atau rekening
+pembayarannya) terhadap akun baru **5100 Selisih Harga Pembelian**. Satu jurnal
+`PO_HARGA` per baris, ditulis ulang dengan jumlah kumulatifnya — mengubah
+berkali-kali tidak menumpuk, kembali ke harga awal menghapusnya.
+
+Jangan menghitung selisih dari rata-rata harga penerimaan: baris yang diterima
+bertahap dengan harga berbeda sah punya rata-rata yang tidak sama dengan harga
+terakhirnya, dan membandingkan keduanya menciptakan selisih yang tidak pernah
+diminta.
+
 ### Ubah & hapus mutasi stok (Mutasi Stok)
 
 `PUT /api/inventory/moves/:id` dan `DELETE /api/inventory/moves/:id`, izin
@@ -952,7 +969,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 936 pemeriksaan, 64 bagian
+npm run smoke            # 945 pemeriksaan, 65 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

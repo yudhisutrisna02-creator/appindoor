@@ -17,7 +17,9 @@ const { z } = require('zod');
 const { db, nextNumber, getSetting } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
-const { r2 } = require('../utils/accounting');
+const {
+  r2, ACC, postJournal, deleteJournalsBySource,
+} = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { dokumenPdf, tableCsv } = require('../utils/exporters');
 const { blokTtd, KIND } = require('../utils/ttd');
@@ -241,7 +243,79 @@ const ubahPoSchema = z.object({
     .min(1, 'minimal satu barang'),
 });
 
-const ubahPO = db.transaction((poId, body) => {
+/**
+ * Akun lawan pembelian — sama persis dengan yang dipakai applyMove saat
+ * barangnya diterima, supaya penyesuaian harga menyentuh akun yang sama.
+ */
+function akunLawanPO(po) {
+  if (po.payment === 'CREDIT') return ACC.AP;
+  if (po.cash_code) return po.cash_code;
+  return po.payment === 'BANK' ? ACC.BANK : ACC.CASH;
+}
+
+/**
+ * Membukukan selisih harga nota untuk barang yang SUDAH diterima.
+ *
+ * Nilai yang masuk persediaan (received_amount) tidak diubah, dan HPP produk
+ * tidak disentuh: HPP di gudang disusun sendiri oleh pemiliknya — harga plus
+ * ongkir, pajak, kemasan, label — sehingga harga nota yang dibetulkan
+ * belakangan tidak boleh menggesernya. Yang ikut berubah hanyalah kewajiban ke
+ * supplier (atau uang yang dibayarkan), lawannya akun Selisih Harga Pembelian.
+ *
+ * Selisihnya dihitung dari PERUBAHAN harga yang dilakukan — jumlah yang sudah
+ * datang × (harga baru − harga lama) — bukan dari rata-rata harga penerimaan.
+ * Pesanan yang diterima bertahap dengan harga berbeda (sebagian datang sebelum
+ * harganya diubah) sah memiliki rata-rata yang tidak sama dengan harga
+ * terakhirnya; membandingkan keduanya menghasilkan "selisih" yang tidak pernah
+ * diminta siapa pun.
+ *
+ * Jurnalnya satu per baris pesanan dan ditulis ulang dengan jumlah
+ * kumulatifnya, jadi mengubah harga berkali-kali tidak menumpuk jurnal.
+ *
+ * @param {number} tambahan selisih dari perubahan kali ini (+ nota lebih mahal)
+ * @returns {number} selisih kumulatif yang sekarang tercatat
+ */
+function sesuaikanSelisihHarga(po, item, userId, tambahan) {
+  const sebelumnya = r2(db
+    .prepare(
+      `SELECT COALESCE(SUM(l.debit - l.credit), 0) s
+         FROM journal_lines l
+         JOIN journals j ON j.id = l.journal_id
+         JOIN accounts a ON a.id = l.account_id
+        WHERE j.source = 'PO_HARGA' AND j.source_id = ? AND a.code = ?`
+    )
+    .get(item.id, ACC.PURCHASE_PRICE_DIFF).s);
+  const selisih = r2(sebelumnya + tambahan);
+
+  deleteJournalsBySource('PO_HARGA', item.id);
+  if (Math.abs(selisih) < 0.01) return 0;
+
+  const produk = db.prepare('SELECT name, unit FROM products WHERE id = ?').get(item.product_id);
+  const lawan = akunLawanPO(po);
+  const mitra = po.payment === 'CREDIT' ? po.partner_id : null;
+  const nilai = Math.abs(selisih);
+  const memo = `Selisih harga nota ${po.po_no} — ${produk.name} ${item.qty_received} ${produk.unit}`;
+
+  postJournal({
+    date: todayLocal(),
+    description: `Selisih Harga Pembelian — ${po.po_no} · ${produk.name}`,
+    lines: selisih > 0
+      ? [
+        { code: ACC.PURCHASE_PRICE_DIFF, debit: nilai, credit: 0, memo },
+        { code: lawan, debit: 0, credit: nilai, memo, partner_id: mitra },
+      ]
+      : [
+        { code: lawan, debit: nilai, credit: 0, memo, partner_id: mitra },
+        { code: ACC.PURCHASE_PRICE_DIFF, debit: 0, credit: nilai, memo },
+      ],
+    source: 'PO_HARGA',
+    sourceId: item.id,
+    userId,
+  });
+  return selisih;
+}
+
+const ubahPO = db.transaction((poId, body, userId) => {
   const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(poId);
   if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');
   if (po.status === 'BATAL') throw httpError(409, 'Pesanan sudah dibatalkan');
@@ -264,6 +338,8 @@ const ubahPO = db.transaction((poId, body) => {
   }
 
   const dipakai = new Set();
+  // Selisih harga nota per baris yang barangnya sudah datang, dari edit ini.
+  const perubahanHarga = new Map();
 
   for (const it of body.items) {
     const produk = db.prepare('SELECT id, name FROM products WHERE id = ?').get(it.product_id);
@@ -293,15 +369,11 @@ const ubahPO = db.transaction((poId, body) => {
       );
     }
 
-    const sisa = r2(asal.qty - asal.qty_received);
-    if (r2(it.unit_cost) !== r2(asal.unit_cost) && sisa <= 0) {
-      throw httpError(
-        422,
-        `${namaAsal.name}: seluruhnya sudah diterima dengan harga ` +
-          `Rp ${asal.unit_cost.toLocaleString('id-ID')} dan sudah masuk HPP. ` +
-          'Harganya tidak bisa diubah dari sini — pakai Retur Pembelian atau koreksi stok.'
-      );
-    }
+    // Harganya BOLEH diubah walau barangnya sudah datang: yang dibetulkan
+    // adalah harga nota supplier. Persediaan dan HPP produk tidak disentuh —
+    // lihat sesuaikanSelisihHarga di atas.
+    const beda = r2(asal.qty_received * (r2(it.unit_cost) - r2(asal.unit_cost)));
+    if (Math.abs(beda) >= 0.01) perubahanHarga.set(asal.id, beda);
   }
 
   // Baris yang dihapus dari formulir: hanya boleh bila belum ada yang datang.
@@ -340,26 +412,45 @@ const ubahPO = db.transaction((poId, body) => {
     else tambah.run(poId, it.product_id, r2(it.qty), r2(it.unit_cost));
   }
 
+  // Baris yang barangnya sudah datang: selisih harga nota terhadap nilai yang
+  // sudah masuk persediaan dibukukan sebagai utang/pembayaran saja.
+  // Hanya baris yang harganya benar-benar diubah pada edit ini.
+  const poBaru = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(poId);
+  let selisihHarga = 0;
+  for (const [itemId, beda] of perubahanHarga) {
+    const item = db.prepare('SELECT * FROM purchase_items WHERE id = ?').get(itemId);
+    sesuaikanSelisihHarga(poBaru, item, userId, beda);
+    selisihHarga = r2(selisihHarga + beda);
+  }
+
   // Status selalu dihitung ulang, tidak disetel manual: menambah baris baru
   // pada pesanan yang sudah "Selesai" mengembalikannya menjadi "Sebagian".
   const items = db.prepare('SELECT qty, qty_received FROM purchase_items WHERE po_id = ?').all(poId);
   db.prepare('UPDATE purchase_orders SET status = ? WHERE id = ?').run(hitungStatus(items), poId);
 
-  return { adaPenerimaan };
+  return { adaPenerimaan, selisihHarga };
 });
 
 router.put('/:id(\\d+)', butuhIzin('pembelian.kelola'), ah((req, res) => {
   const id = Number(req.params.id);
   const body = parse(ubahPoSchema, req.body);
-  const hasil = ubahPO(id, body);
+  const hasil = ubahPO(id, body, req.user.id);
   const po = ambilPO(id);
+  const rp = (n) => `Rp ${Math.abs(n).toLocaleString('id-ID')}`;
 
   res.json({
     ok: true,
     po,
-    message: hasil.adaPenerimaan
-      ? `Pesanan ${po.po_no} diperbarui — perubahan harga hanya berlaku untuk barang yang belum datang`
-      : `Pesanan ${po.po_no} diperbarui`,
+    selisihHarga: hasil.selisihHarga,
+    message:
+      `Pesanan ${po.po_no} diperbarui` +
+      (hasil.adaPenerimaan
+        ? Math.abs(hasil.selisihHarga) >= 0.01
+          ? ` — harga nota barang yang sudah datang ${hasil.selisihHarga > 0 ? 'naik' : 'turun'} ` +
+            `${rp(hasil.selisihHarga)}, ${po.payment === 'CREDIT' ? 'utang supplier' : 'pembayarannya'} ` +
+            'ikut disesuaikan; HPP stok tidak berubah'
+          : ' — HPP stok yang sudah masuk tidak berubah'
+        : ''),
   });
 }));
 

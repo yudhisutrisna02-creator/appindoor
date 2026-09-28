@@ -56,6 +56,11 @@ const COA = [
 
   // ---------- HARGA POKOK ----------
   ['5000', 'Harga Pokok Penjualan (HPP)',    'EXPENSE', 'COGS', 'D', 'OCF', 0],
+  // Selisih antara harga nota supplier dan nilai yang sudah masuk persediaan.
+  // HPP produk disusun sendiri (harga + ongkir + pajak + label), jadi harga
+  // nota yang dibetulkan belakangan tidak boleh menggesernya — selisihnya
+  // dibukukan di sini, bukan di Persediaan.
+  ['5100', 'Selisih Harga Pembelian',        'EXPENSE', 'COGS', 'D', 'OCF', 0],
 
   // ---------- BIAYA PENJUALAN / CHANNEL ----------
   ['6000', 'Biaya Admin Marketplace',        'EXPENSE', 'SELLING', 'D', 'OCF', 0],
@@ -102,6 +107,7 @@ const ACC = {
   SALES_DISCOUNT: '4200',
   SHIPPING_INCOME: '4300',
   COGS: '5000',
+  PURCHASE_PRICE_DIFF: '5100',
   FEE_ADMIN: '6000',
   FEE_HANDLING: '6010',
   FEE_SHIPPING: '6020',

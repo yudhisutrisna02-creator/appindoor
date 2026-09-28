@@ -1093,15 +1093,20 @@ async function main() {
   check('jumlah tidak bisa diturunkan di bawah yang sudah diterima',
     tolakTurunQty === 422, `status ${tolakTurunQty}`);
 
-  let tolakUbahHarga = 0;
-  try {
-    await call('PUT', `/api/pembelian/${poUbah.id}`, {
-      order_date: today, partner_id: idSupplier, payment: 'CREDIT',
-      items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 99000 }],
-    });
-  } catch (err) { tolakUbahHarga = err.status; }
-  check('harga baris yang sudah diterima seluruhnya tidak bisa diubah',
-    tolakUbahHarga === 422, `status ${tolakUbahHarga}`);
+  const hppSblmNota = (await call('GET', `/api/inventory/products?q=${prodPO.sku}`)).products[0].cost;
+  const notaBaru = await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 99000 }],
+  });
+  const hppSsdhNota = (await call('GET', `/api/inventory/products?q=${prodPO.sku}`)).products[0].cost;
+  check('harga baris yang sudah diterima bisa dibetulkan tanpa menggeser HPP',
+    notaBaru.po.items[0].unit_cost === 99000 && near(hppSsdhNota, hppSblmNota, 0.01),
+    `HPP ${hppSblmNota} → ${hppSsdhNota}`);
+  // Dikembalikan supaya pemeriksaan sesudahnya berjalan dari keadaan semula.
+  await call('PUT', `/api/pembelian/${poUbah.id}`, {
+    order_date: today, partner_id: idSupplier, payment: 'CREDIT',
+    items: [{ id: idBarisSelesai, product_id: prodPO.id, qty: 12, unit_cost: 30000 }],
+  });
 
   let tolakHapusBaris = 0;
   try {
@@ -6594,6 +6599,84 @@ async function main() {
 
   const tb64 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
   check('neraca saldo tetap seimbang', tb64.balanced === true);
+
+
+  console.log('\n65. Harga pesanan pembelian dibetulkan tanpa menggeser HPP stok');
+
+  const cap65 = Date.now();
+  const sup65 = await call('POST', '/api/partners', {
+    name: `Supplier Harga Nota ${cap65}`, kind: 'SUPPLIER', phone: '0812000655', address: 'Jl. Uji 65',
+  });
+  const idSup65 = (sup65.partner || sup65).id;
+  const prod65 = (await call('POST', '/api/inventory/products', {
+    sku: `P65-${cap65}`, name: 'Produk Uji Harga Nota', cost: 0, price: 60000,
+  })).product;
+  const produk65 = async () => (await call('GET', `/api/inventory/products?q=P65-${cap65}`)).products[0];
+  const utang65 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((x) => x.id === idSup65) || {}).utang || 0);
+  };
+  const saldo65 = async (kode) => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+
+  const po65 = (await call('POST', '/api/pembelian', {
+    order_date: today, expected_date: today, partner_id: idSup65, payment: 'CREDIT',
+    items: [{ product_id: prod65.id, qty: 10, unit_cost: 20000 }],
+  })).po;
+  const item65 = po65.items[0].id;
+  await call('POST', `/api/pembelian/${po65.id}/terima`, {
+    receive_date: today, lines: [{ item_id: item65, qty: 10 }],
+  });
+
+  // HPP disusun sendiri oleh pemiliknya: harga pabrik + ongkir + label.
+  await call('PUT', `/api/inventory/products/${prod65.id}`, {
+    sku: prod65.sku, name: prod65.name, cost: 23500, price: 60000,
+  });
+  const persediaanSblm65 = await saldo65('1200');
+  // Akun selisih bisa sudah berisi dari pesanan lain; yang diperiksa perubahannya.
+  const selisihAwal65 = await saldo65('5100');
+  check('persiapan: utang Rp 200.000, HPP produk disusun Rp 23.500',
+    near(await utang65(), 200000, 1) && near((await produk65()).cost, 23500, 1),
+    `${await utang65()} · ${(await produk65()).cost}`);
+
+  // Nota supplier ternyata Rp 18.000/unit — harganya dibetulkan.
+  const ubah65 = await call('PUT', `/api/pembelian/${po65.id}`, {
+    order_date: today, expected_date: today, partner_id: idSup65, payment: 'CREDIT',
+    items: [{ id: item65, product_id: prod65.id, qty: 10, unit_cost: 18000 }],
+  });
+  check('harga barang yang sudah seluruhnya datang bisa diubah',
+    ubah65.po.items[0].unit_cost === 18000 && near(ubah65.selisihHarga, -20000, 1),
+    String(ubah65.message));
+  check('HPP produk yang sudah disusun tidak bergeser', near((await produk65()).cost, 23500, 1),
+    String((await produk65()).cost));
+  check('nilai persediaan di buku besar tidak berubah',
+    near(await saldo65('1200'), persediaanSblm65, 1), `${persediaanSblm65} → ${await saldo65('1200')}`);
+  check('utang supplier ikut harga nota yang baru', near(await utang65(), 180000, 1),
+    String(await utang65()));
+  check('selisihnya tercatat di akun Selisih Harga Pembelian',
+    near((await saldo65('5100')) - selisihAwal65, -20000, 1), String((await saldo65('5100')) - selisihAwal65));
+
+  // Diubah lagi: penyesuaiannya ditulis ulang, bukan menumpuk.
+  await call('PUT', `/api/pembelian/${po65.id}`, {
+    order_date: today, expected_date: today, partner_id: idSup65, payment: 'CREDIT',
+    items: [{ id: item65, product_id: prod65.id, qty: 10, unit_cost: 21000 }],
+  });
+  check('mengubah harga berkali-kali tidak menumpuk penyesuaian',
+    near(await utang65(), 210000, 1) && near((await saldo65('5100')) - selisihAwal65, 10000, 1),
+    `utang ${await utang65()} · selisih ${(await saldo65('5100')) - selisihAwal65}`);
+
+  // Kembali ke harga awal: penyesuaiannya hilang sama sekali.
+  await call('PUT', `/api/pembelian/${po65.id}`, {
+    order_date: today, expected_date: today, partner_id: idSup65, payment: 'CREDIT',
+    items: [{ id: item65, product_id: prod65.id, qty: 10, unit_cost: 20000 }],
+  });
+  check('kembali ke harga awal menghapus penyesuaiannya',
+    near(await utang65(), 200000, 1) && near((await saldo65('5100')) - selisihAwal65, 0, 1));
+  const tb65 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb65.balanced === true);
 
 
   // ---------- Hasil ----------
