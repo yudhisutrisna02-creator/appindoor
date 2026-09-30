@@ -643,6 +643,25 @@ bertahap dengan harga berbeda sah punya rata-rata yang tidak sama dengan harga
 terakhirnya, dan membandingkan keduanya menciptakan selisih yang tidak pernah
 diminta.
 
+### Pre-Order / Booking Stok & Penerimaan Barang (GRN)
+
+**Booking** (`purchase_bookings` + `purchase_booking_items`, nomor PB/YYYY-MM/NNNN)
+mengunci jumlah di pabrik tanpa stok dan tanpa jurnal. `POST /api/booking/:id/panggil`
+membuat pesanan pembelian biasa lewat `buatPO`, tiap barisnya menunjuk
+`purchase_items.booking_item_id`, dan `geserJatahBooking()` menaikkan
+`qty_called` (ditolak bila melebihi sisa). Batal PO, hapus/ubah jumlah baris PO
+yang berasal dari booking menggeser jatahnya kembali. Status booking dihitung
+ulang (AKTIF → SELESAI saat habis dipanggil; BATAL manual). Monitoring
+`GET /api/booking/stok-pabrik`: sisa di pabrik = dibooking − dipanggil (booking
+aktif), dalam perjalanan = dipanggil − diterima, total tersedia = stok gudang +
+dalam perjalanan + sisa di pabrik.
+
+**GRN** (`goods_receipts` + `goods_receipt_items`, nomor GRN/YYYY-MM/NNNN):
+`terimaBarang()` kini selalu menulis GRN — juga dari tombol Terima biasa — dengan
+qty diterima baik, qty ditolak (tidak masuk stok, tidak mengurangi sisa PO),
+no. surat jalan supplier, dan penerima. `GET /api/grn/menunggu`, riwayat,
+detail, dan PDF bukti penerimaan dengan tiga kolom tanda tangan.
+
 ### Cara bayar & rekening pesanan pembelian
 
 Transfer bank WAJIB menyebut rekeningnya (`cash_code`, harus akun kas);
@@ -981,7 +1000,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 955 pemeriksaan, 66 bagian
+npm run smoke            # 973 pemeriksaan, 67 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

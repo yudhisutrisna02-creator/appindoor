@@ -6771,6 +6771,116 @@ async function main() {
   check('neraca saldo tetap seimbang', tb66.balanced === true);
 
 
+  console.log('\n67. Booking stok di pabrik & penerimaan barang (GRN)');
+
+  const cap67 = Date.now();
+  const sup67 = await call('POST', '/api/partners', {
+    name: `Pabrik Booking ${cap67}`, kind: 'SUPPLIER', phone: '0812000677', address: 'Jl. Pabrik 67',
+  });
+  const idSup67 = (sup67.partner || sup67).id;
+  const prod67 = (await call('POST', '/api/inventory/products', {
+    sku: `P67-${cap67}`, name: 'GMN Tricoderma 1 KG Uji', unit: 'KG', cost: 0, price: 40000,
+  })).product;
+  const stok67 = async () => (await call('GET', `/api/inventory/products?q=P67-${cap67}`)).products[0].stock;
+  const utang67 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((x) => x.id === idSup67) || {}).utang || 0);
+  };
+
+  // ---- A. Booking 1.500 kg: stok terkunci di pabrik, tanpa stok & tanpa utang ----
+  const bk67 = (await call('POST', '/api/booking', {
+    partner_id: idSup67, booking_date: today, note: 'Booking musim tanam',
+    items: [{ product_id: prod67.id, qty: 1500, unit_cost: 22000 }],
+  })).booking;
+  check('booking tersimpan dengan nomor PB/', /^PB\//.test(bk67.booking_no) && bk67.status === 'AKTIF',
+    bk67.booking_no);
+  check('booking tidak menambah stok gudang dan tidak membentuk utang',
+    (await stok67()) === 0 && near(await utang67(), 0, 1));
+  const pabrik67 = (await call('GET', '/api/booking/stok-pabrik')).rows.find((r) => r.product_id === prod67.id);
+  check('stok di pabrik terpantau 1.500', !!pabrik67 && near(pabrik67.sisa_pabrik, 1500, 0.01),
+    JSON.stringify(pabrik67));
+
+  // ---- B. Panggil 500 kg: jadi pesanan pembelian, sisa di pabrik 1.000 ----
+  const bi67 = bk67.items[0].id;
+  const panggil67 = await call('POST', `/api/booking/${bk67.id}/panggil`, {
+    order_date: today, payment: 'CREDIT', lines: [{ booking_item_id: bi67, qty: 500 }],
+  });
+  check('panggilan menjadi pesanan pembelian berharga booking',
+    /^PO\//.test(panggil67.po.po_no) && panggil67.po.items[0].qty === 500
+      && panggil67.po.items[0].unit_cost === 22000, JSON.stringify(panggil67.po.items[0]));
+  const pabrik67b = (await call('GET', '/api/booking/stok-pabrik')).rows.find((r) => r.product_id === prod67.id);
+  check('sisa di pabrik 1.000, dalam perjalanan 500',
+    near(pabrik67b.sisa_pabrik, 1000, 0.01) && near(pabrik67b.dalam_perjalanan, 500, 0.01),
+    JSON.stringify({ s: pabrik67b.sisa_pabrik, j: pabrik67b.dalam_perjalanan }));
+
+  let tolakLebih67 = 0;
+  try {
+    await call('POST', `/api/booking/${bk67.id}/panggil`, {
+      order_date: today, payment: 'CREDIT', lines: [{ booking_item_id: bi67, qty: 1200 }],
+    });
+  } catch (err) { tolakLebih67 = err.status; }
+  check('memanggil melebihi sisa di pabrik ditolak', tolakLebih67 === 422, `status ${tolakLebih67}`);
+
+  // ---- C. GRN: 480 diterima baik, 20 ditolak ----
+  const po67 = panggil67.po;
+  const menunggu67 = await call('GET', '/api/grn/menunggu');
+  check('pesanan hasil panggilan muncul di daftar penerimaan',
+    menunggu67.rows.some((r) => r.id === po67.id && near(r.sisa, 500, 0.01)));
+  const grn67 = await call('POST', '/api/grn', {
+    po_id: po67.id, receive_date: today, delivery_note_no: `SJ-${cap67}`, received_by: 'Tim Gudang',
+    lines: [{ item_id: po67.items[0].id, qty: 480, qty_rejected: 20, note: 'kemasan sobek' }],
+  });
+  check('GRN bernomor tersimpan dengan yang diterima & ditolak',
+    /^GRN\//.test(grn67.grn.grn_no) && near(grn67.grn.total_diterima, 480, 0.01)
+      && near(grn67.grn.total_ditolak, 20, 0.01), grn67.message);
+  check('stok gudang bertambah hanya yang diterima baik', (await stok67()) === 480, String(await stok67()));
+  check('utang supplier terbentuk sebesar yang diterima', near(await utang67(), 480 * 22000, 1),
+    String(await utang67()));
+  const poSstlh67 = (await call('GET', `/api/pembelian/${po67.id}`)).po;
+  check('pesanan terpotong: sisa 20 masih ditunggu', poSstlh67.status === 'SEBAGIAN'
+    && near(poSstlh67.items[0].qty - poSstlh67.items[0].qty_received, 20, 0.01), poSstlh67.status);
+
+  const pdf67 = await ambilBerkas(`/api/grn/${grn67.grn.id}/pdf`);
+  check('bukti penerimaan barang bisa dicetak sebagai PDF',
+    pdf67.res.ok && pdf67.buf.slice(0, 4).toString() === '%PDF');
+
+  // Tombol Terima biasa pun meninggalkan GRN.
+  const terima67 = await call('POST', `/api/pembelian/${po67.id}/terima`, {
+    receive_date: today, lines: [{ item_id: po67.items[0].id, qty: 20 }],
+  });
+  check('tombol Terima di Pesanan Pembelian juga menghasilkan GRN', /^GRN\//.test(terima67.grn_no || ''));
+  const riwayat67 = await call('GET', `/api/grn?from=${today}&to=${today}&q=${encodeURIComponent(po67.po_no)}`);
+  check('riwayat GRN mencatat kedua kedatangan', riwayat67.rows.length === 2, String(riwayat67.rows.length));
+
+  // ---- D. Batal pesanan panggilan → jatah kembali ke pabrik ----
+  const panggil67b = await call('POST', `/api/booking/${bk67.id}/panggil`, {
+    order_date: today, payment: 'CREDIT', lines: [{ booking_item_id: bi67, qty: 300 }],
+  });
+  await call('PATCH', `/api/pembelian/${panggil67b.po.id}/batal`);
+  const bkLagi67 = (await call('GET', `/api/booking/${bk67.id}`)).booking;
+  check('membatalkan pesanan panggilan mengembalikan jatahnya ke pabrik',
+    near(bkLagi67.items[0].sisa_pabrik, 1000, 0.01), String(bkLagi67.items[0].sisa_pabrik));
+
+  // ---- E. Ubah booking: tidak boleh di bawah yang sudah dipanggil ----
+  let tolakTurun67 = 0;
+  try {
+    await call('PUT', `/api/booking/${bk67.id}`, {
+      partner_id: idSup67, booking_date: today,
+      items: [{ id: bi67, product_id: prod67.id, qty: 400, unit_cost: 22000 }],
+    });
+  } catch (err) { tolakTurun67 = err.status; }
+  check('booking tidak bisa diturunkan di bawah yang sudah dipanggil', tolakTurun67 === 422);
+
+  // ---- F. Izin ----
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  const bolehLihat67 = await call('GET', '/api/booking/stok-pabrik');
+  check('tim gudang bisa memantau stok di pabrik', Array.isArray(bolehLihat67.rows));
+  token = adminAkun;
+
+  const tb67 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb67.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket, UsersRound, Wrench,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket, UsersRound, Wrench, Factory, PackageOpen,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -35,6 +35,8 @@ import Rekonsiliasi from './pages/Rekonsiliasi';
 import SaranBeli from './pages/SaranBeli';
 import Pelanggan from './pages/Pelanggan';
 import ReturBeli from './pages/ReturBeli';
+import BookingStok from './pages/BookingStok';
+import PenerimaanBarang from './pages/PenerimaanBarang';
 import UtangPiutang from './pages/UtangPiutang';
 import Mitra from './pages/Mitra';
 import Retur from './pages/Retur';
@@ -96,7 +98,9 @@ const NAV = [
     key: 'pembelian',
     items: [
       { to: '/pembelian/saran', label: 'Saran Pembelian', icon: ShoppingBasket, izin: 'pembelian.lihat' },
+      { to: '/pembelian/booking', label: 'Pre-Order / Booking Stok', icon: Factory, izin: 'pembelian.lihat' },
       { to: '/pembelian', label: 'Pesanan Pembelian', icon: PackageCheck, izin: 'pembelian.lihat' },
+      { to: '/pembelian/penerimaan', label: 'Penerimaan Barang (GRN)', icon: PackageOpen, izin: 'pembelian.lihat' },
       { to: '/pembelian/retur', label: 'Retur Pembelian', icon: Undo2, izin: 'pembelian.lihat' },
     ],
   },
@@ -487,6 +491,8 @@ export default function App() {
         <Route path="/keuangan/rekonsiliasi" element={<Dijaga izin="keuangan.kas"><Rekonsiliasi /></Dijaga>} />
         <Route path="/pembelian/saran" element={<Dijaga izin="pembelian.lihat"><SaranBeli /></Dijaga>} />
         <Route path="/pembelian/retur" element={<Dijaga izin="pembelian.lihat"><ReturBeli /></Dijaga>} />
+        <Route path="/pembelian/booking" element={<Dijaga izin="pembelian.lihat"><BookingStok /></Dijaga>} />
+        <Route path="/pembelian/penerimaan" element={<Dijaga izin="pembelian.lihat"><PenerimaanBarang /></Dijaga>} />
         <Route path="/penjualan/pelanggan" element={<Dijaga izin="penjualan.lihat"><Pelanggan /></Dijaga>} />
         <Route path="/keuangan/utang-piutang" element={<Dijaga izin="keuangan.lihat"><UtangPiutang /></Dijaga>} />
         <Route path="/keuangan/laporan" element={<Dijaga izin="keuangan.lihat"><LaporanKeuangan /></Dijaga>} />

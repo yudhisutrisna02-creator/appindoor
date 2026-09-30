@@ -363,6 +363,82 @@ function selaraskanWaktuRiwayat(db, applied) {
 }
 
 /**
+ * Pre-order / booking stok ke pabrik, dan bukti penerimaan barang (GRN).
+ *
+ * Booking mengunci jumlah di pabrik tanpa barang berpindah dan tanpa utang:
+ * yang dibukukan baru pesanan pembelian yang "dipanggil" dari booking itu
+ * (purchase_items.booking_item_id), dan barulah penerimaannya yang menambah
+ * stok. Sisa booking dikurangi yang sudah dipanggil = stok yang masih
+ * tersimpan di pabrik.
+ *
+ * GRN mencatat setiap kedatangan barang sebagai dokumen bernomor — berapa yang
+ * diterima baik, berapa yang ditolak, siapa yang memeriksa, surat jalan
+ * supplier mana — supaya penerimaan bisa ditelusuri, bukan hanya angkanya.
+ */
+function buatTabelBookingGrn(db, applied) {
+  if (!tableExists(db, 'purchase_bookings')) {
+    db.exec(`
+      CREATE TABLE purchase_bookings (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        booking_no   TEXT NOT NULL UNIQUE,
+        booking_date TEXT NOT NULL,
+        valid_until  TEXT,
+        partner_id   INTEGER NOT NULL REFERENCES partners(id),
+        status       TEXT NOT NULL DEFAULT 'AKTIF',
+        note         TEXT,
+        user_id      INTEGER REFERENCES users(id),
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_booking_partner ON purchase_bookings(partner_id);
+      CREATE INDEX idx_booking_status  ON purchase_bookings(status);
+
+      CREATE TABLE purchase_booking_items (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        booking_id INTEGER NOT NULL REFERENCES purchase_bookings(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        qty        REAL NOT NULL,
+        unit_cost  REAL NOT NULL DEFAULT 0,
+        qty_called REAL NOT NULL DEFAULT 0
+      );
+      CREATE INDEX idx_booking_item_booking ON purchase_booking_items(booking_id);
+    `);
+    applied.push('tabel purchase_bookings & purchase_booking_items');
+  }
+
+  if (!tableExists(db, 'goods_receipts')) {
+    db.exec(`
+      CREATE TABLE goods_receipts (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        grn_no           TEXT NOT NULL UNIQUE,
+        receive_date     TEXT NOT NULL,
+        po_id            INTEGER NOT NULL REFERENCES purchase_orders(id),
+        delivery_note_no TEXT,
+        received_by      TEXT,
+        note             TEXT,
+        user_id          INTEGER REFERENCES users(id),
+        created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_grn_po   ON goods_receipts(po_id);
+      CREATE INDEX idx_grn_date ON goods_receipts(receive_date);
+
+      CREATE TABLE goods_receipt_items (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        grn_id       INTEGER NOT NULL REFERENCES goods_receipts(id) ON DELETE CASCADE,
+        po_item_id   INTEGER NOT NULL REFERENCES purchase_items(id),
+        product_id   INTEGER NOT NULL REFERENCES products(id),
+        qty_received REAL NOT NULL DEFAULT 0,
+        qty_rejected REAL NOT NULL DEFAULT 0,
+        note         TEXT
+      );
+      CREATE INDEX idx_grn_item_grn ON goods_receipt_items(grn_id);
+    `);
+    applied.push('tabel goods_receipts & goods_receipt_items');
+  }
+
+  addColumn(db, 'purchase_items', 'booking_item_id', 'INTEGER REFERENCES purchase_booking_items(id)', applied);
+}
+
+/**
  * Rekening penampung marketplace: BANK MP INDOOR.
  *
  * Dana pencairan marketplace hampir tidak pernah sama persis dengan nilai
@@ -646,6 +722,7 @@ function runMigrations(db) {
   addColumn(db, 'attendance', 'izin_oleh', 'INTEGER', applied);
   addColumn(db, 'attendance', 'izin_at', 'TEXT', applied);
 
+  buatTabelBookingGrn(db, applied);
   siapkanRekeningMarketplace(db, applied);
 
   return applied;

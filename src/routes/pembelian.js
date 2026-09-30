@@ -405,6 +405,38 @@ function pindahkanAkunLawan(po, lama, baru) {
   return pindah;
 }
 
+/**
+ * Menggeser jumlah yang sudah dipanggil dari satu baris booking.
+ *
+ * Positif = bertambah dipanggil (stok di pabrik berkurang). Tidak boleh
+ * melampaui jumlah booking, dan tidak boleh di bawah nol. Status bookingnya
+ * dihitung ulang: habis dipanggil berarti Selesai.
+ */
+function geserJatahBooking(bookingItemId, delta) {
+  if (Math.abs(delta) < 0.0001) return;
+  const b = db.prepare('SELECT * FROM purchase_booking_items WHERE id = ?').get(bookingItemId);
+  if (!b) return;
+  const baru = r2(b.qty_called + delta);
+  if (baru > b.qty + 0.0001) {
+    const pr = db.prepare('SELECT name, unit FROM products WHERE id = ?').get(b.product_id);
+    throw httpError(
+      422,
+      `${pr.name}: sisa booking di pabrik tinggal ${r2(b.qty - b.qty_called)} ${pr.unit}, ` +
+        `tidak cukup untuk ${r2(delta)} ${pr.unit}`
+    );
+  }
+  db.prepare('UPDATE purchase_booking_items SET qty_called = ? WHERE id = ?').run(Math.max(0, baru), b.id);
+  hitungStatusBooking(b.booking_id);
+}
+
+function hitungStatusBooking(bookingId) {
+  const bk = db.prepare('SELECT status FROM purchase_bookings WHERE id = ?').get(bookingId);
+  if (!bk || bk.status === 'BATAL') return;
+  const items = db.prepare('SELECT qty, qty_called FROM purchase_booking_items WHERE booking_id = ?').all(bookingId);
+  const habis = items.length > 0 && items.every((i) => i.qty_called >= i.qty - 0.0001);
+  db.prepare('UPDATE purchase_bookings SET status = ? WHERE id = ?').run(habis ? 'SELESAI' : 'AKTIF', bookingId);
+}
+
 const ubahPO = db.transaction((poId, body, userId) => {
   const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(poId);
   if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');
@@ -473,9 +505,21 @@ const ubahPO = db.transaction((poId, body, userId) => {
     if (Math.abs(beda) >= 0.01) perubahanHarga.set(asal.id, beda);
   }
 
+  // Baris yang dipanggil dari booking: perubahan jumlahnya menggeser jatah
+  // booking yang sudah terpakai, dan tidak boleh melampaui sisa bookingnya.
+  for (const it of body.items) {
+    const asal = it.id ? petaLama.get(it.id) : null;
+    if (!asal || !asal.booking_item_id) continue;
+    if (it.product_id !== asal.product_id) {
+      throw httpError(422, 'Barang dari booking tidak bisa diganti — panggil ulang dari booking bila keliru');
+    }
+    geserJatahBooking(asal.booking_item_id, r2(it.qty) - r2(asal.qty));
+  }
+
   // Baris yang dihapus dari formulir: hanya boleh bila belum ada yang datang.
   for (const asal of lama) {
     if (dipakai.has(asal.id)) continue;
+    if (asal.booking_item_id && asal.qty_received <= 0) geserJatahBooking(asal.booking_item_id, -asal.qty);
     if (asal.qty_received > 0) {
       const p = db.prepare('SELECT name, unit FROM products WHERE id = ?').get(asal.product_id);
       throw httpError(
@@ -560,9 +604,22 @@ router.get('/:id(\\d+)', butuhIzin('pembelian.lihat'), ah((req, res) => {
 
 const terimaSchema = z.object({
   receive_date: tanggal.default(() => todayLocal()),
+  // Keterangan dokumen penerimaan (GRN). Semuanya pilihan: penerimaan cepat
+  // dari tombol Terima tetap sah tanpa diisi.
+  delivery_note_no: z.string().trim().max(60).optional().nullable(),
+  received_by: z.string().trim().max(80).optional().nullable(),
+  note: z.string().trim().max(300).optional().nullable(),
   lines: z
-    .array(z.object({ item_id: z.number().int().positive(), qty: z.number().positive() }))
-    .min(1, 'tidak ada barang yang diterima'),
+    .array(z.object({
+      item_id: z.number().int().positive(),
+      qty: z.number().nonnegative(),
+      // Barang yang datang tetapi ditolak (rusak, salah kirim): dicatat di GRN,
+      // tidak masuk stok, dan tidak mengurangi sisa pesanan.
+      qty_rejected: z.number().nonnegative().default(0),
+      note: z.string().trim().max(200).optional().nullable(),
+    }))
+    .min(1, 'tidak ada barang yang diterima')
+    .refine((l) => l.some((x) => x.qty > 0 || x.qty_rejected > 0), 'isi jumlah yang diterima atau ditolak'),
 });
 
 /**
@@ -579,9 +636,12 @@ const terimaBarang = db.transaction((poId, body, userId) => {
   if (po.status === 'SELESAI') throw httpError(409, 'Pesanan sudah diterima seluruhnya');
 
   let diterima = 0;
+  const barisGrn = [];
   for (const l of body.lines) {
     const item = db.prepare('SELECT * FROM purchase_items WHERE id = ? AND po_id = ?').get(l.item_id, poId);
     if (!item) throw httpError(404, `Baris ${l.item_id} bukan bagian dari pesanan ini`);
+    barisGrn.push({ item, l });
+    if (!(l.qty > 0)) continue; // hanya penolakan — tidak ada yang masuk stok
 
     const sisa = r2(item.qty - item.qty_received);
     if (l.qty > sisa + 0.001) {
@@ -622,7 +682,28 @@ const terimaBarang = db.transaction((poId, body, userId) => {
   const status = hitungStatus(items);
   db.prepare('UPDATE purchase_orders SET status = ? WHERE id = ?').run(status, poId);
 
-  return { diterima, status };
+  // Setiap kedatangan menjadi satu dokumen GRN bernomor — juga dari tombol
+  // Terima biasa — supaya tidak ada barang masuk yang tidak bisa ditelusuri.
+  const grnNo = nextNumber('GRN', body.receive_date.slice(0, 7));
+  const grn = db
+    .prepare(
+      `INSERT INTO goods_receipts (grn_no, receive_date, po_id, delivery_note_no, received_by, note, user_id)
+       VALUES (?,?,?,?,?,?,?)`
+    )
+    .run(
+      grnNo, body.receive_date, poId, body.delivery_note_no || null,
+      body.received_by || null, body.note || null, userId
+    );
+  const tulisBaris = db.prepare(
+    `INSERT INTO goods_receipt_items (grn_id, po_item_id, product_id, qty_received, qty_rejected, note)
+     VALUES (?,?,?,?,?,?)`
+  );
+  for (const { item, l } of barisGrn) {
+    if (!(l.qty > 0) && !(l.qty_rejected > 0)) continue;
+    tulisBaris.run(grn.lastInsertRowid, item.id, item.product_id, r2(l.qty), r2(l.qty_rejected || 0), l.note || null);
+  }
+
+  return { diterima, status, grn_id: grn.lastInsertRowid, grn_no: grnNo };
 });
 
 // ==================================================================
@@ -732,7 +813,9 @@ router.post('/:id(\\d+)/terima', butuhIzin('pembelian.kelola'), ah((req, res) =>
   const hasil = terimaBarang(Number(req.params.id), body, req.user.id);
   res.json({
     ok: true,
-    message: `${hasil.diterima} barang diterima — pesanan kini ${STATUS[hasil.status] || hasil.status}`,
+    message: `${hasil.grn_no}: ${hasil.diterima} barang diterima — pesanan kini ${STATUS[hasil.status] || hasil.status}`,
+    grn_id: hasil.grn_id,
+    grn_no: hasil.grn_no,
     po: ambilPO(Number(req.params.id)),
   });
 }));
@@ -956,7 +1039,13 @@ router.patch('/:id(\\d+)/batal', butuhIzin('pembelian.kelola'), ah((req, res) =>
     );
   }
 
-  db.prepare("UPDATE purchase_orders SET status = 'BATAL' WHERE id = ?").run(po.id);
+  db.transaction(() => {
+    // Jatah booking yang dipakai pesanan ini kembali tersedia di pabrik.
+    for (const it of db.prepare('SELECT * FROM purchase_items WHERE po_id = ? AND booking_item_id IS NOT NULL').all(po.id)) {
+      geserJatahBooking(it.booking_item_id, -it.qty);
+    }
+    db.prepare("UPDATE purchase_orders SET status = 'BATAL' WHERE id = ?").run(po.id);
+  })();
   res.json({ ok: true, message: `Pesanan ${po.po_no} dibatalkan` });
 }));
 
@@ -994,3 +1083,10 @@ module.exports = router;
 // Dipakai ulang oleh Pusat Perhatian supaya angka peringatannya tidak pernah
 // berbeda dari angka yang tampil di menu ini sendiri.
 module.exports.daftar = daftar;
+module.exports.buatPO = buatPO;
+module.exports.terimaBarang = terimaBarang;
+module.exports.terimaSchema = terimaSchema;
+module.exports.ambilPO = ambilPO;
+module.exports.geserJatahBooking = geserJatahBooking;
+module.exports.hitungStatusBooking = hitungStatusBooking;
+module.exports.STATUS = STATUS;
