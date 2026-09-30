@@ -173,6 +173,8 @@ app.use('/api/retur-beli', halaman('pembelian.lihat'), require('./src/routes/ret
 app.use('/api/booking', halaman('pembelian.lihat'), require('./src/routes/booking'));
 app.use('/api/grn', halaman('pembelian.lihat'), require('./src/routes/grn'));
 app.use('/api/kasir', halaman('penjualan.kasir'), require('./src/routes/kasir'));
+app.use('/api/surat-jalan', halaman('penjualan.suratjalan', 'penjualan.faktur'), require('./src/routes/surat-jalan'));
+app.use('/api/faktur', halaman('penjualan.faktur'), require('./src/routes/faktur'));
 app.use('/api/perbaikan', halaman('gudang.lihat'), require('./src/routes/perbaikan'));
 app.use('/api/partners', halaman('mitra.lihat'), require('./src/routes/partners').router);
 app.use('/api/cashflow', halaman('keuangan.lihat'), require('./src/routes/cashflow'));

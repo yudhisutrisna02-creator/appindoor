@@ -679,6 +679,35 @@ selisih dengan hitungan fisik dijurnal (sumber KASIR) ke 8200 Selisih Kas
 Kasir; setoran ke bank dicatat sebagai jurnal TRANSFER. Halaman Sesi Kasir
 merekap per cara bayar, selisih, dan setoran untuk rentang tanggal.
 
+### Surat Jalan & Faktur Penjualan
+
+Keduanya DOKUMEN, bukan transaksi — tidak ada jurnal dan stok tidak disentuh
+(ordernya sudah membukukan semuanya). Baris menyimpan salinan nama/satuan/harga.
+
+**Surat Jalan** (`/api/surat-jalan`, izin `penjualan.suratjalan` — juga untuk
+tim gudang karena tanpa harga): `delivery_orders` + `delivery_order_items`,
+nomor `nextNumber('GI/DO', 'YYYY/MM')` → GI/DO/YYYY/MM/XXXX. Dibuat dari order
+POSTED; boleh bertahap — sisa kirim dihitung per PRODUK (baris order bisa
+ditulis ulang saat order diubah) dikurangi surat jalan non-BATAL. Penerima &
+alamat bawaan dari buyer_* order lalu data mitra. Status DIKIRIM → DITERIMA
+(tgl + penerima) / BATAL. Tidak bisa diubah/dibatalkan setelah difakturkan.
+PDF resmi `dokumenPdf({resmi:true})` → `pdfKopResmi`: logo 58px, nama hijau,
+tagline, alamat, telp, email, NPWP, garis ganda, judul di tengah; tiga kolom
+tanda tangan (Pengirim / Sopir / Penerima).
+
+**Faktur** (`/api/faktur`, izin `penjualan.faktur`): `sales_invoices` +
+`sales_invoice_items`, nomor GI/INV/YYYY/MM/XXXX. Ditarik dari satu atau
+beberapa surat jalan order yang sama (`delivery_orders.invoice_id`; satu SJ
+ditagih sekali, faktur BATAL melepasnya). Harga = rata-rata tertimbang
+sales_items per produk. Diskon & ongkir (shipping_non_mp) order dibawa hanya
+pada faktur pertama order itu. Jatuh tempo: order.due_date → term_days mitra
+→ setting `faktur_tempo_hari` (14). Status bayar dibaca dari
+order.payment_status (LUNAS / BELUM / JATUH_TEMPO / BATAL). PDF memuat
+terbilang (`utils/terbilang.js`), rekening (setting `faktur_rekening` atau
+akun cash_code order), `faktur_catatan`, dan QR tanda tangan digital
+KIND.FAKTUR (isiDokumen: status bayar tidak ikut disidik, pembatalan ikut).
+Pengaturan → "Faktur Penjualan & Struk Kasir" mengisi keempat setting itu.
+
 ### Cara bayar & rekening pesanan pembelian
 
 Transfer bank WAJIB menyebut rekeningnya (`cash_code`, harus akun kas);
@@ -1017,7 +1046,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 997 pemeriksaan, 68 bagian
+npm run smoke            # 1028 pemeriksaan, 69 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

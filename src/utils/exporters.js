@@ -138,6 +138,63 @@ function pdfKop(doc, { perusahaan, judul, subjudul }) {
   doc.moveDown(0.5);
 }
 
+/**
+ * Kop surat resmi untuk dokumen yang keluar ke pihak lain (surat jalan, faktur).
+ *
+ * Berbeda dari kop laporan: logo lebih besar, alamat dan kontak perusahaan ikut
+ * dicetak, lalu garis ganda memisahkan kop dari isi — bentuk yang lazim pada
+ * surat resmi. Judul dokumen dicetak di tengah di bawah garis.
+ */
+function pdfKopResmi(doc, { perusahaan, judul, subjudul }) {
+  const kiri = doc.page.margins.left;
+  const ruang = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const atas = doc.y;
+  let x = kiri;
+
+  try {
+    const nama = getSetting('company_logo', '');
+    if (nama) {
+      const berkas = path.join(UPLOAD_DIR, path.basename(nama));
+      if (fs.existsSync(berkas)) {
+        doc.image(berkas, kiri, atas, { fit: [58, 58] });
+        x = kiri + 70;
+      }
+    }
+  } catch {
+    /* logo tidak terbaca — kop tetap dicetak tanpa gambar */
+  }
+
+  const lebar = ruang - (x - kiri);
+  doc.font('Helvetica-Bold').fontSize(16).fillColor('#14532D')
+    .text(perusahaan || 'Perusahaan', x, atas + 2, { width: lebar });
+  const tagline = getSetting('company_tagline', '');
+  if (tagline) doc.font('Helvetica-Oblique').fontSize(8.5).fillColor('#475569').text(tagline, x, doc.y, { width: lebar });
+  const alamat = getSetting('company_address', '');
+  if (alamat) doc.font('Helvetica').fontSize(8.5).fillColor('#334155').text(alamat, x, doc.y + 1, { width: lebar });
+  const kontak = [
+    getSetting('company_phone', '') && `Telp/WA: ${getSetting('company_phone', '')}`,
+    getSetting('company_email', '') && `Email: ${getSetting('company_email', '')}`,
+    getSetting('company_tax_id', '') && `NPWP: ${getSetting('company_tax_id', '')}`,
+  ].filter(Boolean).join('   ');
+  if (kontak) doc.font('Helvetica').fontSize(8.5).fillColor('#334155').text(kontak, x, doc.y, { width: lebar });
+
+  const garis = Math.max(doc.y, atas + 60) + 6;
+  doc.moveTo(kiri, garis).lineTo(kiri + ruang, garis).strokeColor('#14532D').lineWidth(1.6).stroke();
+  doc.moveTo(kiri, garis + 3).lineTo(kiri + ruang, garis + 3).strokeColor('#14532D').lineWidth(0.5).stroke();
+
+  doc.y = garis + 14;
+  if (judul) {
+    doc.font('Helvetica-Bold').fontSize(14).fillColor('#0F172A')
+      .text(judul, kiri, doc.y, { width: ruang, align: 'center', characterSpacing: 1 });
+  }
+  if (subjudul) {
+    doc.font('Helvetica').fontSize(9).fillColor('#475569')
+      .text(subjudul, kiri, doc.y, { width: ruang, align: 'center' });
+  }
+  doc.fillColor('#0F172A');
+  doc.moveDown(0.8);
+}
+
 /** Membungkus PDFKit menjadi Promise<Buffer>. */
 function renderPdf(build, options = {}) {
   return new Promise((resolve, reject) => {
@@ -396,7 +453,7 @@ function dokumenPdf(dokumen, { perusahaan } = {}) {
     daftar.forEach((d, i) => {
       if (i > 0) doc.addPage();
 
-      pdfKop(doc, { perusahaan, judul: d.judul, subjudul: d.subjudul });
+      (d.resmi ? pdfKopResmi : pdfKop)(doc, { perusahaan, judul: d.judul, subjudul: d.subjudul });
 
       // Nomor dokumen dan keterangan pokoknya, berdampingan.
       const atas = doc.y;
@@ -466,6 +523,12 @@ function dokumenPdf(dokumen, { perusahaan } = {}) {
               x + lebarKa * 0.55, y, { width: lebarKa * 0.45, align: 'right' });
           doc.y = Math.max(doc.y, y) + (tebal ? 4 : 1);
         }
+        doc.moveDown(0.5);
+      }
+
+      if (d.terbilang) {
+        doc.font('Helvetica-Oblique').fontSize(9).fillColor('#0F172A')
+          .text(`Terbilang: ${d.terbilang}`, kiri, doc.y, { width: ruang });
         doc.moveDown(0.5);
       }
 

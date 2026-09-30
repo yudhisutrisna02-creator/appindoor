@@ -133,6 +133,22 @@ function AppSettings({ isAdmin }) {
       </Field>
 
       <div className="sm:col-span-2 mt-2 border-t border-slate-200 pt-4">
+        <h2 className="card-title">Faktur Penjualan & Struk Kasir</h2>
+      </div>
+      <Field label="Rekening pembayaran di faktur" hint="mis. BCA 123-456-7890 a.n. Grha Indonesia Organik. Kosong = rekening penerima order" className="sm:col-span-2">
+        <input className="input" maxLength={200} value={settings.faktur_rekening || ''} onChange={set('faktur_rekening')} disabled={!isAdmin} />
+      </Field>
+      <Field label="Tempo faktur bawaan (hari)" hint="Dipakai bila order & pelanggan tidak punya jatuh tempo">
+        <input type="number" min="0" className="input" placeholder="14" value={settings.faktur_tempo_hari || ''} onChange={set('faktur_tempo_hari')} disabled={!isAdmin} />
+      </Field>
+      <Field label="Catatan kaki struk kasir">
+        <input className="input" maxLength={200} placeholder="Terima kasih atas kunjungan Anda" value={settings.kasir_catatan_struk || ''} onChange={set('kasir_catatan_struk')} disabled={!isAdmin} />
+      </Field>
+      <Field label="Catatan di faktur" hint="mis. syarat pembayaran atau garansi" className="sm:col-span-2">
+        <input className="input" maxLength={400} value={settings.faktur_catatan || ''} onChange={set('faktur_catatan')} disabled={!isAdmin} />
+      </Field>
+
+      <div className="sm:col-span-2 mt-2 border-t border-slate-200 pt-4">
         <h2 className="card-title">Jam Kerja & Presensi</h2>
       </div>
       <Field label="Jam Masuk (HH:mm)" hint="Dasar kalkulasi keterlambatan">

@@ -152,6 +152,57 @@ function isiDokumen(ttd) {
     };
   }
 
+  if (ttd.kind === KIND.FAKTUR) {
+    const inv = db
+      .prepare(
+        `SELECT i.*, o.order_no, o.payment_status
+           FROM sales_invoices i JOIN sales_orders o ON o.id = i.order_id
+          WHERE i.id = ?`
+      )
+      .get(ttd.ref_id);
+    if (!inv) return null;
+    const items = db
+      .prepare('SELECT product_name, unit, qty, price, subtotal FROM sales_invoice_items WHERE invoice_id = ? ORDER BY id')
+      .all(inv.id);
+
+    // Status bayar sengaja tidak ikut disidik: pelunasan setelah faktur dicetak
+    // tidak mengubah isi tagihannya. Pembatalan justru ikut, karena faktur yang
+    // batal tidak boleh lagi dinyatakan sesuai.
+    return {
+      kanonik: {
+        kind: KIND.FAKTUR,
+        invoice_no: inv.invoice_no,
+        invoice_date: inv.invoice_date,
+        due_date: inv.due_date,
+        customer: inv.customer_name,
+        subtotal: r2(inv.subtotal),
+        discount: r2(inv.discount),
+        shipping: r2(inv.shipping),
+        total: r2(inv.total),
+        batal: inv.status === 'BATAL',
+        items: items.map((i) => [i.product_name, r2(i.qty), r2(i.price)]),
+      },
+      tampil: {
+        jenis: LABEL_KIND.FAKTUR,
+        judul: `Faktur ${inv.invoice_no}`,
+        untuk: inv.customer_name || '-',
+        keterangan: `No. order ${inv.order_no}${inv.due_date ? ` · jatuh tempo ${inv.due_date}` : ''}`,
+        tanggal: inv.invoice_date,
+        baris: [
+          ...items.map((i) => [`${i.product_name} — ${r2(i.qty)} ${i.unit || ''}`.trim(), r2(i.subtotal)]),
+          ...(inv.discount ? [['Diskon', r2(-inv.discount)]] : []),
+          ...(inv.shipping ? [['Ongkos kirim', r2(inv.shipping)]] : []),
+        ],
+        total: ['Total tagihan', r2(inv.total)],
+        catatan: inv.status === 'BATAL'
+          ? 'Faktur ini sudah DIBATALKAN dan tidak berlaku.'
+          : inv.payment_status === 'PAID'
+            ? 'Tagihan ini tercatat sudah dibayar lunas.'
+            : 'Tagihan ini tercatat belum dibayar.',
+      },
+    };
+  }
+
   return null;
 }
 

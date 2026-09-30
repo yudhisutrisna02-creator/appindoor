@@ -483,6 +483,99 @@ function buatTabelKasir(db, applied) {
 }
 
 /**
+ * Surat Jalan (Delivery Order) dan Faktur Penjualan.
+ *
+ * Keduanya dokumen, bukan transaksi: stok, HPP, dan jurnal sudah dibukukan oleh
+ * order penjualannya. Barisnya menyimpan salinan (nama, satuan, harga) saat
+ * dokumen dibuat — lembar resmi yang sudah beredar tidak boleh berubah hanya
+ * karena master produk atau ordernya diperbaiki kemudian.
+ */
+function buatTabelSuratJalan(db, applied) {
+  if (!tableExists(db, 'delivery_orders')) {
+    db.exec(`
+      CREATE TABLE delivery_orders (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        do_no           TEXT NOT NULL UNIQUE,
+        do_date         TEXT NOT NULL,
+        order_id        INTEGER NOT NULL REFERENCES sales_orders(id),
+        recipient_name  TEXT,
+        recipient_phone TEXT,
+        address         TEXT,
+        city            TEXT,
+        courier         TEXT,
+        vehicle_no      TEXT,
+        driver_name     TEXT,
+        tracking_no     TEXT,
+        note            TEXT,
+        status          TEXT NOT NULL DEFAULT 'DIKIRIM',
+        received_date   TEXT,
+        received_by     TEXT,
+        user_id         INTEGER REFERENCES users(id),
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_do_order ON delivery_orders(order_id);
+      CREATE INDEX idx_do_date  ON delivery_orders(do_date);
+
+      CREATE TABLE delivery_order_items (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        do_id        INTEGER NOT NULL REFERENCES delivery_orders(id) ON DELETE CASCADE,
+        product_id   INTEGER NOT NULL REFERENCES products(id),
+        product_name TEXT NOT NULL,
+        sku          TEXT,
+        unit         TEXT,
+        qty          REAL NOT NULL,
+        note         TEXT
+      );
+      CREATE INDEX idx_doi_do ON delivery_order_items(do_id);
+    `);
+    applied.push('tabel delivery_orders');
+  }
+
+  if (!tableExists(db, 'sales_invoices')) {
+    db.exec(`
+      CREATE TABLE sales_invoices (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_no     TEXT NOT NULL UNIQUE,
+        invoice_date   TEXT NOT NULL,
+        due_date       TEXT,
+        order_id       INTEGER NOT NULL REFERENCES sales_orders(id),
+        customer_name  TEXT,
+        customer_phone TEXT,
+        address        TEXT,
+        subtotal       REAL NOT NULL DEFAULT 0,
+        discount       REAL NOT NULL DEFAULT 0,
+        shipping       REAL NOT NULL DEFAULT 0,
+        total          REAL NOT NULL DEFAULT 0,
+        note           TEXT,
+        status         TEXT NOT NULL DEFAULT 'TERBIT',
+        user_id        INTEGER REFERENCES users(id),
+        created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_inv_order ON sales_invoices(order_id);
+      CREATE INDEX idx_inv_date  ON sales_invoices(invoice_date);
+
+      CREATE TABLE sales_invoice_items (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id   INTEGER NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
+        product_id   INTEGER NOT NULL REFERENCES products(id),
+        product_name TEXT NOT NULL,
+        sku          TEXT,
+        unit         TEXT,
+        qty          REAL NOT NULL,
+        price        REAL NOT NULL,
+        subtotal     REAL NOT NULL
+      );
+      CREATE INDEX idx_invi_inv ON sales_invoice_items(invoice_id);
+    `);
+    applied.push('tabel sales_invoices');
+  }
+
+  // Satu surat jalan ditagih sekali; kolomnya di surat jalan supaya "belum
+  // difakturkan" cukup dibaca dari satu tabel.
+  addColumn(db, 'delivery_orders', 'invoice_id', 'INTEGER REFERENCES sales_invoices(id)', applied);
+}
+
+/**
  * Rekening penampung marketplace: BANK MP INDOOR.
  *
  * Dana pencairan marketplace hampir tidak pernah sama persis dengan nilai
@@ -768,6 +861,7 @@ function runMigrations(db) {
 
   buatTabelBookingGrn(db, applied);
   buatTabelKasir(db, applied);
+  buatTabelSuratJalan(db, applied);
   siapkanRekeningMarketplace(db, applied);
 
   return applied;

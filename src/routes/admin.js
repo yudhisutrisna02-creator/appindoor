@@ -343,6 +343,8 @@ const EDITABLE_SETTINGS = [
   // tanpa ini alamatnya ditebak dari permintaan yang sedang berjalan, dan
   // dokumen yang dicetak dari alamat berbeda akan membawa QR yang berbeda pula.
   'app_url',
+  // Dokumen penjualan: faktur dan struk kasir.
+  'faktur_rekening', 'faktur_tempo_hari', 'faktur_catatan', 'kasir_catatan_struk',
 ];
 
 router.get('/settings', ah((req, res) => {

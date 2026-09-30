@@ -7006,6 +7006,152 @@ async function main() {
   check('neraca saldo tetap seimbang', tb68.balanced === true);
 
 
+  console.log('\n69. Surat Jalan & Faktur Penjualan');
+
+  const cap69 = Date.now();
+  const tb69awal = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+  const prodA69 = (await call('POST', '/api/inventory/products', {
+    sku: `SJA-${cap69}`, name: 'GMN Tricoderma Uji 1 KG', unit: 'PACK', cost: 0, price: 40000,
+  })).product;
+  const prodB69 = (await call('POST', '/api/inventory/products', {
+    sku: `SJB-${cap69}`, name: 'Humic Uji 500 GR', unit: 'PACK', cost: 0, price: 30000,
+  })).product;
+  for (const p of [prodA69, prodB69]) {
+    await call('POST', '/api/inventory/moves', {
+      product_id: p.id, move_date: today, move_type: 'IN', qty: 100, unit_cost: 15000, payment: 'CASH',
+    });
+  }
+  const order69 = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Toko Tani Makmur',
+    buyer_name: 'Pak Slamet', buyer_phone: '081234567890', buyer_address: 'Jl. Pemuda 12', buyer_city: 'Kebumen',
+    items: [
+      { product_id: prodA69.id, qty: 10, price: 40000 },
+      { product_id: prodB69.id, qty: 4, price: 30000 },
+    ],
+    discount: 20000, shipping_non_mp: 25000, payment_status: 'UNPAID',
+  });
+  const orderId69 = (order69.order || order69).id;
+  const tbSetelahOrder = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+
+  // ---- A. Calon & isian bawaan dari order ----
+  const calon69 = await call('GET', `/api/surat-jalan/calon?q=${encodeURIComponent('Toko Tani Makmur')}`);
+  check('order yang belum dikirim muncul sebagai calon surat jalan', calon69.rows.some((r) => r.id === orderId69));
+  const isian69 = await call('GET', `/api/surat-jalan/order/${orderId69}`);
+  check('penerima & alamat terisi dari data pembeli order',
+    isian69.bawaan.recipient_name === 'Pak Slamet' && isian69.bawaan.address === 'Jl. Pemuda 12' && isian69.bawaan.city === 'Kebumen');
+  check('barang order tampil dengan sisa kirim', isian69.barang.length === 2
+    && isian69.barang.find((b) => b.product_id === prodA69.id).sisa === 10);
+  check('isian surat jalan tidak memuat harga', !JSON.stringify(isian69).includes('40000'));
+
+  // ---- B. Kirim bertahap ----
+  const bulan69 = today.slice(0, 7).replace('-', '/');
+  const sj1 = (await call('POST', '/api/surat-jalan', {
+    order_id: orderId69, do_date: today, ...isian69.bawaan, driver_name: 'Mas Joko', vehicle_no: 'AA 1234 XY',
+    lines: [{ product_id: prodA69.id, qty: 6 }, { product_id: prodB69.id, qty: 4 }],
+  })).suratJalan;
+  check('nomor surat jalan GI/DO/YYYY/MM/XXXX', new RegExp(`^GI/DO/${bulan69}/\\d{4}$`).test(sj1.do_no), sj1.do_no);
+  check('surat jalan menyimpan barang & jumlah kirim', sj1.items.length === 2 && sj1.total_qty === 10);
+
+  let tolakLebih69 = 0;
+  try {
+    await call('POST', '/api/surat-jalan', {
+      order_id: orderId69, ...isian69.bawaan, lines: [{ product_id: prodA69.id, qty: 5 }],
+    });
+  } catch (err) { tolakLebih69 = err.status; }
+  check('kirim melebihi sisa order ditolak', tolakLebih69 === 422, `status ${tolakLebih69}`);
+
+  const sj2 = (await call('POST', '/api/surat-jalan', {
+    order_id: orderId69, ...isian69.bawaan, lines: [{ product_id: prodA69.id, qty: 4 }],
+  })).suratJalan;
+  const nomor1 = Number(sj1.do_no.slice(-4));
+  check('nomor surat jalan berurutan', Number(sj2.do_no.slice(-4)) === nomor1 + 1, sj2.do_no);
+  const calonHabis = await call('GET', `/api/surat-jalan/calon?q=${encodeURIComponent('Toko Tani Makmur')}`);
+  check('order yang sudah terkirim semua tidak lagi jadi calon', !calonHabis.rows.some((r) => r.id === orderId69));
+
+  const tbSetelahSj = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+  check('surat jalan tidak membukukan apa pun',
+    JSON.stringify(tbSetelahSj.rows) === JSON.stringify(tbSetelahOrder.rows));
+  const stokA69 = (await call('GET', `/api/inventory/products?q=SJA-${cap69}`)).products[0].stock;
+  check('surat jalan tidak mengurangi stok dua kali', stokA69 === 90, String(stokA69));
+
+  const pdfSj = await ambilBerkas(`/api/surat-jalan/${sj1.id}/pdf`);
+  check('surat jalan bisa dicetak sebagai PDF', pdfSj.res.ok && pdfSj.buf.slice(0, 4).toString() === '%PDF');
+
+  // Ubah: jatah lamanya tidak memakan dirinya sendiri
+  const ubahSj = (await call('PUT', `/api/surat-jalan/${sj2.id}`, {
+    ...isian69.bawaan, do_date: today, note: 'Titip di warung depan', lines: [{ product_id: prodA69.id, qty: 4 }],
+  })).suratJalan;
+  check('surat jalan bisa diubah', ubahSj.note === 'Titip di warung depan' && ubahSj.total_qty === 4);
+
+  await call('PATCH', `/api/surat-jalan/${sj1.id}/terima`, { received_by: 'Pak Slamet' });
+  check('surat jalan bisa ditandai diterima', (await call('GET', `/api/surat-jalan/${sj1.id}`)).status === 'DITERIMA');
+
+  // ---- C. Faktur dari surat jalan ----
+  const calonF = await call('GET', '/api/faktur/calon');
+  const grup69 = calonF.rows.find((r) => r.order_id === orderId69);
+  check('surat jalan yang belum ditagih muncul sebagai calon faktur', grup69 && grup69.suratJalan.length === 2);
+
+  const siap69 = await call('GET', `/api/faktur/siapkan?order_id=${orderId69}&do_ids=${sj1.id}`);
+  check('faktur menarik barang & harga dari surat jalan + order',
+    siap69.subtotal === 6 * 40000 + 4 * 30000 && siap69.items.length === 2, String(siap69.subtotal));
+  check('faktur pertama membawa diskon & ongkir order',
+    siap69.bawaan.discount === 20000 && siap69.bawaan.shipping === 25000);
+
+  const inv1 = (await call('POST', '/api/faktur', {
+    order_id: orderId69, do_ids: [sj1.id], invoice_date: today, customer_name: siap69.bawaan.customer_name,
+    address: siap69.bawaan.address,
+  })).faktur;
+  check('nomor faktur GI/INV/YYYY/MM/XXXX', new RegExp(`^GI/INV/${bulan69}/\\d{4}$`).test(inv1.invoice_no), inv1.invoice_no);
+  check('total faktur = subtotal − diskon + ongkir', inv1.total === 360000 - 20000 + 25000, String(inv1.total));
+  check('status bayar faktur mengikuti order (belum lunas)', inv1.status_bayar !== 'LUNAS');
+
+  let tolakDobelF = 0;
+  try { await call('POST', '/api/faktur', { order_id: orderId69, do_ids: [sj1.id], customer_name: 'X' }); }
+  catch (err) { tolakDobelF = err.status; }
+  check('satu surat jalan tidak bisa ditagih dua kali', tolakDobelF === 422, `status ${tolakDobelF}`);
+
+  let tolakUbahSj = 0;
+  try { await call('PATCH', `/api/surat-jalan/${sj1.id}/batal`); } catch (err) { tolakUbahSj = err.status; }
+  check('surat jalan yang sudah difakturkan tidak bisa dibatalkan', tolakUbahSj === 422);
+
+  const inv2 = (await call('POST', '/api/faktur', {
+    order_id: orderId69, do_ids: [sj2.id], customer_name: 'Pak Slamet',
+  })).faktur;
+  check('faktur susulan tidak menagih diskon & ongkir lagi', inv2.discount === 0 && inv2.shipping === 0 && inv2.total === 160000,
+    String(inv2.total));
+
+  const pdfF = await ambilBerkas(`/api/faktur/${inv1.id}/pdf`);
+  check('faktur bisa dicetak sebagai PDF', pdfF.res.ok && pdfF.buf.slice(0, 4).toString() === '%PDF');
+  const terbit69 = await call('GET', '/api/dokumen');
+  check('faktur tercatat sebagai dokumen bertanda tangan digital',
+    terbit69.rows.some((r) => r.kind === 'FAKTUR' && r.nomor === inv1.invoice_no && r.status === 'sah'));
+
+  // Batal faktur → surat jalannya bisa ditagih lagi
+  await call('PATCH', `/api/faktur/${inv2.id}/batal`);
+  const calonLagi = await call('GET', '/api/faktur/calon');
+  check('faktur dibatalkan: surat jalannya kembali bisa ditagih',
+    calonLagi.rows.some((r) => r.order_id === orderId69 && r.suratJalan.some((d) => d.id === sj2.id)));
+  const dokBatal = (await call('GET', '/api/dokumen')).rows.find((r) => r.kind === 'FAKTUR' && r.nomor === inv1.invoice_no);
+  check('dokumen faktur yang masih berlaku tetap sah', dokBatal && dokBatal.status === 'sah');
+
+  const daftarF = await call('GET', `/api/faktur?from=${today}&to=${today}`);
+  check('daftar faktur merekap tagihan yang berlaku', daftarF.rows.some((r) => r.id === inv1.id)
+    && daftarF.ringkas.belum >= inv1.total);
+
+  const tbAkhir69 = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+  check('faktur tidak membukukan apa pun', JSON.stringify(tbAkhir69.rows) === JSON.stringify(tbSetelahOrder.rows));
+  void tb69awal;
+
+  // ---- D. Izin ----
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  const gudangSj = await call('GET', `/api/surat-jalan/${sj1.id}`);
+  check('tim gudang bisa membuka surat jalan', gudangSj.do_no === sj1.do_no);
+  let tolakGudangF = 0;
+  try { await call('GET', '/api/faktur'); } catch (err) { tolakGudangF = err.status; }
+  check('tim gudang tidak bisa melihat faktur (harga)', tolakGudangF === 403, `status ${tolakGudangF}`);
+  token = adminAkun;
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

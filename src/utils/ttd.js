@@ -21,12 +21,14 @@ const KIND = {
   SLIP_GAJI: 'SLIP_GAJI',
   NOTA_SUPPLIER: 'NOTA_SUPPLIER',
   LAPORAN: 'LAPORAN',
+  FAKTUR: 'FAKTUR',
 };
 
 const LABEL_KIND = {
   SLIP_GAJI: 'Slip Gaji',
   NOTA_SUPPLIER: 'Nota Pembayaran Supplier',
   LAPORAN: 'Laporan Resmi',
+  FAKTUR: 'Faktur Penjualan',
 };
 
 /**
