@@ -662,6 +662,23 @@ qty diterima baik, qty ditolak (tidak masuk stok, tidak mengurangi sisa PO),
 no. surat jalan supplier, dan penerima. `GET /api/grn/menunggu`, riwayat,
 detail, dan PDF bukti penerimaan dengan tiga kolom tanda tangan.
 
+### Kasir / POS & Sesi Kasir
+
+`/api/kasir` (izin `penjualan.kasir`). Produk punya kolom `barcode` (unik,
+boleh kosong); `GET /produk?q=` mengembalikan `persis` bila q cocok tepat
+dengan barcode/SKU sehingga scanner (ketik + Enter) langsung menambah ke
+keranjang. Transaksi WAJIB di sesi terbuka (`pos_sessions`, nomor
+KS/YYYY-MM/NNNN, satu sesi terbuka per kasir, modal awal). `POST /transaksi`
+memakai `sales.createOrder` kanal KASIR, status SELESAI & lunas — stok, HPP,
+dan jurnal penjualan sama persis dengan order biasa. Cara bayar: TUNAI → akun
+kas sesi, QRIS → setting `kasir_rekening_qris` (default 1020), TRANSFER →
+rekening pilihan. Struk: HTML thermal 80 mm (window.print) dan PDF 80 mm
+(`/transaksi/:id/struk.pdf`) memakai `company_name/address/phone` dan
+`kasir_catatan_struk`. Tutup sesi: uang laci seharusnya = modal + tunai;
+selisih dengan hitungan fisik dijurnal (sumber KASIR) ke 8200 Selisih Kas
+Kasir; setoran ke bank dicatat sebagai jurnal TRANSFER. Halaman Sesi Kasir
+merekap per cara bayar, selisih, dan setoran untuk rentang tanggal.
+
 ### Cara bayar & rekening pesanan pembelian
 
 Transfer bank WAJIB menyebut rekeningnya (`cash_code`, harus akun kas);
@@ -1000,7 +1017,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 973 pemeriksaan, 67 bagian
+npm run smoke            # 997 pemeriksaan, 68 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

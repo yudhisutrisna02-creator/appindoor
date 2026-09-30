@@ -9,7 +9,7 @@ import { rupiah, num, pct } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
 const EMPTY = {
-  sku: '', name: '', category: 'Umum', unit: 'PCS',
+  sku: '', barcode: '', name: '', category: 'Umum', unit: 'PCS',
   cost: 0, price: 0, min_stock: 0, supplier_id: null, active: true, needs_variant: false,
   lacak_batch: false,
 };
@@ -203,6 +203,12 @@ export default function Produk() {
           <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
             <Field label="SKU *">
               <input className="input" required value={editing.sku} onChange={(e) => setEditing({ ...editing, sku: e.target.value })} />
+            </Field>
+            <Field label="Barcode" hint="Klik lalu pindai kemasan dengan scanner — dipakai di Kasir">
+              <input
+                className="input font-mono" value={editing.barcode || ''} placeholder="mis. 8991234567890"
+                onChange={(e) => setEditing({ ...editing, barcode: e.target.value })}
+              />
             </Field>
             <Field label="Kategori">
               <input className="input" list="kategori-list" value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })} />

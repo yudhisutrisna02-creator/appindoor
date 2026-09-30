@@ -20,6 +20,9 @@ router.use(requireAuth);
 const productSchema = z.object({
   sku: z.string().trim().min(1, 'SKU wajib diisi').max(40),
   name: z.string().trim().min(1, 'nama produk wajib diisi').max(150),
+  // Kode yang dibaca pemindai kasir (EAN/UPC di kemasan). Kosong = kasir
+  // mencari lewat SKU atau nama.
+  barcode: z.string().trim().max(60).optional().nullable(),
   category: z.string().trim().max(60).default('Umum'),
   unit: z.string().trim().max(15).default('PCS'),
   cost: z.number().nonnegative().default(0),
@@ -53,13 +56,13 @@ function ambilProduk(req) {
       `SELECT p.*, s.name AS supplier_name
          FROM products p
          LEFT JOIN partners s ON s.id = p.supplier_id
-        WHERE (p.sku LIKE ? OR p.name LIKE ?)
+        WHERE (p.sku LIKE ? OR p.name LIKE ? OR p.barcode LIKE ?)
           ${category ? 'AND p.category = ?' : ''}
           ${req.query.supplier_id ? 'AND p.supplier_id = ?' : ''}
           ${req.query.includeInactive === '1' ? '' : 'AND p.active = 1'}
         ORDER BY p.name`
     )
-    .all(...[search, search, category, req.query.supplier_id].filter((x) => x !== undefined));
+    .all(...[search, search, search, category, req.query.supplier_id].filter((x) => x !== undefined));
 
   const products = rows.map((p) => ({
     ...p,
@@ -81,18 +84,32 @@ function ambilProduk(req) {
 
 router.get('/products', ah((req, res) => res.json(ambilProduk(req))));
 
+/**
+ * Satu barcode hanya boleh menunjuk satu produk. Dua produk dengan barcode sama
+ * membuat pemindai kasir memilih salah satunya secara acak — dan barang yang
+ * terjual tercatat keluar dari produk yang salah.
+ */
+function periksaBarcode(barcode, kecualiId) {
+  if (!barcode) return;
+  const ada = db
+    .prepare('SELECT sku, name FROM products WHERE barcode = ? AND id <> ?')
+    .get(barcode, kecualiId || 0);
+  if (ada) throw httpError(409, `Barcode ${barcode} sudah dipakai ${ada.sku} — ${ada.name}`);
+}
+
 router.post('/products', butuhIzin('gudang.produk'), ah((req, res) => {
   const p = parse(productSchema, req.body);
   const dupe = db.prepare('SELECT id FROM products WHERE sku = ?').get(p.sku);
   if (dupe) throw httpError(409, `SKU ${p.sku} sudah dipakai produk lain`);
+  periksaBarcode(p.barcode, null);
 
   const info = db
     .prepare(
-      `INSERT INTO products (sku, name, category, unit, cost, price, min_stock, supplier_id, active, needs_variant)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO products (sku, name, category, unit, cost, price, min_stock, supplier_id, active, needs_variant, barcode)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
     )
     .run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock,
-      p.supplier_id || null, p.active ? 1 : 0, p.needs_variant ? 1 : 0);
+      p.supplier_id || null, p.active ? 1 : 0, p.needs_variant ? 1 : 0, p.barcode || null);
 
   res.status(201).json({ ok: true, product: db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid) });
 }));
@@ -105,12 +122,14 @@ router.put('/products/:id', butuhIzin('gudang.produk'), ah((req, res) => {
   const dupe = db.prepare('SELECT id FROM products WHERE sku = ? AND id <> ?').get(p.sku, existing.id);
   if (dupe) throw httpError(409, `SKU ${p.sku} sudah dipakai produk lain`);
 
+  periksaBarcode(p.barcode, existing.id);
   db.prepare(
     `UPDATE products SET sku=?, name=?, category=?, unit=?, cost=?, price=?, min_stock=?,
-            supplier_id=?, active=?, needs_variant=?
+            supplier_id=?, active=?, needs_variant=?, barcode=?
       WHERE id=?`
   ).run(p.sku, p.name, p.category, p.unit, p.cost, p.price, p.min_stock,
-    p.supplier_id || null, p.active ? 1 : 0, p.needs_variant ? 1 : 0, existing.id);
+    p.supplier_id || null, p.active ? 1 : 0, p.needs_variant ? 1 : 0,
+    p.barcode === undefined ? existing.barcode : p.barcode || null, existing.id);
 
   // Menyalakan pelacakan sekaligus memasukkan stok yang sudah ada sebagai batch
   // pembuka. Tanpa itu, sisa batch nol sementara stoknya ratusan, dan penjualan

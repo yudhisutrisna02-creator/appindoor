@@ -41,6 +41,7 @@ export const CHANNEL_LABEL = {
   TOKOPEDIA: 'Tokopedia',
   TIKTOK_SHOP: 'TikTok Shop',
   LAZADA: 'Lazada',
+  KASIR: 'Kasir / Toko',
 };
 
 /**
@@ -148,6 +149,7 @@ export const WARNA_CHANNEL = {
   // Tidak diminta secara khusus; diberi warna sendiri agar tidak tertukar
   // dengan channel lain saat muncul.
   SOCIAL_MEDIA: 'bg-[#7C3AED]',
+  KASIR: 'bg-[#0D9488]',
 };
 
 /** Lencana channel siap pakai — teksnya selalu putih agar kontras terjaga. */

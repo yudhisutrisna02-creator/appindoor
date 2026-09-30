@@ -31,6 +31,8 @@ const LABEL_SUMBER = {
   OPNAME: 'Stok opname',
   REPAIR: 'Perbaikan barang',
   REPAIR_LOSS: 'Barang rusak',
+  KASIR: 'Selisih kas kasir',
+  PO_HARGA: 'Selisih harga pembelian',
 };
 
 // Hanya jurnal berdiri sendiri yang boleh dipindah rekeningnya. Jurnal

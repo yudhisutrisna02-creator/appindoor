@@ -439,6 +439,50 @@ function buatTabelBookingGrn(db, applied) {
 }
 
 /**
+ * Kasir / POS.
+ *
+ * Penjualan kasir tetap menjadi order penjualan biasa (kanal KASIR) — stok,
+ * HPP, dan jurnalnya lewat jalur yang sama dengan order lain. Yang ditambahkan
+ * hanya sesinya: siapa yang membuka laci, dengan modal berapa, dan berapa uang
+ * yang benar-benar ada saat laci ditutup.
+ */
+function buatTabelKasir(db, applied) {
+  addColumn(db, 'products', 'barcode', 'TEXT', applied);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_prod_barcode ON products(barcode)');
+
+  if (!tableExists(db, 'pos_sessions')) {
+    db.exec(`
+      CREATE TABLE pos_sessions (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_no    TEXT NOT NULL UNIQUE,
+        user_id       INTEGER NOT NULL REFERENCES users(id),
+        cash_code     TEXT NOT NULL DEFAULT '1000',
+        opened_at     TEXT NOT NULL,
+        opening_cash  REAL NOT NULL DEFAULT 0,
+        closed_at     TEXT,
+        expected_cash REAL,
+        counted_cash  REAL,
+        selisih       REAL,
+        setor_amount  REAL NOT NULL DEFAULT 0,
+        setor_to      TEXT,
+        note          TEXT,
+        closed_by     INTEGER REFERENCES users(id),
+        status        TEXT NOT NULL DEFAULT 'OPEN'
+      );
+      CREATE INDEX idx_pos_user   ON pos_sessions(user_id, status);
+      CREATE INDEX idx_pos_opened ON pos_sessions(opened_at);
+    `);
+    applied.push('tabel pos_sessions');
+  }
+
+  addColumn(db, 'sales_orders', 'pos_session_id', 'INTEGER REFERENCES pos_sessions(id)', applied);
+  addColumn(db, 'sales_orders', 'pos_method', 'TEXT', applied);
+  addColumn(db, 'sales_orders', 'pos_paid', 'REAL', applied);
+  addColumn(db, 'sales_orders', 'pos_change', 'REAL', applied);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_so_pos ON sales_orders(pos_session_id)');
+}
+
+/**
  * Rekening penampung marketplace: BANK MP INDOOR.
  *
  * Dana pencairan marketplace hampir tidak pernah sama persis dengan nilai
@@ -723,6 +767,7 @@ function runMigrations(db) {
   addColumn(db, 'attendance', 'izin_at', 'TEXT', applied);
 
   buatTabelBookingGrn(db, applied);
+  buatTabelKasir(db, applied);
   siapkanRekeningMarketplace(db, applied);
 
   return applied;

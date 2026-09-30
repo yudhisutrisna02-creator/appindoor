@@ -6881,6 +6881,131 @@ async function main() {
   check('neraca saldo tetap seimbang', tb67.balanced === true);
 
 
+  console.log('\n68. Kasir / POS & sesi kasir');
+
+  const cap68 = Date.now();
+  const saldo68 = async (kode) => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const barcode68 = `899${String(cap68).slice(-10)}`;
+  const prod68 = (await call('POST', '/api/inventory/products', {
+    sku: `P68-${cap68}`, barcode: barcode68, name: 'Pupuk Uji Kasir 1 KG', cost: 0, price: 35000,
+  })).product;
+  check('produk bisa diberi barcode', prod68.barcode === barcode68);
+  let tolakKembar68 = 0;
+  try {
+    await call('POST', '/api/inventory/products', {
+      sku: `P68B-${cap68}`, barcode: barcode68, name: 'Kembar', cost: 0, price: 1,
+    });
+  } catch (err) { tolakKembar68 = err.status; }
+  check('barcode yang sama tidak bisa dipakai dua produk', tolakKembar68 === 409);
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod68.id, move_date: today, move_type: 'IN', qty: 20, unit_cost: 20000, payment: 'CASH',
+  });
+  const stok68 = async () => (await call('GET', `/api/inventory/products?q=P68-${cap68}`)).products[0].stock;
+
+  // ---- A. Pindai: kode persis langsung mengembalikan satu barang ----
+  const cari68 = await call('GET', `/api/kasir/produk?q=${barcode68}`);
+  check('pindai barcode menemukan tepat satu barang', cari68.persis && cari68.persis.id === prod68.id);
+
+  // ---- B. Tanpa sesi tidak bisa berjualan ----
+  let tolakTanpaSesi = 0;
+  try {
+    await call('POST', '/api/kasir/transaksi', {
+      items: [{ product_id: prod68.id, qty: 1, price: 35000 }], method: 'TUNAI', paid: 50000,
+    });
+  } catch (err) { tolakTanpaSesi = err.status; }
+  check('berjualan tanpa sesi kasir ditolak', tolakTanpaSesi === 409);
+
+  const buka68 = await call('POST', '/api/kasir/sesi/buka', { opening_cash: 200000 });
+  check('sesi kasir dibuka bernomor KS/', /^KS\//.test(buka68.sesi.session_no), buka68.sesi.session_no);
+  let tolakDobel68 = 0;
+  try { await call('POST', '/api/kasir/sesi/buka', { opening_cash: 0 }); }
+  catch (err) { tolakDobel68 = err.status; }
+  check('satu kasir tidak bisa membuka dua sesi sekaligus', tolakDobel68 === 409);
+
+  // ---- C. Tiga metode bayar ----
+  const kas68 = await saldo68('1000');
+  const qris68 = await saldo68('1020');
+  const tunai68 = await call('POST', '/api/kasir/transaksi', {
+    items: [{ product_id: prod68.id, qty: 2, price: 35000 }], method: 'TUNAI', paid: 100000, customer: 'Pak Budi',
+  });
+  check('transaksi tunai: kembalian dihitung', near(tunai68.struk.total, 70000, 1) && near(tunai68.struk.kembali, 30000, 1),
+    JSON.stringify({ t: tunai68.struk.total, k: tunai68.struk.kembali }));
+  check('uang tunai masuk ke laci (Kas Tunai)', near((await saldo68('1000')) - kas68, 70000, 1));
+  check('stok berkurang lewat jalur order biasa', (await stok68()) === 18, String(await stok68()));
+
+  const q68 = await call('POST', '/api/kasir/transaksi', {
+    items: [{ product_id: prod68.id, qty: 1, price: 35000 }], discount: 5000, method: 'QRIS',
+  });
+  check('QRIS masuk ke rekening QRIS, diskon mengurangi total',
+    near(q68.struk.total, 30000, 1) && near((await saldo68('1020')) - qris68, 30000, 1));
+
+  const rek68 = (await call('POST', '/api/cashflow/rekening', {
+    nama: [`BCA UJI KASIR 680-${cap68}`], mulai_kode: '1970',
+  })).dibuat[0].code;
+  let tolakTfTanpaRek = 0;
+  try {
+    await call('POST', '/api/kasir/transaksi', { items: [{ product_id: prod68.id, qty: 1, price: 35000 }], method: 'TRANSFER' });
+  } catch (err) { tolakTfTanpaRek = err.status; }
+  check('transfer tanpa rekening ditolak', tolakTfTanpaRek === 422);
+  await call('POST', '/api/kasir/transaksi', {
+    items: [{ product_id: prod68.id, qty: 1, price: 35000 }], method: 'TRANSFER', cash_code: rek68,
+  });
+  check('transfer masuk ke rekening yang dipilih', near(await saldo68(rek68), 35000, 1));
+
+  let tolakKurang68 = 0;
+  try {
+    await call('POST', '/api/kasir/transaksi', {
+      items: [{ product_id: prod68.id, qty: 1, price: 35000 }], method: 'TUNAI', paid: 20000,
+    });
+  } catch (err) { tolakKurang68 = err.status; }
+  check('uang tunai kurang dari total ditolak', tolakKurang68 === 422);
+
+  const strukPdf68 = await ambilBerkas(`/api/kasir/transaksi/${tunai68.struk.id}/struk.pdf`);
+  check('struk thermal tersedia sebagai PDF', strukPdf68.res.ok && strukPdf68.buf.slice(0, 4).toString() === '%PDF');
+
+  // ---- D. Rekap & tutup sesi: laci kurang Rp 2.000, setor Rp 200.000 ----
+  const aktif68 = (await call('GET', '/api/kasir/sesi-aktif')).sesi;
+  check('rekap sesi per metode bayar',
+    aktif68.rekap.transaksi === 3 && near(aktif68.rekap.perMetode.TUNAI, 70000, 1)
+      && near(aktif68.rekap.perMetode.QRIS, 30000, 1) && near(aktif68.rekap.perMetode.TRANSFER, 35000, 1),
+    JSON.stringify(aktif68.rekap));
+  check('uang laci seharusnya = modal + tunai', near(aktif68.rekap.uangLaciSeharusnya, 270000, 1));
+
+  const kasSblmTutup = await saldo68('1000');
+  const tutup68 = await call('POST', `/api/kasir/sesi/${aktif68.id}/tutup`, {
+    counted_cash: 268000, setor_amount: 200000, setor_to: rek68, note: 'Tutup shift pagi',
+  });
+  check('sesi ditutup dengan selisih tercatat', tutup68.sesi.status === 'CLOSED' && near(tutup68.sesi.selisih, -2000, 1),
+    tutup68.message);
+  check('kekurangan laci dibukukan sebagai Selisih Kas Kasir', near(await saldo68('8200'), 2000, 1));
+  check('Kas Tunai berkurang sebesar selisih & setoran',
+    near((await saldo68('1000')) - kasSblmTutup, -202000, 1), String((await saldo68('1000')) - kasSblmTutup));
+  check('setoran masuk ke rekening bank', near(await saldo68(rek68), 235000, 1));
+
+  let tolakTutupLagi = 0;
+  try { await call('POST', `/api/kasir/sesi/${aktif68.id}/tutup`, { counted_cash: 0 }); }
+  catch (err) { tolakTutupLagi = err.status; }
+  check('sesi yang sudah ditutup tidak bisa ditutup lagi', tolakTutupLagi === 409);
+
+  const riwayat68 = await call('GET', `/api/kasir/sesi?from=${today}&to=${today}`);
+  check('riwayat sesi merekap setoran harian',
+    riwayat68.rows.some((s) => s.id === aktif68.id) && riwayat68.ringkas.disetor >= 200000);
+
+  // ---- E. Izin ----
+  token = await masukSebagai(akunGudang.user.email, 'RahasiaKuat1');
+  let tolakGudang68 = 0;
+  try { await call('GET', '/api/kasir/sesi-aktif'); } catch (err) { tolakGudang68 = err.status; }
+  check('tim tanpa izin kasir tidak bisa membuka kasir', tolakGudang68 === 403, `status ${tolakGudang68}`);
+  token = adminAkun;
+
+  const tb68 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb68.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

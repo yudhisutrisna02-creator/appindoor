@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fingerprint, CalendarClock, Package, ArrowLeftRight, ClipboardCheck,
   Warehouse, ShoppingCart, TrendingUp, BookOpenCheck, ListTree, FileBarChart2,
   Settings, LogOut, Menu, X, Wallet, HandCoins, Undo2, Contact, Store, ChevronDown, Megaphone,
-  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket, UsersRound, Wrench, Factory, PackageOpen,
+  Sun, Moon, MonitorSmartphone, Truck, PackageCheck, Landmark, PackageSearch, Target, Hourglass, ShieldCheck, DatabaseBackup, BellRing, TrendingDown, History, FileText, UserCircle, ArrowRightLeft, CalendarX2, Landmark as BankIcon, ShoppingBasket, UsersRound, Wrench, Factory, PackageOpen, ScanBarcode, Vault,
 } from 'lucide-react';
 
 import { useAuth } from './lib/auth';
@@ -37,6 +37,8 @@ import Pelanggan from './pages/Pelanggan';
 import ReturBeli from './pages/ReturBeli';
 import BookingStok from './pages/BookingStok';
 import PenerimaanBarang from './pages/PenerimaanBarang';
+import Kasir from './pages/Kasir';
+import SesiKasir from './pages/SesiKasir';
 import UtangPiutang from './pages/UtangPiutang';
 import Mitra from './pages/Mitra';
 import Retur from './pages/Retur';
@@ -82,6 +84,8 @@ const NAV = [
     section: 'Penjualan',
     key: 'penjualan',
     items: [
+      { to: '/penjualan/kasir', label: 'Kasir / POS', icon: ScanBarcode, izin: 'penjualan.kasir' },
+      { to: '/penjualan/sesi-kasir', label: 'Sesi Kasir', icon: Vault, izin: 'penjualan.kasir' },
       { to: '/penjualan', label: 'Order Penjualan', icon: ShoppingCart, izin: 'penjualan.lihat' },
       { to: '/penjualan/pengiriman', label: 'Papan Pengiriman', icon: Truck, izin: 'penjualan.lihat' },
       { to: '/penjualan/pencairan', label: 'Pencairan Dana', icon: Hourglass, izin: 'penjualan.lihat' },
@@ -493,6 +497,8 @@ export default function App() {
         <Route path="/pembelian/retur" element={<Dijaga izin="pembelian.lihat"><ReturBeli /></Dijaga>} />
         <Route path="/pembelian/booking" element={<Dijaga izin="pembelian.lihat"><BookingStok /></Dijaga>} />
         <Route path="/pembelian/penerimaan" element={<Dijaga izin="pembelian.lihat"><PenerimaanBarang /></Dijaga>} />
+        <Route path="/penjualan/kasir" element={<Dijaga izin="penjualan.kasir"><Kasir /></Dijaga>} />
+        <Route path="/penjualan/sesi-kasir" element={<Dijaga izin="penjualan.kasir"><SesiKasir /></Dijaga>} />
         <Route path="/penjualan/pelanggan" element={<Dijaga izin="penjualan.lihat"><Pelanggan /></Dijaga>} />
         <Route path="/keuangan/utang-piutang" element={<Dijaga izin="keuangan.lihat"><UtangPiutang /></Dijaga>} />
         <Route path="/keuangan/laporan" element={<Dijaga izin="keuangan.lihat"><LaporanKeuangan /></Dijaga>} />

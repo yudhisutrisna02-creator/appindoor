@@ -88,6 +88,8 @@ const COA = [
   // memang sudah benar tetapi tidak ada yang tahu berapa yang hilang karena
   // barang rusak.
   ['8100', 'Kerugian Barang Rusak',           'EXPENSE', 'OTHER',   'D', 'NONE', 0],
+  // Selisih uang laci kasir saat sesi ditutup: kurang = beban, lebih = kredit.
+  ['8200', 'Selisih Kas Kasir',              'EXPENSE', 'OTHER',   'D', 'NONE', 0],
 ];
 
 /** Kode akun yang direferensikan oleh posting otomatis. */
@@ -120,6 +122,8 @@ const ACC = {
   STOCK_VARIANCE: '8000',
   REPAIR_INVENTORY: '1250',
   DAMAGED_LOSS: '8100',
+  CASH_OVER_SHORT: '8200',
+  QRIS: '1020',
 };
 
 module.exports = { COA, ACC };

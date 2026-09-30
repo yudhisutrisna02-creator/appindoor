@@ -5,7 +5,7 @@
  * Ditaruh di satu berkas supaya penambahan kanal baru cukup satu baris dan
  * tidak menyisakan salinan daftar yang tertinggal di modul lain.
  */
-const CHANNELS = ['OFFLINE_WA', 'SOCIAL_MEDIA', 'WEBSITE', 'SHOPEE', 'TOKOPEDIA', 'TIKTOK_SHOP', 'LAZADA'];
+const CHANNELS = ['OFFLINE_WA', 'SOCIAL_MEDIA', 'WEBSITE', 'SHOPEE', 'TOKOPEDIA', 'TIKTOK_SHOP', 'LAZADA', 'KASIR'];
 
 const CHANNEL_LABEL = {
   OFFLINE_WA: 'Offline / WhatsApp',
@@ -15,6 +15,8 @@ const CHANNEL_LABEL = {
   TOKOPEDIA: 'Tokopedia',
   TIKTOK_SHOP: 'TikTok Shop',
   LAZADA: 'Lazada',
+  // Penjualan langsung di toko lewat menu Kasir / POS.
+  KASIR: 'Kasir / Toko',
 };
 
 /** Kanal yang uangnya masuk lewat rekening penampung marketplace, bukan kas. */

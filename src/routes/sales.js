@@ -1764,3 +1764,5 @@ module.exports = router;
 module.exports.ambilRetur = ambilRetur;
 module.exports.calonBersihkan = calonBersihkan;
 module.exports.cancelOrder = cancelOrder;
+module.exports.createOrder = createOrder;
+module.exports.orderSchema = orderSchema;

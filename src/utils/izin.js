@@ -53,6 +53,7 @@ const KATALOG = [
       { kunci: 'penjualan.retur', label: 'Mencatat retur penjualan' },
       { kunci: 'penjualan.toko', label: 'Mengelola daftar toko / akun marketplace' },
       { kunci: 'penjualan.margin', label: 'Melihat analisis margin & HPP' },
+      { kunci: 'penjualan.kasir', label: 'Berjualan di Kasir/POS & membuka/menutup sesi kasir' },
     ],
   },
   {
@@ -167,6 +168,7 @@ const PERAN_BAWAAN = [
       'gudang.lihat', 'gudang.kinerja',
       'pembelian.lihat',
       'penjualan.lihat', 'penjualan.buat', 'penjualan.ubah', 'penjualan.retur', 'penjualan.margin',
+      'penjualan.kasir',
       'mitra.lihat', 'mitra.kelola',
       'target.lihat',
     ],
