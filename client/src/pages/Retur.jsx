@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Undo2, Plus, PackageCheck, Pencil } from 'lucide-react';
+import { Undo2, Plus, PackageCheck, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   PageHeader, StatCard, Spinner, EmptyState, Modal,
@@ -168,6 +168,20 @@ export default function Retur() {
       price: baris && baris.harga_order != null ? baris.harga_order : (baris?.price ?? f.price),
       qty: baris && baris.sisa_retur != null ? Math.min(Number(f.qty) || 1, baris.sisa_retur) : f.qty,
     }));
+  }
+
+  async function hapus(r) {
+    const pesan = `Hapus retur ${r.return_no} (${r.product_name}, ${num(r.qty)} ${r.unit || ''})?\n\n`
+      + 'Stok yang dulu masuk ditarik lagi dan jurnal pengembalian dananya dihapus. Tindakan ini tidak bisa dibatalkan.';
+    if (!window.confirm(pesan)) return;
+    try {
+      const res = await api.del(`/api/sales/returns/${r.id}`);
+      toast.success(res.message);
+      load();
+      api.get('/api/inventory/products').then((d) => setProducts(d.products)).catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function submit(e) {
@@ -339,13 +353,22 @@ export default function Retur() {
                         </td>
                         <td className="max-w-[200px] truncate text-xs text-slate-500">{r.reason || '-'}</td>
                         <td className="text-right">
-                          <button
-                            type="button" onClick={() => openUbah(r)}
-                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            aria-label={`Ubah retur ${r.return_no}`}
-                          >
-                            <Pencil size={15} />
-                          </button>
+                          <div className="flex justify-end gap-0.5">
+                            <button
+                              type="button" onClick={() => openUbah(r)}
+                              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                              aria-label={`Ubah retur ${r.return_no}`} title="Ubah"
+                            >
+                              <Pencil size={15} />
+                            </button>
+                            <button
+                              type="button" onClick={() => hapus(r)}
+                              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              aria-label={`Hapus retur ${r.return_no}`} title="Hapus"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

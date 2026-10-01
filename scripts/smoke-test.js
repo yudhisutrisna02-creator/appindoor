@@ -7152,6 +7152,64 @@ async function main() {
   token = adminAkun;
 
 
+  console.log('\n70. Hapus retur penjualan');
+
+  const cap70 = Date.now();
+  const saldo70 = async (kode) => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === kode) || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const prod70 = (await call('POST', '/api/inventory/products', {
+    sku: `RT70-${cap70}`, name: 'Uji Hapus Retur', cost: 0, price: 50000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod70.id, move_date: today, move_type: 'IN', qty: 10, unit_cost: 20000, payment: 'CASH',
+  });
+  const stok70 = async () => (await call('GET', `/api/inventory/products?q=RT70-${cap70}`)).products[0].stock;
+  const order70 = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Uji Retur 70',
+    items: [{ product_id: prod70.id, qty: 3, price: 50000 }],
+  });
+  const orderId70 = (order70.order || order70).id;
+  const returAkun70 = await saldo70('4100');
+  const stokSebelum70 = await stok70();
+
+  const retur70 = await call('POST', '/api/sales/returns', {
+    return_date: today, order_id: orderId70, product_id: prod70.id, qty: 2, price: 50000, kondisi: 'BAGUS', reason: 'salah input',
+  });
+  check('retur bagus menambah stok', (await stok70()) === stokSebelum70 + 2);
+
+  const hapus70 = await call('DELETE', `/api/sales/returns/${retur70.id}`);
+  check('retur bisa dihapus', hapus70.ok === true, hapus70.message);
+  check('stok yang dulu masuk ditarik lagi', (await stok70()) === stokSebelum70, String(await stok70()));
+  const daftar70 = await call('GET', `/api/sales/returns/list?from=${today}&to=${today}&q=RT70-${cap70}`);
+  check('retur hilang dari daftar', !daftar70.rows.some((r) => r.id === retur70.id));
+  const mutasi70 = (await call('GET', `/api/inventory/moves?from=${today}&to=${today}&product_id=${prod70.id}`)).rows;
+  check('mutasi stok retur ikut terhapus', !mutasi70.some((m) => m.source === 'RETURN'));
+  check('jurnal retur ikut terhapus', near(await saldo70('4100'), returAkun70, 1));
+
+  // Barang retur yang sudah terjual lagi tidak bisa dihapus returnya
+  const retur70b = await call('POST', '/api/sales/returns', {
+    return_date: today, order_id: orderId70, product_id: prod70.id, qty: 1, price: 50000, kondisi: 'BAGUS',
+  });
+  const sisa70 = await stok70();
+  await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Habiskan Stok',
+    items: [{ product_id: prod70.id, qty: sisa70, price: 50000 }],
+  });
+  let tolak70 = 0;
+  try { await call('DELETE', `/api/sales/returns/${retur70b.id}`); } catch (err) { tolak70 = err.status; }
+  check('retur yang barangnya sudah terjual lagi ditolak dihapus', tolak70 === 422, `status ${tolak70}`);
+
+  let tolakAda70 = 0;
+  try { await call('DELETE', `/api/sales/returns/${retur70.id}`); } catch (err) { tolakAda70 = err.status; }
+  check('retur yang sudah dihapus tidak ditemukan lagi', tolakAda70 === 404);
+
+  const tb70 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb70.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

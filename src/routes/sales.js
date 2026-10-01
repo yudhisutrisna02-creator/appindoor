@@ -5,7 +5,7 @@ const { db, nextNumber } = require('../db');
 const { requireAuth, butuhIzin } = require('../middleware/auth');
 const { ah, parse, httpError, dateRange } = require('../utils/http');
 const {
-  r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines, rekeningMarketplace,
+  r2, ACC, postJournal, deleteJournalsBySource, buildSalesJournalLines, rekeningMarketplace, tolakBilaTerekonsiliasi,
 } = require('../utils/accounting');
 const { daftarkanEkspor } = require('../utils/ekspor');
 const { todayLocal } = require('../utils/time');
@@ -1713,6 +1713,32 @@ router.put('/returns/:id(\\d+)', butuhIzin('penjualan.retur'), ah((req, res) => 
     ...hasil,
     message: `Retur ${hasil.return_no} diperbarui — ${KABAR_KONDISI[hasil.kondisi]}`,
   });
+}));
+
+/**
+ * Menghapus retur yang salah input.
+ *
+ * Seluruh akibatnya dibalik lewat jalur yang sama dengan mengubah retur: stok
+ * dan batch yang dulu masuk ditarik lagi, jurnal pengembalian dana dihapus,
+ * dan barang di daftar perbaikan ikut hilang. Ditolak bila barangnya sudah
+ * terjual lagi, sudah diproses di Barang Perlu Perbaikan, bulannya sudah tutup
+ * buku, atau jurnalnya sudah dicocokkan dengan rekening koran.
+ */
+const hapusRetur = db.transaction((id) => {
+  const r = db.prepare('SELECT * FROM sales_returns WHERE id = ?').get(id);
+  if (!r) throw httpError(404, 'Retur tidak ditemukan');
+  for (const j of db.prepare("SELECT id, entry_no FROM journals WHERE source = 'RETURN' AND source_id = ?").all(r.id)) {
+    tolakBilaTerekonsiliasi(j);
+  }
+  batalkanEfekRetur(r);
+  db.prepare('DELETE FROM barang_perbaikan WHERE return_id = ?').run(r.id);
+  db.prepare('DELETE FROM sales_returns WHERE id = ?').run(r.id);
+  return r;
+});
+
+router.delete('/returns/:id(\\d+)', butuhIzin('penjualan.retur'), ah((req, res) => {
+  const r = hapusRetur(Number(req.params.id));
+  res.json({ ok: true, message: `Retur ${r.return_no} dihapus — stok dan jurnalnya sudah dibalik` });
 }));
 
 router.post('/returns', butuhIzin('penjualan.buat'), ah((req, res) => {
