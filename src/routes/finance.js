@@ -490,12 +490,15 @@ router.get('/reports/:report/export/excel', ah(async (req, res) => {
 router.get('/ledger/:accountId/export/excel', ah(async (req, res) => {
   const { from, to } = dateRange(req.query);
   const led = generalLedger(Number(req.params.accountId), from, to);
+  // Akun utang/piutang dibaca per mitra; kolomnya hanya muncul bila ada isinya.
+  const adaMitra = led.entries.some((e) => e.partner_name);
 
   const buffer = await tableExcel(
     `BB ${led.account.code}`,
     [
       { header: 'Tanggal', key: 'entry_date', width: 12 },
       { header: 'No. Jurnal', key: 'entry_no', width: 20 },
+      ...(adaMitra ? [{ header: 'Supplier / Mitra', key: 'partner_name', width: 26 }] : []),
       { header: 'Keterangan', key: 'description', width: 40 },
       { header: 'Debit', key: 'debit', width: 16, money: true },
       { header: 'Kredit', key: 'credit', width: 16, money: true },

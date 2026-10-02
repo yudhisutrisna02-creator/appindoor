@@ -96,6 +96,8 @@ export default function Jurnal() {
   const bisaPindahDiSini = bolehPindah && !!ledger?.account?.is_cash;
   const bolehHapusJ = punya('keuangan.kas') || punya('keuangan.jurnal');
   const kolomAksi = bisaPindahDiSini || bolehHapusJ;
+  // Akun utang/piutang: tampilkan siapa mitranya di tiap baris.
+  const kolomMitra = !!ledger?.entries?.some((e) => e.partner_name);
   const rekeningTujuan = accounts.filter((a) => a.is_cash && a.active && a.code !== ledger?.account?.code);
 
   async function pindahkan(e) {
@@ -342,10 +344,10 @@ export default function Jurnal() {
             ) : (
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th>{kolomAksi && <th />}</tr></thead>
+                  <thead><tr><th>Tanggal</th><th>No. Jurnal</th>{kolomMitra && <th>Supplier / Mitra</th>}<th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th>{kolomAksi && <th />}</tr></thead>
                   <tbody>
                     <tr className="bg-slate-50">
-                      <td colSpan={5} className="px-3 py-2 font-semibold">Saldo Awal</td>
+                      <td colSpan={kolomMitra ? 6 : 5} className="px-3 py-2 font-semibold">Saldo Awal</td>
                       <td className="tabular px-3 py-2 font-semibold">{rupiah(ledger.opening)}</td>
                       {kolomAksi && <td />}
                     </tr>
@@ -353,6 +355,7 @@ export default function Jurnal() {
                       <tr key={i}>
                         <td className="tabular">{dateID(e.entry_date)}</td>
                         <td className="font-mono text-xs">{e.entry_no}</td>
+                        {kolomMitra && <td className="font-medium text-slate-900">{e.partner_name || '-'}</td>}
                         <td className="max-w-[300px] truncate">{e.memo || e.description}</td>
                         <td className="tabular">{e.debit ? rupiah(e.debit) : '-'}</td>
                         <td className="tabular">{e.credit ? rupiah(e.credit) : '-'}</td>

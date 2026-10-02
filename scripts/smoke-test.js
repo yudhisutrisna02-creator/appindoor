@@ -7506,6 +7506,7 @@ async function main() {
     .entries.find((e) => e.partner_id === (sup73.partner || sup73).id);
   const iUtang73 = await call('GET', `/api/utang-aksi/umum/${jUtang73.journal_id}`);
   check('jurnal utang mitra dibuka di dialog Utang & Piutang', iUtang73.mitra && iUtang73.mitra.partner_id === (sup73.partner || sup73).id);
+  check('buku besar utang menampilkan nama supplier', jUtang73.partner_name === `Supplier BB ${cap73}`, String(jUtang73.partner_name));
 
   const tb73 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
   check('neraca saldo tetap seimbang', tb73.balanced === true);

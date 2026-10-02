@@ -353,8 +353,10 @@ function generalLedger(accountId, from, to) {
 
   const entries = db
     .prepare(
-      `SELECT j.id AS journal_id, j.entry_date, j.entry_no, j.description, j.source, l.debit, l.credit, l.memo, l.partner_id
+      `SELECT j.id AS journal_id, j.entry_date, j.entry_no, j.description, j.source, l.debit, l.credit, l.memo, l.partner_id,
+              p.name AS partner_name
          FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+         LEFT JOIN partners p ON p.id = l.partner_id
          ${where}
         ORDER BY j.entry_date, j.id, l.id`
     )
