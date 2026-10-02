@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { PageHeader, Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, StatCard, TombolEkspor } from '../components/ui';
 import { rupiah, today, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import HapusJurnal from '../components/HapusJurnal';
 
 const emptyEntry = () => ({
   entry_date: today(),
@@ -58,6 +59,7 @@ export default function Jurnal() {
   const [accountId, setAccountId] = useState('');
   const [ledger, setLedger] = useState(null);
   const [pindah, setPindah] = useState(null);
+  const [hapusJ, setHapusJ] = useState(null);
   const [memindah, setMemindah] = useState(false);
 
   const loadJournals = useCallback(async () => {
@@ -92,6 +94,8 @@ export default function Jurnal() {
   useEffect(() => { if (tab === 'ledger') loadLedger(); }, [tab, loadLedger]);
 
   const bisaPindahDiSini = bolehPindah && !!ledger?.account?.is_cash;
+  const bolehHapusJ = punya('keuangan.kas') || punya('keuangan.jurnal');
+  const kolomAksi = bisaPindahDiSini || bolehHapusJ;
   const rekeningTujuan = accounts.filter((a) => a.is_cash && a.active && a.code !== ledger?.account?.code);
 
   async function pindahkan(e) {
@@ -338,12 +342,12 @@ export default function Jurnal() {
             ) : (
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th>{bisaPindahDiSini && <th />}</tr></thead>
+                  <thead><tr><th>Tanggal</th><th>No. Jurnal</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th>{kolomAksi && <th />}</tr></thead>
                   <tbody>
                     <tr className="bg-slate-50">
                       <td colSpan={5} className="px-3 py-2 font-semibold">Saldo Awal</td>
                       <td className="tabular px-3 py-2 font-semibold">{rupiah(ledger.opening)}</td>
-                      {bisaPindahDiSini && <td />}
+                      {kolomAksi && <td />}
                     </tr>
                     {ledger.entries.map((e, i) => (
                       <tr key={i}>
@@ -353,15 +357,24 @@ export default function Jurnal() {
                         <td className="tabular">{e.debit ? rupiah(e.debit) : '-'}</td>
                         <td className="tabular">{e.credit ? rupiah(e.credit) : '-'}</td>
                         <td className="tabular font-semibold">{rupiah(e.balance)}</td>
-                        {bisaPindahDiSini && (
-                          <td className="text-right">
-                            {LABEL_SUMBER_PINDAH[e.source] && (
+                        {kolomAksi && (
+                          <td className="whitespace-nowrap text-right">
+                            {bisaPindahDiSini && LABEL_SUMBER_PINDAH[e.source] && (
                               <button
                                 type="button" className="btn-ghost !px-2 !py-1 text-xs"
                                 title="Pindahkan ke rekening lain"
                                 onClick={() => setPindah({ journal_id: e.journal_id, entry_no: e.entry_no, entry_date: e.entry_date, description: e.description, credit: e.credit || e.debit, ke: '' })}
                               >
                                 Pindah
+                              </button>
+                            )}
+                            {bolehHapusJ && (
+                              <button
+                                type="button" className="btn-ghost !px-2 !py-1 text-rose-600"
+                                title="Hapus jurnal ini" aria-label={`Hapus ${e.entry_no}`}
+                                onClick={() => setHapusJ({ journal_id: e.journal_id })}
+                              >
+                                <Trash2 size={14} />
                               </button>
                             )}
                           </td>
@@ -516,6 +529,7 @@ export default function Jurnal() {
           </div>
         )}
       </Modal>
+      <HapusJurnal target={hapusJ} onClose={() => setHapusJ(null)} onSelesai={loadLedger} />
     </div>
   );
 }

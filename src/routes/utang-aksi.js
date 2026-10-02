@@ -294,4 +294,124 @@ router.delete('/jurnal/:id(\\d+)', butuhIzin('keuangan.kas'), ah(async (req, res
   });
 }));
 
+/* ================================================================
+ * HAPUS JURNAL DARI BUKU BESAR
+ * ================================================================
+ * Setiap baris di buku besar per akun bisa dihapus, tetapi caranya mengikuti
+ * asal jurnalnya — persis seperti di Utang & Piutang. Jurnal yang punya mitra
+ * utang/piutang diarahkan ke dialog Utang & Piutang (ada pilihan tandai lunas).
+ */
+const SUMBER_LANGSUNG = new Set(['MANUAL', 'SETTLEMENT', 'AWAL', 'LUNAS', 'CASH']);
+const ARAH_DOKUMEN = {
+  SALES: ['Order Penjualan', '/penjualan'],
+  RETURN: ['Retur Penjualan', '/penjualan/retur'],
+  PURCHASE_RETURN: ['Retur Pembelian', '/pembelian/retur'],
+  PO_HARGA: ['Pesanan Pembelian', '/pembelian'],
+  OPNAME: ['Stok Opname', '/gudang/opname'],
+  PAYROLL: ['Penggajian', '/presensi/penggajian'],
+  ADS: ['Biaya Iklan', '/penjualan/iklan'],
+  KASIR: ['Sesi Kasir', '/penjualan/sesi-kasir'],
+  REPAIR_LOSS: ['Barang Perlu Perbaikan', '/gudang/perbaikan'],
+};
+
+function ambilUmum(id) {
+  const j = db.prepare('SELECT * FROM journals WHERE id = ?').get(id);
+  if (!j) throw httpError(404, 'Jurnal tidak ditemukan');
+  const baris = db
+    .prepare(
+      `SELECT l.*, a.code, a.name AS account_name, a.subtype FROM journal_lines l
+         JOIN accounts a ON a.id = l.account_id WHERE l.journal_id = ? ORDER BY l.id`
+    )
+    .all(j.id);
+  const mitra = baris.find((l) => l.partner_id && ['PAYABLE', 'RECEIVABLE'].includes(l.subtype));
+  const total = r2(baris.reduce((s, l) => s + l.debit, 0));
+
+  let hapus = null;
+  let alasan = null;
+  let dokumen = null;
+  let mutasi = null;
+  if (SUMBER_LANGSUNG.has(j.source)) hapus = 'LANGSUNG';
+  else if (j.source === 'TRANSFER') hapus = 'PINDAH';
+  else if (j.source === 'STOCK') {
+    mutasi = db.prepare('SELECT m.*, p.name AS product_name, p.unit, p.stock, p.lacak_batch FROM stock_moves m JOIN products p ON p.id = m.product_id WHERE m.id = ?').get(j.source_id);
+    if (mutasi && String(mutasi.ref || '').startsWith('PO/')) {
+      dokumen = { nomor: mutasi.ref, tautan: '/pembelian' };
+      alasan = `Berasal dari penerimaan pesanan ${mutasi.ref} — hapus lewat menu Pesanan Pembelian.`;
+    } else if (mutasi && mutasi.source === 'MANUAL') hapus = 'MUTASI';
+    else alasan = 'Mutasi stok asalnya tidak ditemukan atau bukan dari Mutasi Stok.';
+  } else {
+    const [nama, tautan] = ARAH_DOKUMEN[j.source] || [j.source, null];
+    dokumen = tautan ? { nomor: nama, tautan } : null;
+    alasan = `Jurnal otomatis dari ${nama} — hapus/ubah lewat menu ${nama} supaya dokumen dan jurnalnya tetap sejalan.`;
+  }
+
+  const stokKurang = mutasi && mutasi.move_type === 'IN' && mutasi.stock + 0.0001 < mutasi.qty;
+  return {
+    j, baris, mutasi,
+    info: {
+      journal_id: j.id,
+      entry_no: j.entry_no,
+      entry_date: j.entry_date,
+      description: j.description,
+      source: j.source,
+      label: LABEL[j.source] || j.source,
+      total,
+      baris: baris.map((l) => ({ code: l.code, account_name: l.account_name, debit: r2(l.debit), credit: r2(l.credit) })),
+      mitra: mitra ? { partner_id: mitra.partner_id } : null,
+      hapus,
+      alasan,
+      dokumen,
+      mutasi: mutasi ? {
+        product_name: mutasi.product_name, qty: r2(mutasi.qty), unit: mutasi.unit, stok: r2(mutasi.stock),
+        arah: mutasi.move_type === 'IN' ? 'masuk' : 'keluar', stokKurang: !!stokKurang,
+      } : null,
+    },
+  };
+}
+
+router.get('/umum/:id(\\d+)', ah((req, res) => res.json(ambilUmum(Number(req.params.id)).info)));
+
+router.delete('/umum/:id(\\d+)', ah(async (req, res) => {
+  const a = ambilUmum(Number(req.params.id));
+  if (!req.izin.has('keuangan.jurnal') && !req.izin.has('keuangan.kas')) {
+    throw httpError(403, 'Menghapus jurnal membutuhkan izin keuangan.kas atau keuangan.jurnal');
+  }
+  if (!a.info.hapus) throw httpError(422, a.info.alasan);
+  tolakBilaTerekonsiliasi(a.j);
+
+  if (a.info.hapus === 'LANGSUNG' || a.info.hapus === 'PINDAH') {
+    db.transaction(() => {
+      // Tanda lunas yang menunjuk jurnal ini, dan potongan biaya milik
+      // pemindahan saldo, ikut terhapus bersama induknya.
+      for (const l of db.prepare("SELECT id FROM journals WHERE source = 'LUNAS' AND source_id = ?").all(a.j.id)) deleteJournalById(l.id);
+      if (a.info.hapus === 'PINDAH') {
+        for (const p of db.prepare("SELECT id FROM journals WHERE source = 'CASH' AND source_id = ?").all(a.j.id)) deleteJournalById(p.id);
+      }
+      deleteJournalById(a.j.id);
+    })();
+    return res.json({ ok: true, message: `${a.j.entry_no} dihapus — ${a.j.description}` });
+  }
+
+  // Mutasi stok manual: stok, HPP, dan jurnalnya dibalik bersama.
+  if (!req.izin.has('gudang.produk') && !req.izin.has('sistem.peran')) {
+    throw httpError(403, 'Menghapus mutasi stok membutuhkan izin gudang.produk');
+  }
+  const mv = a.mutasi;
+  if (mv.lacak_batch) throw httpError(422, `${mv.product_name} dilacak per batch — betulkan lewat Stok Opname`);
+  if (a.info.mutasi.stokKurang) {
+    throw httpError(422, `Stok ${mv.product_name} tinggal ${r2(mv.stock)} ${mv.unit}, tidak cukup untuk membatalkan barang masuk ${r2(mv.qty)} ${mv.unit} — barangnya sudah terjual`);
+  }
+  const cadangan = await buatCadangan('manual');
+  db.transaction(() => {
+    for (const l of db.prepare("SELECT id FROM journals WHERE source = 'LUNAS' AND source_id = ?").all(a.j.id)) deleteJournalById(l.id);
+    balikkanMutasi(mv);
+    hitungUlangSaldo(mv.product_id);
+  })();
+  res.json({
+    ok: true,
+    cadangan: cadangan.nama,
+    message: `Mutasi ${a.info.mutasi.arah} ${r2(mv.qty)} ${mv.unit} ${mv.product_name} (${a.j.entry_no}) dihapus — stok, HPP, dan jurnalnya dibalik. Cadangan: ${cadangan.nama}`,
+  });
+}));
+
 module.exports = router;

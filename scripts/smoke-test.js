@@ -7432,6 +7432,85 @@ async function main() {
   check('neraca saldo tetap seimbang', tb72.balanced === true);
 
 
+  console.log('\n73. Hapus jurnal dari Buku Besar per Akun');
+
+  const cap73 = Date.now();
+  const coa73 = await call('GET', '/api/finance/accounts');
+  const akun73 = (kode) => coa73.accounts.find((x) => x.code === kode);
+  const ada73 = async (id) => {
+    try { await call('GET', `/api/utang-aksi/umum/${id}`); return true; } catch (err) { return err.status !== 404; }
+  };
+
+  // Kas keluar → hapus langsung
+  const kas73 = await call('POST', '/api/cashflow/entries', {
+    entry_date: today, direction: 'OUT', amount: 12345, category_code: '6190', cash_code: '1000', description: `Uji hapus buku besar ${cap73}`,
+  });
+  const iKas73 = await call('GET', `/api/utang-aksi/umum/${kas73.journal.id}`);
+  check('kas keluar: bisa dihapus langsung', iKas73.hapus === 'LANGSUNG' && !iKas73.mitra);
+  const buku73 = await call('GET', `/api/finance/reports/ledger/${akun73('1000').id}?from=${today}&to=${today}`);
+  check('baris buku besar membawa id jurnal & mitra', buku73.entries.some((e) => e.journal_id === kas73.journal.id && 'partner_id' in e));
+  await call('DELETE', `/api/utang-aksi/umum/${kas73.journal.id}`);
+  check('kas keluar terhapus dari buku besar', !(await ada73(kas73.journal.id)));
+
+  // Jurnal manual
+  const man73 = await call('POST', '/api/finance/journals', {
+    entry_date: today, description: `Manual uji 73 ${cap73}`,
+    lines: [{ account_id: akun73('1000').id, debit: 500, credit: 0 }, { account_id: akun73('3000').id, debit: 0, credit: 500 }],
+  });
+  await call('DELETE', `/api/utang-aksi/umum/${man73.journal.id}`);
+  check('jurnal manual terhapus', !(await ada73(man73.journal.id)));
+
+  // Pindah saldo
+  const pindah73 = await call('POST', '/api/cashflow/pindah', { entry_date: today, from_code: '1000', to_code: '1010', amount: 7000 });
+  const iPindah73 = await call('GET', `/api/utang-aksi/umum/${pindah73.journal.id}`);
+  check('pindah saldo: dibatalkan sebagai pemindahan', iPindah73.hapus === 'PINDAH');
+  await call('DELETE', `/api/utang-aksi/umum/${pindah73.journal.id}`);
+  check('pindah saldo terhapus', !(await ada73(pindah73.journal.id)));
+
+  // Barang masuk tunai → mutasi ikut dibalik
+  const prod73 = (await call('POST', '/api/inventory/products', { sku: `P73-${cap73}`, name: 'Produk Uji Buku Besar', cost: 0, price: 30000 })).product;
+  const mv73 = (await call('POST', '/api/inventory/moves', {
+    product_id: prod73.id, move_date: today, move_type: 'IN', qty: 6, unit_cost: 10000, payment: 'CASH',
+  })).move;
+  const jStok73 = (await call('GET', `/api/finance/reports/ledger/${akun73('1200').id}?from=${today}&to=${today}`))
+    .entries.find((e) => e.source === 'STOCK' && /Produk Uji Buku Besar/.test(e.description));
+  const iStok73 = await call('GET', `/api/utang-aksi/umum/${jStok73.journal_id}`);
+  check('barang masuk tunai: dihapus bersama mutasinya', iStok73.hapus === 'MUTASI' && iStok73.mutasi.qty === 6);
+  const hStok73 = await call('DELETE', `/api/utang-aksi/umum/${jStok73.journal_id}`);
+  const stok73 = (await call('GET', `/api/inventory/products?q=P73-${cap73}`)).products[0].stock;
+  check('stok ikut dibalik & cadangan dibuat', stok73 === 0 && /^erp-/.test(hStok73.cadangan || ''), String(stok73));
+  void mv73;
+
+  // Jurnal penjualan → diarahkan ke menu asal
+  await call('POST', '/api/inventory/moves', { product_id: prod73.id, move_date: today, move_type: 'IN', qty: 2, unit_cost: 10000, payment: 'CASH' });
+  const ord73 = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: `Uji 73 ${cap73}`, items: [{ product_id: prod73.id, qty: 1, price: 30000 }],
+  });
+  const jual73 = await call('GET', `/api/finance/journals?from=${today}&to=${today}&source=SALES`);
+  const idJual73 = (jual73.rows.find((r) => r.description.includes((ord73.order || ord73).order_no)) || jual73.rows[0] || {}).id;
+  check('jurnal penjualan ditemukan', !!idJual73);
+  if (idJual73) {
+    const iJual73 = await call('GET', `/api/utang-aksi/umum/${idJual73}`);
+    check('jurnal penjualan diarahkan ke Order Penjualan', !iJual73.hapus && iJual73.dokumen && iJual73.dokumen.tautan === '/penjualan');
+    let tolak73 = 0;
+    try { await call('DELETE', `/api/utang-aksi/umum/${idJual73}`); } catch (err) { tolak73 = err.status; }
+    check('jurnal penjualan tidak bisa dihapus dari buku besar', tolak73 === 422);
+  }
+
+  // Utang supplier → diarahkan ke dialog Utang & Piutang
+  const sup73 = await call('POST', '/api/partners', { name: `Supplier BB ${cap73}`, kind: 'SUPPLIER' });
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod73.id, move_date: today, move_type: 'IN', qty: 1, unit_cost: 9000, payment: 'CREDIT', partner_id: (sup73.partner || sup73).id,
+  });
+  const jUtang73 = (await call('GET', `/api/finance/reports/ledger/${akun73('2000').id}?from=${today}&to=${today}`))
+    .entries.find((e) => e.partner_id === (sup73.partner || sup73).id);
+  const iUtang73 = await call('GET', `/api/utang-aksi/umum/${jUtang73.journal_id}`);
+  check('jurnal utang mitra dibuka di dialog Utang & Piutang', iUtang73.mitra && iUtang73.mitra.partner_id === (sup73.partner || sup73).id);
+
+  const tb73 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb73.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);
