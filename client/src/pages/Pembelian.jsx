@@ -54,6 +54,7 @@ export default function Pembelian() {
   const [terima, setTerima] = useState(null);
   const [nota, setNota] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [hapus, setHapus] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -257,6 +258,31 @@ export default function Pembelian() {
     }
   }
 
+  async function bukaHapus(po) {
+    try {
+      const p = await api.get(`/api/pembelian/${po.id}/hapus-pratinjau`);
+      setHapus({ po, p, stok: p.dariBarangMasuk || !p.stokCukup ? 'BIARKAN' : 'BALIK', ketik: '' });
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  async function jalankanHapus(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const q = new URLSearchParams({ stok: hapus.stok, konfirmasi: hapus.ketik.trim() });
+      const res = await api.del(`/api/pembelian/${hapus.po.id}?${q}`);
+      toast.success(res.message);
+      setHapus(null);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading || !data) return <Spinner label="Menyiapkan pesanan pembelian..." />;
 
   const r = data.ringkas;
@@ -389,6 +415,11 @@ export default function Pembelian() {
                         {bolehKelola && po.status === 'DIPESAN' && (
                           <button className="btn-ghost !px-2 !py-1 text-rose-600" onClick={() => batal(po)} aria-label="Batalkan">
                             <XCircle size={15} />
+                          </button>
+                        )}
+                        {bolehKelola && (
+                          <button className="btn-ghost !px-2 !py-1 text-slate-400 hover:text-rose-600" onClick={() => bukaHapus(po)} aria-label={`Hapus pesanan ${po.po_no}`} title="Hapus pesanan">
+                            <Trash2 size={15} />
                           </button>
                         )}
                       </div>
@@ -671,6 +702,89 @@ export default function Pembelian() {
               <button type="button" className="btn-secondary flex-1" onClick={() => setTerima(null)}>Batal</button>
               <button type="submit" className="btn-primary flex-1" disabled={saving}>
                 {saving ? 'Memproses...' : 'Terima Barang'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ---------- HAPUS PESANAN ---------- */}
+      <Modal open={!!hapus} onClose={() => setHapus(null)} title={`Hapus Pesanan — ${hapus?.po.po_no || ''}`} wide>
+        {hapus && (
+          <form onSubmit={jalankanHapus} className="grid gap-3">
+            <p className="text-sm text-slate-600">
+              <strong>{hapus.po.supplier_name}</strong> · {rupiah(hapus.po.total)}
+              {hapus.p.grn.length > 0 && <> · GRN {hapus.p.grn.join(', ')} ikut terhapus</>}
+            </p>
+
+            {hapus.p.returBeli.length > 0 && (
+              <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                Pesanan ini punya retur pembelian ({hapus.p.returBeli.join(', ')}). Hapus returnya dulu.
+              </p>
+            )}
+
+            {hapus.p.barang.length > 0 ? (
+              <>
+                <div className="table-wrap">
+                  <table className="table text-sm">
+                    <thead><tr><th>Barang yang sudah diterima</th><th className="text-right">Masuk dari PO ini</th><th className="text-right">Stok sekarang</th></tr></thead>
+                    <tbody>
+                      {hapus.p.barang.map((b) => (
+                        <tr key={b.product_id}>
+                          <td>{b.product_name}</td>
+                          <td className="tabular text-right">{num(b.qty)} {b.unit}</td>
+                          <td className={`tabular text-right ${b.cukup ? '' : 'font-semibold text-rose-600'}`}>{num(b.stok)} {b.unit}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grid gap-2">
+                  <label className={`flex cursor-pointer gap-3 rounded-xl border p-3 text-sm ${hapus.stok === 'BALIK' ? 'border-brand-500 bg-brand-50' : 'border-slate-200'} ${!hapus.p.stokCukup ? 'opacity-50' : ''}`}>
+                    <input type="radio" name="stok" checked={hapus.stok === 'BALIK'} disabled={!hapus.p.stokCukup}
+                      onChange={() => setHapus({ ...hapus, stok: 'BALIK' })} />
+                    <span>
+                      <strong>Hapus & batalkan penerimaan barang</strong>
+                      <span className="block text-xs text-slate-500">
+                        Stok dikurangi lagi, HPP & jurnal persediaan/utang dibalik. Pilih ini bila pesanan akan dibuat ulang lalu diterima lagi.
+                        {!hapus.p.stokCukup && ' (Tidak bisa: sebagian barang sudah terjual.)'}
+                      </span>
+                    </span>
+                  </label>
+                  <label className={`flex cursor-pointer gap-3 rounded-xl border p-3 text-sm ${hapus.stok === 'BIARKAN' ? 'border-brand-500 bg-brand-50' : 'border-slate-200'}`}>
+                    <input type="radio" name="stok" checked={hapus.stok === 'BIARKAN'}
+                      onChange={() => setHapus({ ...hapus, stok: 'BIARKAN' })} />
+                    <span>
+                      <strong>Hapus pesanannya saja, stok tetap</strong>
+                      <span className="block text-xs text-slate-500">
+                        Barang masuk, stok, dan jurnalnya tidak berubah — hanya dilepas dari nomor PO ini, lalu bisa dijadikan pesanan lagi
+                        lewat Mutasi Stok → "Jadikan pesanan".{hapus.p.dariBarangMasuk && ' Pesanan ini memang dibuat dari barang masuk.'}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
+                {hapus.stok === 'BALIK' && Math.abs(hapus.p.utang.berkurang) > 0.5 && (
+                  <p className={`rounded-xl px-3 py-2 text-xs ${hapus.p.utang.sesudah < -0.5 ? 'bg-amber-50 text-amber-800' : 'bg-slate-50 text-slate-600'}`}>
+                    Utang ke {hapus.po.supplier_name}: {rupiah(hapus.p.utang.sekarang)} → {rupiah(hapus.p.utang.sesudah)}.
+                    {hapus.p.utang.sesudah < -0.5 && ' Supplier akan tampak lebih bayar sampai pesanannya dicatat ulang.'}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-slate-600">Belum ada barang yang diterima — hanya dokumen pesanannya yang dihapus.</p>
+            )}
+
+            <Field label={`Ketik ${hapus.po.po_no} untuk konfirmasi`}>
+              <input className="input font-mono" value={hapus.ketik} onChange={(e) => setHapus({ ...hapus, ketik: e.target.value })} placeholder={hapus.po.po_no} />
+            </Field>
+            <p className="text-xs text-slate-500">Cadangan database dibuat otomatis sebelum penghapusan.</p>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setHapus(null)}>Batal</button>
+              <button type="submit" className="btn-danger flex-1"
+                disabled={saving || hapus.ketik.trim() !== hapus.po.po_no || hapus.p.returBeli.length > 0}>
+                <Trash2 size={16} /> {saving ? 'Menghapus...' : 'Hapus Pesanan'}
               </button>
             </div>
           </form>

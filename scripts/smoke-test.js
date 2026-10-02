@@ -7210,6 +7210,112 @@ async function main() {
   check('neraca saldo tetap seimbang', tb70.balanced === true);
 
 
+  console.log('\n71. Hapus pesanan pembelian');
+
+  const cap71 = Date.now();
+  const sup71 = await call('POST', '/api/partners', {
+    name: `Supplier Hapus PO ${cap71}`, kind: 'SUPPLIER', phone: '0812000711', address: 'Jl. Uji 71',
+  });
+  const idSup71 = (sup71.partner || sup71).id;
+  const prod71 = (await call('POST', '/api/inventory/products', {
+    sku: `P71-${cap71}`, name: 'Produk Uji Hapus PO', cost: 0, price: 40000,
+  })).product;
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod71.id, move_date: today, move_type: 'IN', qty: 5, unit_cost: 10000, payment: 'CASH',
+  });
+  const info71 = async () => (await call('GET', `/api/inventory/products?q=P71-${cap71}`)).products[0];
+  const utang71 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    return r2Uji(([...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((r) => r.id === idSup71) || {}).utang || 0);
+  };
+  const tbAwal71 = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+  const awal71 = await info71();
+
+  // ---- A. Pesanan sudah diterima → hapus & batalkan penerimaan ----
+  const po71 = (await call('POST', '/api/pembelian', {
+    order_date: today, partner_id: idSup71, payment: 'CREDIT',
+    items: [{ product_id: prod71.id, qty: 10, unit_cost: 16000 }],
+  })).po;
+  await call('POST', `/api/pembelian/${po71.id}/terima`, {
+    receive_date: today, lines: [{ item_id: po71.items[0].id, qty: 10 }],
+  });
+  // Harga nota dibetulkan → ada jurnal PO_HARGA yang juga harus ikut hilang
+  await call('PUT', `/api/pembelian/${po71.id}`, {
+    order_date: today, partner_id: idSup71, payment: 'CREDIT',
+    items: [{ id: po71.items[0].id, product_id: prod71.id, qty: 10, unit_cost: 17000 }],
+  });
+  check('stok bertambah dari penerimaan', (await info71()).stock === awal71.stock + 10);
+
+  const prat71 = await call('GET', `/api/pembelian/${po71.id}/hapus-pratinjau`);
+  check('pratinjau menyebut barang yang akan dibalik', prat71.barang.length === 1 && prat71.barang[0].qty === 10 && prat71.stokCukup);
+  check('pratinjau menghitung pengaruh ke utang supplier', prat71.utang.berkurang > 0 && near(prat71.utang.sesudah, 0, 1),
+    JSON.stringify(prat71.utang));
+
+  let tolakKonfirmasi71 = 0;
+  try { await call('DELETE', `/api/pembelian/${po71.id}?stok=BALIK&konfirmasi=SALAH`); }
+  catch (err) { tolakKonfirmasi71 = err.status; }
+  check('hapus tanpa ketik nomor PO yang benar ditolak', tolakKonfirmasi71 === 422);
+
+  const hapus71 = await call('DELETE', `/api/pembelian/${po71.id}?stok=BALIK&konfirmasi=${encodeURIComponent(po71.po_no)}`);
+  check('pesanan terhapus dan cadangan dibuat', hapus71.ok && /^erp-/.test(hapus71.cadangan || ''), hapus71.message);
+  const akhir71 = await info71();
+  check('stok kembali seperti sebelum pesanan', akhir71.stock === awal71.stock, String(akhir71.stock));
+  check('HPP kembali seperti sebelum pesanan', near(akhir71.cost, awal71.cost, 0.5), String(akhir71.cost));
+  check('utang supplier kembali nol', near(await utang71(), 0, 1));
+  let tidakAda71 = 0;
+  try { await call('GET', `/api/pembelian/${po71.id}`); } catch (err) { tidakAda71 = err.status; }
+  check('pesanan tidak ditemukan lagi', tidakAda71 === 404);
+  const grn71 = await call('GET', `/api/grn?from=${today}&to=${today}&q=${encodeURIComponent(po71.po_no)}`);
+  check('GRN pesanan ikut terhapus', !grn71.rows.some((g) => g.po_no === po71.po_no));
+  const tbAkhir71 = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+  check('buku besar kembali persis seperti sebelum pesanan',
+    JSON.stringify(tbAkhir71.rows.filter((r) => Math.abs(r.debit - r.credit) > 0.004))
+      === JSON.stringify(tbAwal71.rows.filter((r) => Math.abs(r.debit - r.credit) > 0.004)));
+
+  // ---- B. Barang sudah terjual → batalkan penerimaan ditolak ----
+  const po71b = (await call('POST', '/api/pembelian', {
+    order_date: today, partner_id: idSup71, payment: 'CREDIT',
+    items: [{ product_id: prod71.id, qty: 4, unit_cost: 10000 }],
+  })).po;
+  await call('POST', `/api/pembelian/${po71b.id}/terima`, {
+    receive_date: today, lines: [{ item_id: po71b.items[0].id, qty: 4 }],
+  });
+  await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Habiskan 71',
+    items: [{ product_id: prod71.id, qty: (await info71()).stock, price: 40000 }],
+  });
+  const prat71b = await call('GET', `/api/pembelian/${po71b.id}/hapus-pratinjau`);
+  check('pratinjau tahu stoknya tidak cukup', prat71b.stokCukup === false);
+  let tolakTerjual71 = 0;
+  try { await call('DELETE', `/api/pembelian/${po71b.id}?stok=BALIK&konfirmasi=${encodeURIComponent(po71b.po_no)}`); }
+  catch (err) { tolakTerjual71 = err.status; }
+  check('barang sudah terjual: pembatalan penerimaan ditolak', tolakTerjual71 === 422);
+  check('penolakan tidak mengubah apa pun', (await call('GET', `/api/pembelian/${po71b.id}`)).po.po_no === po71b.po_no);
+
+  // ---- C. Hapus pesanan saja, stok tetap ----
+  const stokSblm71 = (await info71()).stock;
+  await call('DELETE', `/api/pembelian/${po71b.id}?stok=BIARKAN&konfirmasi=${encodeURIComponent(po71b.po_no)}`);
+  check('pilihan stok tetap: stok tidak berubah', (await info71()).stock === stokSblm71);
+  const mutasi71 = (await call('GET', `/api/inventory/moves?from=${today}&to=${today}&product_id=${prod71.id}`)).rows;
+  const lepas71 = mutasi71.find((m) => m.move_type === 'IN' && near(m.qty, 4, 0.01) && !m.ref);
+  check('barang masuknya dilepas dari nomor PO', !!lepas71 && !mutasi71.some((m) => m.ref === po71b.po_no));
+  const jadi71 = await call('POST', '/api/pembelian/dari-barang-masuk', { move_id: lepas71.id, order_date: today });
+  check('barang masuk itu bisa dijadikan pesanan lagi', jadi71.po.status === 'SELESAI' && (await info71()).stock === stokSblm71);
+
+  // ---- D. Pesanan belum diterima ----
+  const po71c = (await call('POST', '/api/pembelian', {
+    order_date: today, partner_id: idSup71, payment: 'CREDIT',
+    items: [{ product_id: prod71.id, qty: 3, unit_cost: 10000 }],
+  })).po;
+  await call('DELETE', `/api/pembelian/${po71c.id}?konfirmasi=${encodeURIComponent(po71c.po_no)}`);
+  let tidakAda71c = 0;
+  try { await call('GET', `/api/pembelian/${po71c.id}`); } catch (err) { tidakAda71c = err.status; }
+  check('pesanan yang belum datang bisa langsung dihapus', tidakAda71c === 404);
+
+  const tb71 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb71.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

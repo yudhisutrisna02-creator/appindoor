@@ -25,7 +25,8 @@ const { dokumenPdf, tableCsv } = require('../utils/exporters');
 const { blokTtd, KIND } = require('../utils/ttd');
 const { isiDokumen } = require('../utils/dokumen');
 const { todayLocal } = require('../utils/time');
-const { applyMove, koreksiHargaMasuk } = require('./inventory');
+const { applyMove, koreksiHargaMasuk, balikkanMutasi, hitungUlangSaldo } = require('./inventory');
+const { buatCadangan } = require('../utils/cadangan');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -1047,6 +1048,178 @@ router.patch('/:id(\\d+)/batal', butuhIzin('pembelian.kelola'), ah((req, res) =>
     db.prepare("UPDATE purchase_orders SET status = 'BATAL' WHERE id = ?").run(po.id);
   })();
   res.json({ ok: true, message: `Pesanan ${po.po_no} dibatalkan` });
+}));
+
+// ==================================================================
+// HAPUS PESANAN
+// ==================================================================
+/**
+ * Apa saja yang ikut terhapus bila pesanan ini dihapus.
+ *
+ * Pesanan yang barangnya sudah datang meninggalkan jejak di tempat lain:
+ * mutasi stok (ref = nomor PO) beserta jurnal persediaan lawan utang/kas,
+ * jurnal selisih harga (PO_HARGA), dokumen GRN, dan jatah booking pabrik.
+ * Dua cara menghapus:
+ *   - BALIK: semua penerimaan dibatalkan — stok berkurang, HPP dan jurnalnya
+ *     kembali seperti sebelum barang datang. Untuk pesanan yang salah lalu
+ *     dicatat ulang dan diterima lagi.
+ *   - BIARKAN: hanya dokumen pesanannya yang hilang; mutasi barang masuknya
+ *     tetap ada (stok & jurnal utuh) dan dilepas dari nomor PO ini, sehingga
+ *     bisa dijadikan pesanan lagi lewat "dari barang masuk".
+ */
+function rencanaHapus(po) {
+  const items = db.prepare('SELECT * FROM purchase_items WHERE po_id = ?').all(po.id);
+  const mutasi = db
+    .prepare(
+      `SELECT m.*, p.name AS product_name, p.unit, p.stock, p.lacak_batch
+         FROM stock_moves m JOIN products p ON p.id = m.product_id
+        WHERE m.ref = ? AND m.source = 'MANUAL' AND m.move_type = 'IN'
+        ORDER BY m.id`
+    )
+    .all(po.po_no);
+
+  // Kebutuhan stok per produk — satu produk bisa datang beberapa kali.
+  const perProduk = new Map();
+  for (const m of mutasi) {
+    const ada = perProduk.get(m.product_id) || {
+      product_id: m.product_id, product_name: m.product_name, unit: m.unit, stok: r2(m.stock), qty: 0, lacak_batch: m.lacak_batch,
+    };
+    ada.qty = r2(ada.qty + m.qty);
+    perProduk.set(m.product_id, ada);
+  }
+  const barang = [...perProduk.values()].map((b) => ({ ...b, cukup: b.stok + 0.0001 >= b.qty }));
+
+  const jurnal = [
+    ...(mutasi.length
+      ? db.prepare(`SELECT id, entry_no FROM journals WHERE source = 'STOCK' AND source_id IN (${mutasi.map(() => '?').join(',')})`)
+        .all(...mutasi.map((m) => m.id))
+      : []),
+    ...(items.length
+      ? db.prepare(`SELECT id, entry_no FROM journals WHERE source = 'PO_HARGA' AND source_id IN (${items.map(() => '?').join(',')})`)
+        .all(...items.map((i) => i.id))
+      : []),
+  ];
+
+  // Pengaruh ke utang supplier: baris utang (PAYABLE) milik jurnal-jurnal itu.
+  const pengaruhUtang = jurnal.length
+    ? r2(db.prepare(
+      `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS n
+         FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+        WHERE a.subtype = 'PAYABLE' AND l.journal_id IN (${jurnal.map(() => '?').join(',')})`
+    ).get(...jurnal.map((j) => j.id)).n)
+    : 0;
+  const utangSekarang = r2(db.prepare(
+    `SELECT COALESCE(SUM(l.credit - l.debit), 0) AS n
+       FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+       JOIN journals j ON j.id = l.journal_id
+      WHERE a.subtype = 'PAYABLE' AND l.partner_id = ? AND j.posted = 1`
+  ).get(po.partner_id).n);
+
+  const returBeli = db.prepare('SELECT return_no FROM purchase_returns WHERE po_id = ?').all(po.id).map((r) => r.return_no);
+  const grn = db.prepare('SELECT grn_no FROM goods_receipts WHERE po_id = ?').all(po.id).map((g) => g.grn_no);
+
+  return {
+    items, mutasi, jurnal, barang, returBeli, grn,
+    dariBarangMasuk: /Dari barang masuk/.test(po.note || ''),
+    utang: { sekarang: utangSekarang, berkurang: pengaruhUtang, sesudah: r2(utangSekarang - pengaruhUtang) },
+  };
+}
+
+/** GET /api/pembelian/:id/hapus-pratinjau — yang akan terjadi bila pesanan dihapus. */
+router.get('/:id(\\d+)/hapus-pratinjau', butuhIzin('pembelian.kelola'), ah((req, res) => {
+  const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(Number(req.params.id));
+  if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');
+  const r = rencanaHapus(po);
+  res.json({
+    po_no: po.po_no,
+    status: po.status,
+    barang: r.barang,
+    jumlahMutasi: r.mutasi.length,
+    jumlahJurnal: r.jurnal.length,
+    grn: r.grn,
+    returBeli: r.returBeli,
+    dariBarangMasuk: r.dariBarangMasuk,
+    utang: r.utang,
+    stokCukup: r.barang.every((b) => b.cukup),
+  });
+}));
+
+const hapusSchema = z.object({
+  stok: z.enum(['BALIK', 'BIARKAN']).default('BALIK'),
+  konfirmasi: z.string().trim(),
+});
+
+/** DELETE /api/pembelian/:id — menghapus pesanan beserta akibatnya. */
+router.delete('/:id(\\d+)', butuhIzin('pembelian.kelola'), ah(async (req, res) => {
+  const body = parse(hapusSchema, { ...(req.body || {}), ...req.query });
+  const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(Number(req.params.id));
+  if (!po) throw httpError(404, 'Pesanan pembelian tidak ditemukan');
+  if (body.konfirmasi !== po.po_no) {
+    throw httpError(422, `Ketik nomor pesanan ${po.po_no} untuk mengonfirmasi penghapusan`);
+  }
+
+  const awal = rencanaHapus(po);
+  if (awal.returBeli.length) {
+    throw httpError(422, `Pesanan ini punya retur pembelian (${awal.returBeli.join(', ')}) — hapus returnya dulu`);
+  }
+  for (const j of awal.jurnal) tolakBilaTerekonsiliasi(j);
+  if (body.stok === 'BALIK') {
+    const batch = awal.barang.find((b) => b.lacak_batch);
+    if (batch) {
+      throw httpError(422, `${batch.product_name} dilacak per batch — kurangi stoknya lewat Stok Opname, lalu hapus pesanan dengan pilihan "stok tetap"`);
+    }
+    const kurang = awal.barang.find((b) => !b.cukup);
+    if (kurang) {
+      throw httpError(
+        422,
+        `Stok ${kurang.product_name} tinggal ${kurang.stok} ${kurang.unit}, tidak cukup untuk membatalkan penerimaan ` +
+          `${kurang.qty} ${kurang.unit} — barangnya sudah terjual. Pilih "hapus pesanan saja, stok tetap", atau betulkan lewat Ubah pesanan.`
+      );
+    }
+  }
+
+  // Cadangan dulu: penghapusan ini menyentuh stok, HPP, dan buku besar.
+  const cadangan = await buatCadangan('manual');
+
+  db.transaction(() => {
+    const r = rencanaHapus(po);
+    for (const it of r.items) {
+      deleteJournalsBySource('PO_HARGA', it.id);
+      if (it.booking_item_id) geserJatahBooking(it.booking_item_id, -it.qty);
+    }
+    if (body.stok === 'BALIK') {
+      const produk = new Set();
+      for (const m of r.mutasi) {
+        balikkanMutasi(m);
+        produk.add(m.product_id);
+      }
+      for (const id of produk) hitungUlangSaldo(id);
+    } else {
+      // Mutasinya tetap; hanya dilepas dari nomor pesanan yang dihapus.
+      db.prepare(
+        `UPDATE stock_moves
+            SET ref = NULL, note = TRIM(COALESCE(note, '') || ' · lepas dari ' || ? || ' (pesanan dihapus)')
+          WHERE ref = ? AND source = 'MANUAL' AND move_type = 'IN'`
+      ).run(po.po_no, po.po_no);
+    }
+    db.prepare('DELETE FROM goods_receipt_items WHERE grn_id IN (SELECT id FROM goods_receipts WHERE po_id = ?)').run(po.id);
+    db.prepare('DELETE FROM goods_receipts WHERE po_id = ?').run(po.id);
+    db.prepare('DELETE FROM purchase_items WHERE po_id = ?').run(po.id);
+    db.prepare('DELETE FROM purchase_orders WHERE id = ?').run(po.id);
+  })();
+
+  const sesudah = body.stok === 'BALIK' ? awal.utang.sesudah : awal.utang.sekarang;
+  res.json({
+    ok: true,
+    cadangan: cadangan.nama,
+    message:
+      `Pesanan ${po.po_no} dihapus` +
+      (body.stok === 'BALIK'
+        ? (awal.mutasi.length ? ` — ${awal.mutasi.length} penerimaan barang dibatalkan, stok & jurnalnya dibalik` : '')
+        : (awal.mutasi.length ? ' — barang masuknya tetap di stok (bisa dijadikan pesanan lagi)' : '')) +
+      (sesudah < -0.5 ? `. Perhatian: supplier ini kini lebih bayar Rp ${Math.abs(sesudah).toLocaleString('id-ID')} — catat ulang pesanannya atau betulkan pembayarannya di Utang & Piutang.` : '.') +
+      ` Cadangan sebelum hapus: ${cadangan.nama}`,
+  });
 }));
 
 daftarkanEkspor(router, {

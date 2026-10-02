@@ -1266,6 +1266,8 @@ router.get('/opname/:id', ah((req, res) => {
 module.exports = router;
 module.exports.applyMove = applyMove;
 module.exports.koreksiHargaMasuk = koreksiHargaMasuk;
+module.exports.balikkanMutasi = balikkanMutasi;
+module.exports.hitungUlangSaldo = hitungUlangSaldo;
 // Dipakai Pusat Perhatian supaya peringatan kadaluarsa dan halamannya
 // menghitung dari fungsi yang sama, bukan dua query yang bisa berbeda.
 module.exports.ambilKadaluarsa = ambilKadaluarsa;
