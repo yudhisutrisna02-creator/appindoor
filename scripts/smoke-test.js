@@ -7316,6 +7316,122 @@ async function main() {
   check('neraca saldo tetap seimbang', tb71.balanced === true);
 
 
+  console.log('\n72. Ubah, hapus & tandai lunas di Utang & Piutang');
+
+  const cap72 = Date.now();
+  const sup72 = await call('POST', '/api/partners', {
+    name: `Supplier Aksi ${cap72}`, kind: 'BOTH', phone: '0812000722', address: 'Jl. Uji 72',
+  });
+  const idSup72 = (sup72.partner || sup72).id;
+  const prod72 = (await call('POST', '/api/inventory/products', {
+    sku: `P72-${cap72}`, name: 'Produk Uji Aksi Utang', cost: 0, price: 50000,
+  })).product;
+  const info72 = async () => (await call('GET', `/api/inventory/products?q=P72-${cap72}`)).products[0];
+  const saldoMitra72 = async () => {
+    const d = await call('GET', '/api/cashflow/ar-ap');
+    const r = [...d.utang, ...d.piutang, ...(d.lebihBayar || [])].find((x) => x.id === idSup72) || {};
+    return { utang: r2Uji(r.utang || 0), piutang: r2Uji(r.piutang || 0) };
+  };
+  const kas72 = async () => {
+    const tb = await call('GET', '/api/finance/reports/trial-balance?from=2000-01-01&to=2099-12-31');
+    const b = (tb.rows || []).find((r) => r.code === '1000') || {};
+    return r2Uji((b.debit || 0) - (b.credit || 0));
+  };
+  const jurnalMitra72 = async (sumber) => (await call('GET', `/api/cashflow/transaksi-mitra?from=${today}&to=${today}&q=${encodeURIComponent(`Supplier Aksi ${cap72}`)}`))
+    .rows.filter((r) => r.source === sumber);
+
+  // Barang masuk kredit — seperti data impor Agustus
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod72.id, move_date: today, move_type: 'IN', qty: 10, unit_cost: 20000, payment: 'CREDIT', partner_id: idSup72,
+  });
+  let jm72 = (await jurnalMitra72('STOCK'))[0];
+  const i72 = await call('GET', `/api/utang-aksi/jurnal/${jm72.journal_id}?partner_id=${idSup72}`);
+  check('barang masuk: tersedia ubah nominal, hapus barang masuk, dan tandai lunas',
+    i72.ubah === 'HARGA_MASUK' && i72.hapus === 'BARANG_MASUK' && i72.bolehLunasi && i72.nominal === 200000, JSON.stringify({ u: i72.ubah, h: i72.hapus }));
+
+  // ---- A. Ubah nominal barang masuk ----
+  await call('PUT', `/api/utang-aksi/jurnal/${jm72.journal_id}`, { partner_id: idSup72, tanggal: today, nominal: 180000, catatan: 'harga nota benar' });
+  check('ubah nominal: utang ikut berubah', (await saldoMitra72()).utang === 180000);
+  check('ubah nominal: HPP ikut disesuaikan', near((await info72()).cost, 18000, 1), String((await info72()).cost));
+  jm72 = (await jurnalMitra72('STOCK'))[0]; // jurnalnya ditulis ulang saat harga dibetulkan
+
+  // ---- B. Tandai lunas: utang tertutup, stok & kas tidak berubah ----
+  const kasSblm72 = await kas72();
+  const stokSblm72 = (await info72()).stock;
+  let tolakLebih72 = 0;
+  try { await call('POST', `/api/utang-aksi/jurnal/${jm72.journal_id}/lunasi`, { partner_id: idSup72, tanggal: today, nominal: 999999 }); }
+  catch (err) { tolakLebih72 = err.status; }
+  check('tandai lunas melebihi utang ditolak', tolakLebih72 === 422);
+  const lunas72 = await call('POST', `/api/utang-aksi/jurnal/${jm72.journal_id}/lunasi`, { partner_id: idSup72, tanggal: today, nominal: 180000 });
+  check('tandai lunas: utang menjadi nol', (await saldoMitra72()).utang === 0, lunas72.message);
+  check('tandai lunas: stok & Kas Tunai tidak berubah', (await info72()).stock === stokSblm72 && near(await kas72(), kasSblm72, 1));
+  const i72b = await call('GET', `/api/utang-aksi/jurnal/${jm72.journal_id}?partner_id=${idSup72}`);
+  check('transaksi tercatat sudah ditandai lunas', i72b.sudahLunas.length === 1 && i72b.bolehLunasi === false);
+
+  // Tanda lunas bisa dihapus lagi
+  const jLunas72 = (await jurnalMitra72('LUNAS'))[0];
+  const iLunas72 = await call('GET', `/api/utang-aksi/jurnal/${jLunas72.journal_id}?partner_id=${idSup72}`);
+  check('tanda lunas bisa diubah & dihapus langsung', iLunas72.hapus === 'LANGSUNG' && iLunas72.ubah === 'NOMINAL');
+  await call('DELETE', `/api/utang-aksi/jurnal/${jLunas72.journal_id}?partner_id=${idSup72}`);
+  check('hapus tanda lunas: utang kembali', (await saldoMitra72()).utang === 180000);
+
+  // ---- C. Hapus barang masuk: stok, HPP, utang dibalik ----
+  const hapus72 = await call('DELETE', `/api/utang-aksi/jurnal/${jm72.journal_id}?partner_id=${idSup72}`);
+  check('barang masuk dihapus dengan cadangan', hapus72.ok && /^erp-/.test(hapus72.cadangan || ''));
+  check('stok & utang kembali nol', (await info72()).stock === 0 && (await saldoMitra72()).utang === 0);
+
+  // ---- D. Barang sudah terjual → hapus ditolak, tandai lunas tetap bisa ----
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod72.id, move_date: today, move_type: 'IN', qty: 5, unit_cost: 10000, payment: 'CREDIT', partner_id: idSup72,
+  });
+  await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Habiskan 72', items: [{ product_id: prod72.id, qty: 5, price: 50000 }],
+  });
+  const jm72d = (await jurnalMitra72('STOCK'))[0];
+  let tolakTerjual72 = 0;
+  try { await call('DELETE', `/api/utang-aksi/jurnal/${jm72d.journal_id}?partner_id=${idSup72}`); }
+  catch (err) { tolakTerjual72 = err.status; }
+  check('barang sudah terjual: hapus barang masuk ditolak', tolakTerjual72 === 422);
+  await call('POST', `/api/utang-aksi/jurnal/${jm72d.journal_id}/lunasi`, { partner_id: idSup72, tanggal: today, nominal: 50000 });
+  check('...tetapi utangnya bisa ditandai lunas', (await saldoMitra72()).utang === 0);
+
+  // ---- E. Pelunasan dihapus lewat jalur yang sama ----
+  await call('POST', '/api/inventory/moves', {
+    product_id: prod72.id, move_date: today, move_type: 'IN', qty: 2, unit_cost: 10000, payment: 'CREDIT', partner_id: idSup72,
+  });
+  const bayar72 = await call('POST', '/api/cashflow/settlements', {
+    entry_date: today, partner_id: idSup72, direction: 'PAY', amount: 15000, cash_code: '1000',
+  });
+  const iBayar72 = await call('GET', `/api/utang-aksi/jurnal/${bayar72.journal.id}?partner_id=${idSup72}`);
+  check('pelunasan: ubah lewat form pelunasan, hapus langsung', iBayar72.ubah === 'PELUNASAN' && iBayar72.hapus === 'LANGSUNG');
+  await call('DELETE', `/api/utang-aksi/jurnal/${bayar72.journal.id}?partner_id=${idSup72}`);
+  check('pelunasan terhapus: utang kembali penuh', (await saldoMitra72()).utang === 20000);
+
+  // ---- F. Piutang penjualan: tidak bisa dihapus dari sini, bisa ditandai lunas ----
+  const order72 = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: 'Piutang 72', partner_id: idSup72, payment_status: 'UNPAID',
+    items: [{ product_id: prod72.id, qty: 1, price: 50000 }],
+  });
+  void order72;
+  const jSales72 = (await jurnalMitra72('SALES')).find((r) => r.subtype === 'RECEIVABLE');
+  if (jSales72) {
+    const iSales72 = await call('GET', `/api/utang-aksi/jurnal/${jSales72.journal_id}?partner_id=${idSup72}`);
+    check('piutang penjualan: diarahkan ke order, bisa ditandai lunas',
+      !iSales72.hapus && iSales72.dokumen && iSales72.dokumen.jenis === 'ORDER' && iSales72.bolehLunasi);
+    let tolakSales72 = 0;
+    try { await call('DELETE', `/api/utang-aksi/jurnal/${jSales72.journal_id}?partner_id=${idSup72}`); }
+    catch (err) { tolakSales72 = err.status; }
+    check('jurnal penjualan tidak bisa dihapus dari Utang & Piutang', tolakSales72 === 422);
+    await call('POST', `/api/utang-aksi/jurnal/${jSales72.journal_id}/lunasi`, { partner_id: idSup72, tanggal: today, nominal: iSales72.nominal });
+    check('piutang ditandai lunas', (await saldoMitra72()).piutang === 0);
+  } else {
+    check('order belum lunas membentuk piutang mitra', false, 'jurnal SALES tidak ditemukan');
+  }
+
+  const tb72 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb72.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

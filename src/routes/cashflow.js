@@ -948,11 +948,12 @@ router.post('/settlements', butuhIzin('keuangan.kas'), ah((req, res) => {
 const LABEL_TRANSAKSI = {
   SETTLEMENT: 'Pelunasan', AWAL: 'Saldo awal', STOCK: 'Barang masuk', SALES: 'Penjualan',
   PURCHASE_RETURN: 'Retur pembelian', RETURN: 'Retur penjualan', CASH: 'Kas masuk/keluar',
-  MANUAL: 'Jurnal manual', PAYROLL: 'Penggajian', ADS: 'Iklan',
+  MANUAL: 'Jurnal manual', PAYROLL: 'Penggajian', ADS: 'Iklan', LUNAS: 'Ditandai lunas',
+  PO_HARGA: 'Selisih harga pesanan', KASIR: 'Kasir',
 };
 // Hanya jurnal yang dokumennya adalah jurnal itu sendiri. Utang dari barang
 // masuk atau pesanan pembelian dibetulkan lewat dokumen asalnya.
-const BISA_HAPUS_MITRA = new Set(['SETTLEMENT', 'AWAL']);
+const BISA_HAPUS_MITRA = new Set(['SETTLEMENT', 'AWAL', 'LUNAS']);
 
 /**
  * Pengambil transaksi utang/piutang — satu baris per jurnal per mitra.

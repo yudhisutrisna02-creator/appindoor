@@ -32,6 +32,7 @@ const LABEL_SUMBER = {
   REPAIR: 'Perbaikan barang',
   REPAIR_LOSS: 'Barang rusak',
   KASIR: 'Selisih kas kasir',
+  LUNAS: 'Ditandai lunas',
   PO_HARGA: 'Selisih harga pembelian',
 };
 

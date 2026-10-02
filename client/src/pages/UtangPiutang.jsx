@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HandCoins, Receipt, Wallet, Eye, Trash2, ListOrdered, AlertTriangle } from 'lucide-react';
+import { HandCoins, Receipt, Wallet, Eye, Trash2, ListOrdered, AlertTriangle, Pencil } from 'lucide-react';
+import AksiTransaksiMitra from '../components/AksiTransaksiMitra';
 import { api } from '../lib/api';
 import { PageHeader, StatCard, Spinner, EmptyState, Modal, useToast, Field, TombolEkspor } from '../components/ui';
 import { rupiah, today, dateID } from '../lib/format';
@@ -16,6 +17,7 @@ export default function UtangPiutang() {
   const [tab, setTab] = useState('piutang');
   const [data, setData] = useState(null);
   const [options, setOptions] = useState(null);
+  const [aksi, setAksi] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bayar, setBayar] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -75,23 +77,6 @@ export default function UtangPiutang() {
       toast.error(err.message);
     } finally {
       setSaving(false);
-    }
-  }
-
-  // Pembayaran yang salah nominal, tanggal, atau rekening dihapus lalu dicatat
-  // ulang. Utang/piutangnya terbuka kembali sebesar nominal itu.
-  async function hapusPembayaran(e) {
-    if (!window.confirm(
-      `Hapus pembayaran ${e.entry_no} (${dateID(e.entry_date)}, ${rupiah(e.debit || e.credit)})? ` +
-      'Sisa utang/piutangnya bertambah lagi sebesar nominal ini, lalu catat ulang pembayaran yang benar.'
-    )) return;
-    try {
-      const res = await api.del(`/api/cashflow/settlements/${e.journal_id}`);
-      toast.success(res.message);
-      setDetail(await api.get(`/api/partners/${detail.partner.id}/ledger`));
-      load();
-    } catch (err) {
-      toast.error(err.message);
     }
   }
 
@@ -337,15 +322,20 @@ export default function UtangPiutang() {
                         <td className="tabular">{e.credit ? rupiah(e.credit) : '-'}</td>
                         {bolehHapus && (
                           <td>
-                            {(e.source === 'SETTLEMENT' || e.source === 'AWAL') && (
+                            <div className="flex justify-end gap-0.5">
                               <button
-                                type="button" className="btn-ghost !px-2 !py-1 text-rose-600"
-                                title="Hapus pembayaran ini" aria-label="Hapus pembayaran"
-                                onClick={() => hapusPembayaran(e)}
+                                type="button" className="btn-ghost !px-2 !py-1" title="Ubah" aria-label={`Ubah ${e.entry_no}`}
+                                onClick={() => setAksi({ journal_id: e.journal_id, partner_id: detail.partner.id, mode: 'ubah' })}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <button
+                                type="button" className="btn-ghost !px-2 !py-1 text-rose-600" title="Hapus / tandai lunas" aria-label={`Hapus ${e.entry_no}`}
+                                onClick={() => setAksi({ journal_id: e.journal_id, partner_id: detail.partner.id, mode: 'hapus' })}
                               >
                                 <Trash2 size={14} />
                               </button>
-                            )}
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -357,6 +347,13 @@ export default function UtangPiutang() {
           </div>
         )}
       </Modal>
+      <AksiTransaksiMitra
+        target={aksi} onClose={() => setAksi(null)} cashAccounts={options?.cashAccounts || []}
+        onSelesai={async () => {
+          load();
+          if (detail) setDetail(await api.get(`/api/partners/${detail.partner.id}/ledger`));
+        }}
+      />
     </div>
   );
 }

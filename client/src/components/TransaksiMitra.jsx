@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
-import { Spinner, EmptyState, Modal, DateRangeFilter, defaultRange, useToast, Field, TombolEkspor } from './ui';
+import { Spinner, EmptyState, DateRangeFilter, defaultRange, useToast, TombolEkspor } from './ui';
+import AksiTransaksiMitra from './AksiTransaksiMitra';
 import { rupiah, dateID } from '../lib/format';
 import { useAuth } from '../lib/auth';
 
@@ -22,8 +23,7 @@ export default function TransaksiMitra({ onBerubah, cashAccounts = [] }) {
   const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [ubah, setUbah] = useState(null);
-  const [menyimpan, setMenyimpan] = useState(false);
+  const [aksi, setAksi] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,42 +41,6 @@ export default function TransaksiMitra({ onBerubah, cashAccounts = [] }) {
     const t = setTimeout(load, 250);
     return () => clearTimeout(t);
   }, [load]);
-
-  async function hapus(r) {
-    if (!window.confirm(
-      `Hapus ${r.label.toLowerCase()} ${r.entry_no} — ${r.partner_name}, ${dateID(r.entry_date)}, ${rupiah(r.nominal)}?\n\n` +
-      `Sisa ${r.jenis.toLowerCase()} mitra ini berubah sebesar nominal tersebut.`
-    )) return;
-    try {
-      const res = await api.del(`/api/cashflow/settlements/${r.journal_id}`);
-      toast.success(res.message);
-      load();
-      onBerubah?.();
-    } catch (err) {
-      toast.error(err.message);
-    }
-  }
-
-  async function simpan(e) {
-    e.preventDefault();
-    setMenyimpan(true);
-    try {
-      const res = await api.put(`/api/cashflow/settlements/${ubah.journal_id}`, {
-        entry_date: ubah.entry_date,
-        amount: Number(ubah.nominal),
-        cash_code: ubah.cash_code,
-        note: ubah.memo || null,
-      });
-      toast.success(res.message);
-      setUbah(null);
-      load();
-      onBerubah?.();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setMenyimpan(false);
-    }
-  }
 
   const params = { ...range, jenis, q };
 
@@ -137,22 +101,18 @@ export default function TransaksiMitra({ onBerubah, cashAccounts = [] }) {
                     <td>
                       {bolehUbah && (
                         <div className="flex justify-end gap-1">
-                          {r.bisaUbah && (
-                            <button
-                              type="button" className="btn-ghost !px-2 !py-1" title="Ubah" aria-label="Ubah"
-                              onClick={() => setUbah({ ...r, cash_code: r.cash_code || '' })}
-                            >
-                              <Pencil size={14} />
-                            </button>
-                          )}
-                          {r.bisaHapus && (
-                            <button
-                              type="button" className="btn-ghost !px-2 !py-1 text-rose-600" title="Hapus" aria-label="Hapus"
-                              onClick={() => hapus(r)}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
+                          <button
+                            type="button" className="btn-ghost !px-2 !py-1" title="Ubah" aria-label={`Ubah ${r.entry_no}`}
+                            onClick={() => setAksi({ journal_id: r.journal_id, partner_id: r.partner_id, mode: 'ubah' })}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button" className="btn-ghost !px-2 !py-1 text-rose-600" title="Hapus / tandai lunas" aria-label={`Hapus ${r.entry_no}`}
+                            onClick={() => setAksi({ journal_id: r.journal_id, partner_id: r.partner_id, mode: 'hapus' })}
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                       )}
                     </td>
@@ -162,56 +122,17 @@ export default function TransaksiMitra({ onBerubah, cashAccounts = [] }) {
             </table>
             <p className="mt-2 text-xs text-slate-500">
               <span className="text-amber-700">+</span> utang/piutang bertambah ·{' '}
-              <span className="text-emerald-700">−</span> dilunasi. Utang dari barang masuk atau pesanan
-              pembelian dibetulkan lewat Mutasi Stok / Pesanan Pembelian.
+              <span className="text-emerald-700">−</span> dilunasi. Ikon hapus pada utang barang masuk menawarkan "Tandai sudah lunas"
+              (stok tetap) atau hapus barang masuknya.
             </p>
           </div>
         )}
       </div>
 
-      <Modal open={!!ubah} onClose={() => setUbah(null)} title={`Ubah ${ubah?.entry_no || ''}`}>
-        {ubah && (
-          <form onSubmit={simpan} className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-slate-50 p-3 text-sm sm:col-span-2">
-              <p className="font-semibold text-slate-900">{ubah.partner_name}</p>
-              <p className="text-xs text-slate-500">{ubah.description}</p>
-            </div>
-            <Field label="Tanggal *">
-              <input
-                type="date" className="input" required value={ubah.entry_date}
-                onChange={(e) => setUbah({ ...ubah, entry_date: e.target.value })}
-              />
-            </Field>
-            <Field label="Nominal (Rp) *">
-              <input
-                type="number" min="0" step="any" className="input" required value={ubah.nominal}
-                onChange={(e) => setUbah({ ...ubah, nominal: e.target.value })}
-              />
-            </Field>
-            <Field label={ubah.subtype === 'PAYABLE' ? 'Uang diambil dari *' : 'Uang masuk ke *'} className="sm:col-span-2">
-              <select
-                className="input" required value={ubah.cash_code}
-                onChange={(e) => setUbah({ ...ubah, cash_code: e.target.value })}
-              >
-                <option value="">— pilih rekening yang benar-benar dipakai —</option>
-                {cashAccounts.map((k) => <option key={k.code} value={k.code}>{k.code} — {k.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Catatan" className="sm:col-span-2">
-              <input
-                className="input" maxLength={200} value={ubah.memo || ''}
-                onChange={(e) => setUbah({ ...ubah, memo: e.target.value })}
-              />
-            </Field>
-            <div className="flex gap-2 sm:col-span-2">
-              <button type="button" className="btn-secondary flex-1" onClick={() => setUbah(null)}>Batal</button>
-              <button type="submit" className="btn-primary flex-1" disabled={menyimpan}>
-                {menyimpan ? 'Menyimpan...' : 'Simpan Perubahan'}
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      <AksiTransaksiMitra
+        target={aksi} onClose={() => setAksi(null)} cashAccounts={cashAccounts}
+        onSelesai={() => { load(); onBerubah?.(); }}
+      />
     </div>
   );
 }
