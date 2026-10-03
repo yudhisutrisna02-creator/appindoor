@@ -7512,6 +7512,25 @@ async function main() {
   check('neraca saldo tetap seimbang', tb73.balanced === true);
 
 
+  console.log('\n74. Pajak order dalam nominal rupiah');
+
+  await call('POST', '/api/inventory/moves', { product_id: prod73.id, move_date: today, move_type: 'IN', qty: 3, unit_cost: 10000, payment: 'CASH' });
+  const pajak74 = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: `Uji Pajak ${cap73}`,
+    items: [{ product_id: prod73.id, qty: 1, price: 30000 }], tax_amount: 3300,
+  });
+  const idPajak74 = (pajak74.order || pajak74).id;
+  const o74 = (await call('GET', `/api/sales/${idPajak74}`)).order;
+  check('pajak tersimpan sesuai nominal yang diketik', near(o74.tax_amount, 3300, 0.01) && near(o74.tax_pct, 0, 0.01),
+    JSON.stringify({ a: o74.tax_amount, p: o74.tax_pct }));
+  await call('PUT', `/api/sales/${idPajak74}`, { tax_amount: 1500 });
+  const o74b = (await call('GET', `/api/sales/${idPajak74}`)).order;
+  check('nominal pajak bisa diubah dari Ubah Order', near(o74b.tax_amount, 1500, 0.01) && near(o74b.net_profit, o74.net_profit + 1800, 0.01),
+    JSON.stringify({ a: o74b.tax_amount, l: o74b.net_profit }));
+  const tb74 = await call('GET', `/api/finance/reports/trial-balance?from=2000-01-01&to=${today}`);
+  check('neraca saldo tetap seimbang', tb74.balanced === true);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

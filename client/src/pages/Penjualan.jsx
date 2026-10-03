@@ -36,7 +36,7 @@ const emptyOrder = () => ({
   handling_fee: 0,
   shipping_extra: 0,
   voucher_platform: 0,
-  tax_pct: 0,
+  tax_amount: 0,
   packing_cost: 0,
   other_cost: 0,
   shipping_non_mp: 0,
@@ -114,7 +114,7 @@ export default function Penjualan() {
     const netRevenue = gross - discount;
 
     const adminFee = Number(form.admin_fee) || 0;
-    const taxAmount = (netRevenue * (Number(form.tax_pct) || 0)) / 100;
+    const taxAmount = Number(form.tax_amount) || 0;
     const fees =
       adminFee + taxAmount +
       (Number(form.handling_fee) || 0) + (Number(form.shipping_extra) || 0) +
@@ -219,7 +219,7 @@ export default function Penjualan() {
         handling_fee: Number(form.handling_fee) || 0,
         shipping_extra: Number(form.shipping_extra) || 0,
         voucher_platform: Number(form.voucher_platform) || 0,
-        tax_pct: Number(form.tax_pct) || 0,
+        tax_amount: Number(form.tax_amount) || 0,
         packing_cost: Number(form.packing_cost) || 0,
         other_cost: Number(form.other_cost) || 0,
         shipping_non_mp: Number(form.shipping_non_mp) || 0,
@@ -688,8 +688,8 @@ export default function Penjualan() {
               <Field label="Biaya Layanan (Rp)">
                 <input type="number" min="0" step="any" className="input" value={form.handling_fee} onChange={(e) => setForm({ ...form, handling_fee: e.target.value })} />
               </Field>
-              <Field label="Pajak (%)" hint={`≈ ${rupiah(calc?.taxAmount || 0)}`}>
-                <input type="number" min="0" max="100" step="any" className="input" value={form.tax_pct} onChange={(e) => setForm({ ...form, tax_pct: e.target.value })} />
+              <Field label="Pajak / PPN (Rp)" hint="Nominal pajak, bukan persen">
+                <input type="number" min="0" step="any" className="input" value={form.tax_amount} onChange={(e) => setForm({ ...form, tax_amount: e.target.value })} />
               </Field>
               <Field label="Biaya Packing (Rp)">
                 <input type="number" min="0" step="any" className="input" value={form.packing_cost} onChange={(e) => setForm({ ...form, packing_cost: e.target.value })} />

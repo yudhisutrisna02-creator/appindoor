@@ -99,6 +99,7 @@ export default function UbahOrder({ order, shops = [], rekening = [], rekeningMp
       packing_cost: order.packing_cost ?? 0,
       other_cost: order.other_cost ?? 0,
       shipping_non_mp: order.shipping_non_mp ?? 0,
+      tax_amount: order.tax_amount ?? 0,
     });
     setBukaBiaya(false);
   }, [order]);
@@ -119,7 +120,7 @@ export default function UbahOrder({ order, shops = [], rekening = [], rekeningMp
     const angka = new Set([
       'discount', 'admin_fee', 'handling_fee', 'shipping_extra',
       'shipping_charged', 'voucher_platform', 'packing_cost', 'other_cost',
-      'shipping_non_mp',
+      'shipping_non_mp', 'tax_amount',
     ]);
 
     for (const [k, v] of Object.entries(form)) {
@@ -525,6 +526,7 @@ export default function UbahOrder({ order, shops = [], rekening = [], rekeningMp
               ['handling_fee', 'Biaya Layanan'],
               ['shipping_charged', 'Ongkir Ditagih ke Pembeli'],
               ['packing_cost', 'Biaya Packing'],
+              ['tax_amount', 'Pajak / PPN (Rp)'],
               ['other_cost', 'Biaya Lain'],
               ['shipping_non_mp', 'Biaya Kirim Non MP'],
             ].map(([k, l]) => (
