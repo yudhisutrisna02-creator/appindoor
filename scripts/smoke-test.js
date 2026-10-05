@@ -7531,6 +7531,25 @@ async function main() {
   check('neraca saldo tetap seimbang', tb74.balanced === true);
 
 
+  console.log('\n75. PIC input order penjualan');
+
+  token = await masukSebagai(akunCs63.user.email, 'RahasiaKuat1');
+  const orderCs75 = await call('POST', '/api/sales', {
+    order_date: today, channel: 'OFFLINE_WA', customer: `Uji PIC ${cap73}`,
+    items: [{ product_id: prod73.id, qty: 1, price: 30000 }],
+  });
+  token = adminAkun;
+  const idCs75 = (orderCs75.order || orderCs75).id;
+  const semua75 = await call('GET', `/api/sales?from=${today}&to=${today}`);
+  const baris75 = semua75.rows.find((o) => o.id === idCs75);
+  check('daftar order menampilkan PIC yang menginput', baris75 && baris75.user_name === akunCs63.user.name, baris75 && baris75.user_name);
+  check('pilihan PIC memuat akun yang pernah menginput order', semua75.pic.some((u) => u.id === akunCs63.user.id));
+  const saring75 = await call('GET', `/api/sales?from=${today}&to=${today}&user_id=${akunCs63.user.id}`);
+  check('saring per PIC hanya menampilkan order miliknya',
+    saring75.rows.length > 0 && saring75.rows.every((o) => o.user_name === akunCs63.user.name) && saring75.rows.some((o) => o.id === idCs75));
+  check('detail order memuat PIC', (await call('GET', `/api/sales/${idCs75}`)).order.user_name === akunCs63.user.name);
+
+
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);
   console.log(`Lulus: ${passed}   Gagal: ${failed}`);

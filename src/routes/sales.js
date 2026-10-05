@@ -492,6 +492,11 @@ function orderFilter(query) {
     where += ' AND o.fulfillment_status = ?';
     params.push(query.fulfillment_status);
   }
+  // PIC = akun yang menginput order (user_id saat order disimpan).
+  if (query.user_id) {
+    where += ' AND o.user_id = ?';
+    params.push(Number(query.user_id));
+  }
 
   const cari = cariOrder(query.q);
   if (cari) {
@@ -554,7 +559,13 @@ router.get('/', ah((req, res) => {
   const iklan = belanjaIklan(req.query, from, to);
 
   const diminta = batas(req.query.limit);
-  res.json({
+  const pic = db
+    .prepare(
+      `SELECT DISTINCT u.id, u.name FROM sales_orders o JOIN users u ON u.id = o.user_id
+        WHERE o.status = 'POSTED' ORDER BY u.name`
+    )
+    .all();
+  res.json({ pic, 
     from, to, rows,
     iklan,
     // Daftar boleh terpotong; ringkasannya tidak. Keduanya dibedakan supaya
@@ -593,7 +604,9 @@ router.get('/', ah((req, res) => {
 
 /** GET /api/sales/:id — detail order beserta item. */
 router.get('/:id(\\d+)', ah((req, res) => {
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+  const order = db
+    .prepare('SELECT o.*, u.name AS user_name FROM sales_orders o LEFT JOIN users u ON u.id = o.user_id WHERE o.id = ?')
+    .get(req.params.id);
   if (!order) throw httpError(404, 'Order tidak ditemukan');
 
   const items = db
@@ -1269,6 +1282,7 @@ router.get('/analytics', ah((req, res) => res.json(ambilAnalitik(req))));
 const KOLOM_ORDER = [
   { header: 'No. Order', key: 'order_no', width: 18 },
   { header: 'Tanggal', key: 'order_date', width: 11 },
+  { header: 'PIC Input', key: 'user_name', width: 18 },
   { header: 'Toko', key: 'shop_name', width: 20 },
   { header: 'Channel', key: 'channel_label', width: 16 },
   { header: 'No. Pesanan', key: 'order_ref', width: 20 },
@@ -1314,9 +1328,10 @@ daftarkanEkspor(router, {
     const { from, to, where, params } = orderFilter(req.query);
     const rows = db
       .prepare(
-        `SELECT o.*, sh.name AS shop_name
+        `SELECT o.*, sh.name AS shop_name, u.name AS user_name
            FROM sales_orders o
            LEFT JOIN shops sh ON sh.id = o.shop_id
+           LEFT JOIN users u  ON u.id = o.user_id
            ${where} ORDER BY o.order_date, o.id`
       )
       .all(...params);

@@ -46,7 +46,7 @@ const emptyOrder = () => ({
 
 export default function Penjualan() {
   const toast = useToast();
-  const { canManage, punya } = useAuth();
+  const { canManage, punya, user } = useAuth();
   // Centang massal hanya berguna bagi yang boleh mengubah pesanan.
   const bolehUbah = punya('penjualan.ubah');
   const [hapusPeriode, setHapusPeriode] = useState(false);
@@ -54,6 +54,7 @@ export default function Penjualan() {
   const [range, setRange] = useState(defaultRange);
   const [channel, setChannel] = useState('');
   const [shopId, setShopId] = useState('');
+  const [picId, setPicId] = useState('');
   const [q, setQ] = useState('');
   // Kolom keuangan disembunyikan secara bawaan; angkanya tetap ada, hanya tidak
   // ikut memenuhi layar saat yang dicari adalah satu pesanan.
@@ -73,7 +74,7 @@ export default function Penjualan() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.get('/api/sales', { ...range, channel, shop_id: shopId, q }));
+      setData(await api.get('/api/sales', { ...range, channel, shop_id: shopId, user_id: picId, q }));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -298,7 +299,7 @@ export default function Penjualan() {
             <Trash2 size={16} /> Hapus Periode
           </button>
         )}
-          <TombolEkspor path="/api/sales" params={{ ...range, channel, shop_id: shopId, q }} nama="order-penjualan" />
+          <TombolEkspor path="/api/sales" params={{ ...range, channel, shop_id: shopId, user_id: picId, q }} nama="order-penjualan" />
       </PageHeader>
 
       <DateRangeFilter range={range} onChange={setRange}>
@@ -324,6 +325,13 @@ export default function Penjualan() {
           <select className="input" value={shopId} onChange={(e) => setShopId(e.target.value)}>
             <option value="">Semua Toko</option>
             {shops.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
+          </select>
+        </div>
+        <div className="flex-1">
+          <label className="label">PIC Input</label>
+          <select className="input" value={picId} onChange={(e) => setPicId(e.target.value)}>
+            <option value="">Semua PIC</option>
+            {(data?.pic || []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </div>
       </DateRangeFilter>
@@ -465,7 +473,7 @@ export default function Penjualan() {
                       )}
                       <th>No. Order</th><th>Tanggal</th><th>Toko</th><th>Nama Pembeli</th>
                       <th>No. Pesanan</th><th>Resi / Kode Booking</th>
-                      <th>Pesanan</th><th>Bayar</th>
+                      <th>Pesanan</th><th>Bayar</th><th>PIC Input</th>
                       {tampilUang && (
                         <>
                           <th className="text-right">Pendapatan</th>
@@ -517,6 +525,7 @@ export default function Penjualan() {
                             {o.payment_status === 'PAID' ? 'Lunas' : 'Belum cair'}
                           </span>
                         </td>
+                        <td className="whitespace-nowrap text-xs font-medium text-slate-700">{o.user_name || '-'}</td>
                         {tampilUang && (
                           <>
                             <td className="tabular text-right">{rupiah(o.net_revenue)}</td>
@@ -832,6 +841,9 @@ export default function Penjualan() {
               </div>
             )}
 
+            <p className="mb-2 text-xs text-slate-500">
+              PIC Input: <strong className="text-slate-700">{user?.name || '-'}</strong> — tercatat otomatis dari akun yang sedang login.
+            </p>
             <div className="flex gap-2">
               <button type="button" className="btn-secondary flex-1" onClick={() => setForm(null)}>Batal</button>
               <button type="submit" className="btn-primary flex-1" disabled={saving}>
@@ -886,6 +898,7 @@ export default function Penjualan() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <dl className="space-y-1 text-sm">
+                <DetailRow label="PIC Input" value={detail.order.user_name || '-'} />
                 <DetailRow label="Penjualan Kotor" value={rupiah(detail.order.gross_sales)} />
                 <DetailRow label="Diskon" value={`− ${rupiah(detail.order.discount)}`} />
                 <DetailRow label="Pendapatan Kotor" value={rupiah(detail.order.net_revenue)} bold />
