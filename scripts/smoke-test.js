@@ -7549,6 +7549,23 @@ async function main() {
     saring75.rows.length > 0 && saring75.rows.every((o) => o.user_name === akunCs63.user.name) && saring75.rows.some((o) => o.id === idCs75));
   check('detail order memuat PIC', (await call('GET', `/api/sales/${idCs75}`)).order.user_name === akunCs63.user.name);
 
+  // Dua admin menyimpan bersamaan: nomor tidak kembar, urut, stok tepat.
+  await call('POST', '/api/inventory/moves', { product_id: prod73.id, move_date: today, move_type: 'IN', qty: 50, unit_cost: 10000, payment: 'CASH' });
+  const stokSblm75 = (await call('GET', `/api/inventory/products?q=P73-${cap73}`)).products[0].stock;
+  const tokCs75 = await masukSebagai(akunCs63.user.email, 'RahasiaKuat1');
+  const serentak75 = await Promise.all(Array.from({ length: 12 }, (_, i) => {
+    const tok = i % 2 ? tokCs75 : adminAkun;
+    return fetch(`${BASE}/api/sales`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+      body: JSON.stringify({ order_date: today, channel: 'OFFLINE_WA', customer: `Serentak ${i}`, items: [{ product_id: prod73.id, qty: 1, price: 30000 }] }),
+    }).then((r) => r.json());
+  }));
+  const nomor75 = serentak75.map((r) => (r.order || r).order_no || r.orderNo).filter(Boolean);
+  check('12 order serentak tersimpan semua dengan nomor berbeda', nomor75.length === 12 && new Set(nomor75).size === 12, JSON.stringify(nomor75));
+  const angka75 = nomor75.map((n) => Number(n.slice(-4))).sort((x, y) => x - y);
+  check('nomor order serentak berurutan tanpa loncat', angka75.every((n, i) => i === 0 || n === angka75[i - 1] + 1));
+  check('stok berkurang tepat 12', (await call('GET', `/api/inventory/products?q=P73-${cap73}`)).products[0].stock === stokSblm75 - 12);
+
 
   // ---------- Hasil ----------
   console.log(`\n${'─'.repeat(48)}`);

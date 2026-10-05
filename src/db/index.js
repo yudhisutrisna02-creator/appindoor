@@ -27,6 +27,10 @@ fs.mkdirSync(path.dirname(dbFile), { recursive: true });
 const db = new Database(dbFile);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+// Bila ada lebih dari satu proses server (mis. beberapa pekerja di hosting),
+// penulisan yang datang bersamaan menunggu giliran — bukan gagal 'database is
+// locked' dan bukan saling timpa.
+db.pragma('busy_timeout = 15000');
 
 /**
  * Menyiapkan struktur database.

@@ -81,7 +81,7 @@ export default function Penjualan() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, channel, shopId, q]);
+  }, [range, channel, shopId, picId, q]);
 
   useEffect(() => { load(); }, [load]);
 

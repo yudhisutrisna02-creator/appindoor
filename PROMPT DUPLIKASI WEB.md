@@ -1046,7 +1046,7 @@ karena satu berkas hilang.
 Dua rangkaian uji yang dijalankan terhadap peladen sungguhan:
 
 ```bash
-npm run smoke            # 1096 pemeriksaan, 75 bagian
+npm run smoke            # 1099 pemeriksaan, 75 bagian
 npm run smoke:features   # 29 pemeriksaan alur ujung-ke-ujung
 npm run cek:ikon         # tiap ikon menu benar-benar diimpor
 ```

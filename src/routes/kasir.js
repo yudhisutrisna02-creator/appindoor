@@ -372,7 +372,7 @@ router.post('/transaksi', butuhIzin('penjualan.kasir'), ah((req, res) => {
       'UPDATE sales_orders SET pos_session_id = ?, pos_method = ?, pos_paid = ?, pos_change = ? WHERE id = ?'
     ).run(sesi.id, body.method, dibayar, kembali, r.orderId);
     return r;
-  })();
+  }).immediate();
 
   res.status(201).json({
     ok: true,

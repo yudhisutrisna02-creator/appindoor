@@ -396,7 +396,10 @@ const createOrder = db.transaction((body, userId) => {
 
 router.post('/', butuhIzin('penjualan.buat'), ah((req, res) => {
   const body = parse(orderSchema, req.body);
-  const result = createOrder(body, req.user.id);
+  // IMMEDIATE: kunci tulis diambil di awal, sehingga dua admin yang menyimpan
+  // bersamaan dari komputer berbeda dilayani bergiliran — nomor order, stok,
+  // dan jurnalnya tidak pernah saling timpa.
+  const result = createOrder.immediate(body, req.user.id);
   res.status(201).json({
     ok: true,
     message: `Order ${result.orderNo} tersimpan — laba bersih Rp ${result.calc.net_profit.toLocaleString('id-ID')} (${result.calc.margin_pct}%)`,
